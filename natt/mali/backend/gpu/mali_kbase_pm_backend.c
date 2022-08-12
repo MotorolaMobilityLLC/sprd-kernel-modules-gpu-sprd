@@ -78,6 +78,9 @@ int kbase_pm_runtime_init(struct kbase_device *kbdev)
 					callbacks->power_runtime_gpu_active_callback;
 		kbdev->pm.backend.callback_power_off_second_part =
 					callbacks->power_off_second_part_callback;
+		kbdev->pm.backend.callback_power_shader_polling =
+					callbacks->power_shader_polling_callback;
+
 		if (callbacks->power_runtime_init_callback)
 			return callbacks->power_runtime_init_callback(kbdev);
 		else

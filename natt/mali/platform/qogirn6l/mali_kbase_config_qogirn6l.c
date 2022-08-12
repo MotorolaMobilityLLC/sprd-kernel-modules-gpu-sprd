@@ -904,6 +904,7 @@ struct kbase_pm_callback_conf pm_qogirn6l_callbacks = {
 	.power_suspend_callback = pm_callback_power_suspend,
 	.power_resume_callback = pm_callback_power_resume,
 	.power_off_second_part_callback = pm_callback_second_part,
+	.power_shader_polling_callback = NULL,
 #ifdef KBASE_PM_RUNTIME
 	.power_runtime_init_callback = pm_callback_power_runtime_init,
 	.power_runtime_term_callback = pm_callback_power_runtime_term,

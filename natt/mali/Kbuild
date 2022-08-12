@@ -170,11 +170,6 @@ ifeq ($(CONFIG_LIMIT_MIN_FREQ),y)
 DEFINES +=-DCONFIG_LIMIT_MIN_FREQ
 endif
 
-ifeq ($(CONFIG_MALI_PLATFORM_NAME), qogirn6pro)
-mali_kbase-y := platform/$(MALI_PLATFORM_DIR)/mali_kbase_config_$(MALI_PLATFORM_DIR).o
-DEFINES +=-DQOGIRN6P_GPU_POLLING
-endif
-
 -DMALI_RELEASE_NAME=\"$(MALI_RELEASE_NAME)\
 
 #debug gpu performance

@@ -1200,12 +1200,15 @@ static void pm_callback_power_runtime_term(struct kbase_device *kbdev)
 }
 #endif/*CONFIG_PM_RUNTIME*/
 
+static void pm_callback_shader_polling(struct kbase_device *kbdev);
+
 struct kbase_pm_callback_conf pm_qogirn6pro_callbacks = {
 	.power_off_callback = pm_callback_power_off,
 	.power_on_callback = pm_callback_power_on,
 	.power_suspend_callback = pm_callback_power_suspend,
 	.power_resume_callback = pm_callback_power_resume,
 	.power_off_second_part_callback = pm_callback_second_part,
+	.power_shader_polling_callback = pm_callback_shader_polling,
 #ifdef KBASE_PM_RUNTIME
 	.power_runtime_init_callback = pm_callback_power_runtime_init,
 	.power_runtime_term_callback = pm_callback_power_runtime_term,
@@ -1451,7 +1454,6 @@ void kbase_platform_set_boost(struct kbase_device *kbdev, struct kbase_context *
 }
 #endif
 
-#ifdef QOGIRN6P_GPU_POLLING
 
 u32 core0_pwr = 0;
 u32 core1_pwr = 0;
@@ -1473,13 +1475,9 @@ u32 core3_pwr_wakeup = MOVE_BIT_LEFT(8,16);
 u32 cur_st_mask = MOVE_BIT_LEFT(0xf0,0);
 u32 st_pwr_mode = MOVE_BIT_LEFT(7,4);
 
-//to check if the gpu core state is ready or not
-void mali_core_state_check(void)
+
+bool is_shader_ready(void)
 {
-    bool not_ready;
-    int pass_retry = 5;//the time of consecutive passes
-    int pass_counter = 0;
-    int counter = 0;//count the time of check
     //check if the gpu_core_state ready or not
     regmap_read(gpu_dvfs_ctx.gpu_core0_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_core0_state_reg.args[0], &core0_pwr);
     core0_pwr = core0_pwr & core0_pwr_mask ;
@@ -1499,81 +1497,49 @@ void mali_core_state_check(void)
     regmap_read(gpu_dvfs_ctx.cur_st_st3_reg.regmap_ptr, gpu_dvfs_ctx.cur_st_st3_reg.args[0], &cur_st_st3_pwr);
     cur_st_st3_pwr = cur_st_st3_pwr & cur_st_mask ;
 
-    printk(KERN_ERR "SPRDDEBUG gpu_core0_pwr = 0x%x,gpu_core1_pwr = 0x%x,gpu_core2_pwr = 0x%x,gpu_core3_pwr = 0x%x,cur_st_st0_pwr = 0x%x,cur_st_st1_pwr = 0x%x,cur_st_st2_pwr = 0x%x,cur_st_st3_pwr= 0x%x, counter = %d\n ",
-           core0_pwr,core1_pwr,core2_pwr,core3_pwr,cur_st_st0_pwr,cur_st_st1_pwr,cur_st_st2_pwr,cur_st_st3_pwr, counter);
-    not_ready = ( core0_pwr != core0_pwr_wakeup )||( core1_pwr != core1_pwr_wakeup )||( core2_pwr != core2_pwr_wakeup )
-        ||( core3_pwr != core3_pwr_wakeup )||(cur_st_st0_pwr!=st_pwr_mode)||(cur_st_st1_pwr!=st_pwr_mode)
-        ||(cur_st_st2_pwr!=st_pwr_mode)||(cur_st_st3_pwr!=st_pwr_mode);
-    while(not_ready)
+    return  ( core0_pwr == core0_pwr_wakeup )&&( core1_pwr == core1_pwr_wakeup )&&( core2_pwr == core2_pwr_wakeup )
+        &&( core3_pwr == core3_pwr_wakeup )&&(cur_st_st0_pwr == st_pwr_mode)&&(cur_st_st1_pwr == st_pwr_mode)
+        &&(cur_st_st2_pwr == st_pwr_mode)&&(cur_st_st3_pwr == st_pwr_mode);
+}
+
+//to check if the gpu core state is ready or not
+void mali_core_state_check(void)
+{
+    int pass_retry = 5;//the time of consecutive passes
+    int pass_counter = 0;
+    int counter = 0;//count the time of check
+
+    //printk(KERN_ERR "SPRDDEBUG gpu_core0_pwr = 0x%x,gpu_core1_pwr = 0x%x,gpu_core2_pwr = 0x%x,gpu_core3_pwr = 0x%x,cur_st_st0_pwr = 0x%x,cur_st_st1_pwr = 0x%x,cur_st_st2_pwr = 0x%x,cur_st_st3_pwr= 0x%x, counter = %d\n ",
+    //       core0_pwr,core1_pwr,core2_pwr,core3_pwr,cur_st_st0_pwr,cur_st_st1_pwr,cur_st_st2_pwr,cur_st_st3_pwr, counter);
+    while(1)
     {
         udelay(5);
-        regmap_read(gpu_dvfs_ctx.gpu_core0_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_core0_state_reg.args[0], &core0_pwr);
-        core0_pwr = core0_pwr & core0_pwr_mask ;
-        regmap_read(gpu_dvfs_ctx.gpu_core1_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_core1_state_reg.args[0], &core1_pwr);
-        core1_pwr = core1_pwr & core1_pwr_mask ;
-        regmap_read(gpu_dvfs_ctx.gpu_core2_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_core2_state_reg.args[0], &core2_pwr);
-        core2_pwr = core2_pwr & core2_pwr_mask ;
-        regmap_read(gpu_dvfs_ctx.gpu_core3_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_core3_state_reg.args[0], &core3_pwr);
-        core3_pwr = core3_pwr & core3_pwr_mask ;
-
-        regmap_read(gpu_dvfs_ctx.cur_st_st0_reg.regmap_ptr, gpu_dvfs_ctx.cur_st_st0_reg.args[0], &cur_st_st0_pwr);
-        cur_st_st0_pwr = cur_st_st0_pwr & cur_st_mask ;
-        regmap_read(gpu_dvfs_ctx.cur_st_st1_reg.regmap_ptr, gpu_dvfs_ctx.cur_st_st1_reg.args[0], &cur_st_st1_pwr);
-        cur_st_st1_pwr = cur_st_st1_pwr & cur_st_mask ;
-        regmap_read(gpu_dvfs_ctx.cur_st_st2_reg.regmap_ptr, gpu_dvfs_ctx.cur_st_st2_reg.args[0], &cur_st_st2_pwr);
-        cur_st_st2_pwr = cur_st_st2_pwr & cur_st_mask ;
-        regmap_read(gpu_dvfs_ctx.cur_st_st3_reg.regmap_ptr, gpu_dvfs_ctx.cur_st_st3_reg.args[0], &cur_st_st3_pwr);
-        cur_st_st3_pwr = cur_st_st3_pwr & cur_st_mask ;
-
-        not_ready = ( core0_pwr != core0_pwr_wakeup )||( core1_pwr != core1_pwr_wakeup )||( core2_pwr != core2_pwr_wakeup )
-            ||( core3_pwr != core3_pwr_wakeup )||(cur_st_st0_pwr!=st_pwr_mode)||(cur_st_st1_pwr!=st_pwr_mode)
-            ||(cur_st_st2_pwr!=st_pwr_mode)||(cur_st_st3_pwr!=st_pwr_mode);
         //printk(KERN_ERR "SPRDDEBUG gpu_core0_pwr = 0x%x,gpu_core1_pwr = 0x%x,gpu_core2_pwr = 0x%x,gpu_core3_pwr = 0x%x,cur_st_st0_pwr = 0x%x,cur_st_st1_pwr = 0x%x,cur_st_st2_pwr = 0x%x,cur_st_st3_pwr= 0x%x, counter = %d\n ",
                        //core0_pwr,core1_pwr,core2_pwr,core3_pwr,cur_st_st0_pwr,cur_st_st1_pwr,cur_st_st2_pwr,cur_st_st3_pwr, counter);
-        if(!not_ready){
-            pass_counter++;
+        if(is_shader_ready()){
+            pass_counter=0;
             while(pass_counter < pass_retry){
-                            regmap_read(gpu_dvfs_ctx.gpu_core0_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_core0_state_reg.args[0], &core0_pwr);
-                                core0_pwr = core0_pwr & core0_pwr_mask ;
-                                regmap_read(gpu_dvfs_ctx.gpu_core1_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_core1_state_reg.args[0], &core1_pwr);
-                                core1_pwr = core1_pwr & core1_pwr_mask ;
-                                regmap_read(gpu_dvfs_ctx.gpu_core2_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_core2_state_reg.args[0], &core2_pwr);
-                                core2_pwr = core2_pwr & core2_pwr_mask ;
-                                regmap_read(gpu_dvfs_ctx.gpu_core3_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_core3_state_reg.args[0], &core3_pwr);
-                                core3_pwr = core3_pwr & core3_pwr_mask ;
-
-                                regmap_read(gpu_dvfs_ctx.cur_st_st0_reg.regmap_ptr, gpu_dvfs_ctx.cur_st_st0_reg.args[0], &cur_st_st0_pwr);
-                                cur_st_st0_pwr = cur_st_st0_pwr & cur_st_mask ;
-                                regmap_read(gpu_dvfs_ctx.cur_st_st1_reg.regmap_ptr, gpu_dvfs_ctx.cur_st_st1_reg.args[0], &cur_st_st1_pwr);
-                                cur_st_st1_pwr = cur_st_st1_pwr & cur_st_mask ;
-                                regmap_read(gpu_dvfs_ctx.cur_st_st2_reg.regmap_ptr, gpu_dvfs_ctx.cur_st_st2_reg.args[0], &cur_st_st2_pwr);
-                                cur_st_st2_pwr = cur_st_st2_pwr & cur_st_mask ;
-                                regmap_read(gpu_dvfs_ctx.cur_st_st3_reg.regmap_ptr, gpu_dvfs_ctx.cur_st_st3_reg.args[0], &cur_st_st3_pwr);
-                                cur_st_st3_pwr = cur_st_st3_pwr & cur_st_mask ;
-
-                            not_ready = ( core0_pwr != core0_pwr_wakeup )||( core1_pwr != core1_pwr_wakeup )||( core2_pwr != core2_pwr_wakeup )
-                ||( core3_pwr != core3_pwr_wakeup )||(cur_st_st0_pwr!=st_pwr_mode)||(cur_st_st1_pwr!=st_pwr_mode)
-                ||(cur_st_st2_pwr!=st_pwr_mode)||(cur_st_st3_pwr!=st_pwr_mode);
-
-                            if(not_ready){
-                                    break;
-                                }else pass_counter++;
-                        }
-                    if(pass_counter>=pass_retry){
-                            printk(KERN_ERR "SPRDDEBUG gpu core power on polling SUCCESS !");
-                            break;
-                        }
+                if(!is_shader_ready()){
+                        break;
+                }else pass_counter++;
+            }
+            if(pass_counter>=pass_retry){
+                printk(KERN_INFO "SPRDDEBUG gpu core power on polling SUCCESS !");
+                break;
+            }
         }
-        if(counter++ > 2000 && not_ready )
-        {
+        if(counter++ > 2000 && !is_shader_ready() ){
             printk(KERN_ERR "SPRDDEBUG gpu core power on TIMEOUT !");
         	printk(KERN_ERR "SPRDDEBUG gpu_core0_pwr = 0x%x,gpu_core1_pwr = 0x%x,gpu_core2_pwr = 0x%x,gpu_core3_pwr = 0x%x,cur_st_st0_pwr = 0x%x,cur_st_st1_pwr = 0x%x,cur_st_st2_pwr = 0x%x,cur_st_st3_pwr= 0x%x, counter = %d\n ",
                    core0_pwr,core1_pwr,core2_pwr,core3_pwr,cur_st_st0_pwr,cur_st_st1_pwr,cur_st_st2_pwr,cur_st_st3_pwr, counter);
             WARN_ON(1);
-            counter = 0;
             break;
         }
     }
 }
 
-#endif
+static void pm_callback_shader_polling(struct kbase_device *kbdev)
+{
+	CSTD_UNUSED(kbdev);
+	mali_core_state_check();
+}

@@ -59,8 +59,6 @@
 #define GPU_768M_FREQ       768000000
 #define GPU_850M_FREQ       850000000
 
-#define QOGIRL6_GPU_POLLING
-
 struct gpu_qos_config {
 	u8 arqos;
 	u8 awqos;
@@ -725,12 +723,15 @@ static void pm_callback_power_runtime_term(struct kbase_device *kbdev)
 }
 #endif/*CONFIG_PM_RUNTIME*/
 
+static void pm_callback_shader_polling(struct kbase_device *kbdev);
+
 struct kbase_pm_callback_conf pm_qogirl6_callbacks = {
 	.power_off_callback = pm_callback_power_off,
 	.power_on_callback = pm_callback_power_on,
 	.power_suspend_callback = pm_callback_power_suspend,
 	.power_resume_callback = pm_callback_power_resume,
 	.power_off_second_part_callback = NULL,
+	.power_shader_polling_callback = pm_callback_shader_polling,
 #ifdef KBASE_PM_RUNTIME
 	.power_runtime_init_callback = pm_callback_power_runtime_init,
 	.power_runtime_term_callback = pm_callback_power_runtime_term,
@@ -944,93 +945,78 @@ void kbase_platform_set_boost(struct kbase_device *kbdev, struct kbase_context *
 }
 #endif
 
-#ifdef QOGIRL6_GPU_POLLING
+static u32 pd_gpu_co_state;
+static u32 PD_GPU_CO_STATE_MASK = 0x1F000000;
+static u32 GPU_CO_STATE_ACTIVE = 0x08000000;
+static u32 cur_st_st0;
+static u32 CUR_ST_ST0_MASK = 0X000000F0;
+static u32 CUR_ST_ST0_READY = 0x00000070;
+static u32 SHADER_PWRTRANS_LO1,SHADER_PWRTRANS_HI1;
+static u32 SHADER_READY_LO1,SHADER_READY_HI1;
 extern u32 kbase_reg_read(struct kbase_device *kbdev, u32 offset);
-extern void kbase_reg_write(struct kbase_device *kbdev, u32 offset, u32 value);
 
-void gpu_polling_power_on(struct kbase_device *kbdev,u32 reg,u32 lo,u32 hi, u32 reg2)
+bool is_shader_ready(struct kbase_device *kbdev)
 {
-	u32 GPU_IRQ_CLEAR_MASK_ALL = 0xffffffff;
-	u32 GPU_IRQ_MASK1;
-	u32 GPU_IRQ_MASK2;
-	u32 pd_gpu_co_state;
-	u32 PD_GPU_CO_STATE_MASK = 0x1F000000;
-	u32 GPU_CO_STATE_ACTIVE = 0x08000000;
-	u32 cur_st_st0;
-	u32 CUR_ST_ST0_MASK = 0X000000F0;
-	u32 CUR_ST_ST0_READY = 0x00000070;
-	u32 SHADER_PWRTRANS_LO1,SHADER_PWRTRANS_HI1;
-	u32 SHADER_READY_LO1,SHADER_READY_HI1;
-	int retry,poll,timeout;
+	//PMU APB
+	//printk(KERN_ERR "SPRDDEBUG read pd_gpu_co_state\n");
+	//regmap_read(gpu_dvfs_ctx.gpu_core0_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_core0_state_reg.args[0], &pd_gpu_co_state);
+	//pd_gpu_co_state = pd_gpu_co_state & PD_GPU_CO_STATE_MASK;
+	pd_gpu_co_state = GPU_CO_STATE_ACTIVE & PD_GPU_CO_STATE_MASK;
 
-	GPU_IRQ_MASK1 = kbase_reg_read(kbdev,GPU_CONTROL_REG(GPU_IRQ_MASK));
-	kbase_reg_write(kbdev, GPU_CONTROL_REG(GPU_IRQ_CLEAR), GPU_IRQ_CLEAR_MASK_ALL);
-	GPU_IRQ_MASK2 = kbase_reg_read(kbdev,GPU_CONTROL_REG(GPU_IRQ_MASK)) | POWER_CHANGED_SINGLE | POWER_CHANGED_ALL;
-	kbase_reg_write(kbdev, GPU_CONTROL_REG(GPU_IRQ_MASK),GPU_IRQ_MASK2);
+	//GPU APB
+	//printk(KERN_ERR "SPRDDEBUG read cur_st_st0\n");
+	//regmap_read(gpu_dvfs_ctx.cur_st_st0_reg.regmap_ptr, gpu_dvfs_ctx.cur_st_st0_reg.args[0], &cur_st_st0);
+	//cur_st_st0 = cur_st_st0 & CUR_ST_ST0_MASK;
+	cur_st_st0 = CUR_ST_ST0_READY & CUR_ST_ST0_MASK;
 
-	retry = 0;
+	//printk(KERN_ERR "SPRDDEBUG read SHADER_READY\n");
+	SHADER_READY_LO1 = kbase_reg_read(kbdev,GPU_CONTROL_REG(SHADER_READY_LO));
+	SHADER_READY_HI1 = kbase_reg_read(kbdev,GPU_CONTROL_REG(SHADER_READY_HI));
+
+	//printk(KERN_ERR "SPRDDEBUG read SHADER_PWRTRANS\n");
+	SHADER_PWRTRANS_LO1 = kbase_reg_read(kbdev,GPU_CONTROL_REG(SHADER_PWRTRANS_LO));
+	SHADER_PWRTRANS_HI1 = kbase_reg_read(kbdev,GPU_CONTROL_REG(SHADER_PWRTRANS_HI));
+
+	return pd_gpu_co_state == GPU_CO_STATE_ACTIVE && cur_st_st0 == CUR_ST_ST0_READY && SHADER_READY_LO1 == 1 &&
+		SHADER_READY_HI1 == 0 && SHADER_PWRTRANS_LO1 == 0 && SHADER_PWRTRANS_HI1 == 0;
+}
+
+void gpu_polling_power_on(struct kbase_device *kbdev)
+{
+	int poll=0,timeout=0;
+
 	while(1){
-		poll = 0;
-		timeout = 0;
-
-		if (lo != 0)
-			kbase_reg_write(kbdev, GPU_CONTROL_REG(reg), lo);
-		if (hi != 0)
-			kbase_reg_write(kbdev, GPU_CONTROL_REG(reg + 4), hi);
-
-		while(1){
-			udelay(5);
-
-			regmap_read(gpu_dvfs_ctx.gpu_core0_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_core0_state_reg.args[0], &pd_gpu_co_state);
-			pd_gpu_co_state = pd_gpu_co_state & PD_GPU_CO_STATE_MASK;
-
-			regmap_read(gpu_dvfs_ctx.cur_st_st0_reg.regmap_ptr, gpu_dvfs_ctx.cur_st_st0_reg.args[0], &cur_st_st0);
-			cur_st_st0 = cur_st_st0 & CUR_ST_ST0_MASK;
-
-			SHADER_READY_LO1 = kbase_reg_read(kbdev,GPU_CONTROL_REG(SHADER_READY_LO));
-			SHADER_READY_HI1 = kbase_reg_read(kbdev,GPU_CONTROL_REG(SHADER_READY_HI));
-
-			SHADER_PWRTRANS_LO1 = kbase_reg_read(kbdev,GPU_CONTROL_REG(SHADER_PWRTRANS_LO));
-			SHADER_PWRTRANS_HI1 = kbase_reg_read(kbdev,GPU_CONTROL_REG(SHADER_PWRTRANS_HI));
-
-			if(pd_gpu_co_state == GPU_CO_STATE_ACTIVE && cur_st_st0 == CUR_ST_ST0_READY && SHADER_READY_LO1 == 1 &&
-				SHADER_READY_HI1 == 0 && SHADER_PWRTRANS_LO1 == 0 && SHADER_PWRTRANS_HI1 == 0){
-				poll++;
-			}else{
-				poll = 0;
+		udelay(5);
+		if(is_shader_ready(kbdev)){
+			poll++;
+			while(poll < 5){
+				if(is_shader_ready(kbdev)){
+					poll++;
+				}else {
+					poll = 0;
+					break;
+				}
 			}
-
-			if(poll >= 5){
+			if(poll>=5){//success
+				printk(KERN_INFO "SPRDDEBUG gpu shader core power on polling SUCCESS !!");
 				break;
 			}
+		}
 
-			timeout++;
-			if(timeout > 600){//time>5us*600==3ms
-				printk(KERN_ERR "gpu shader core power on is timeout !");
-				break;
-			}
-		}//end of polling while(1)
-		if(poll == 0){//if quit by timeout
-			//power off, then try power on again
-			retry++;
-			if (lo != 0)
-				kbase_reg_write(kbdev, GPU_CONTROL_REG(reg2), lo);
-			if (hi != 0)
-				kbase_reg_write(kbdev, GPU_CONTROL_REG(reg2 + 4), hi);
-			if(retry > 10000){
-				printk(KERN_ERR "gpu shader power on polling retry over 10000 times! FAIL");
-				break;
-			}else{
-				printk(KERN_ERR "gpu shader core power off and retry polling");
-			}
-		}else{
+		if(timeout++>2000 && (!is_shader_ready(kbdev))){//10ms
+			printk(KERN_ERR "SPRDDEBUG gpu core power on TIMEOUT !!");
+			printk(KERN_ERR "SPRDDEBUG pd_gpu_co_state = 0x%x,cur_st_st0 = 0x%x,SHADER_READY_LO1 = 0x%x,SHADER_READY_HI1 = 0x%x,SHADER_PWRTRANS_LO1 = 0x%x,SHADER_PWRTRANS_HI1 = 0x%x, timeout = %d\n ",
+				pd_gpu_co_state,cur_st_st0,SHADER_READY_LO1,SHADER_READY_HI1,SHADER_PWRTRANS_LO1,SHADER_PWRTRANS_HI1, timeout);
+			WARN_ON(1);
 			break;
 		}
 	}
-	//restore GPU IRQ MASK
-	kbase_reg_write(kbdev, GPU_CONTROL_REG(GPU_IRQ_MASK),GPU_IRQ_MASK1);
 }
-#endif
+
+static void pm_callback_shader_polling(struct kbase_device *kbdev)
+{
+	gpu_polling_power_on(kbdev);
+}
 
 //fake function for N6pro
 int kbase_platform_set_DVFS_table(struct kbase_device *kbdev)

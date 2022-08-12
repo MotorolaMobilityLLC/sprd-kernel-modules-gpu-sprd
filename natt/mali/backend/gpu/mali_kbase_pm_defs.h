@@ -443,6 +443,7 @@ struct kbase_pm_backend_data {
 	void (*callback_power_runtime_gpu_idle)(struct kbase_device *kbdev);
 	void (*callback_power_runtime_gpu_active)(struct kbase_device *kbdev);
 	void (*callback_power_off_second_part)(struct kbase_device *kbdev);
+	void (*callback_power_shader_polling)(struct kbase_device *kbdev);
 
 	u64 ca_cores_enabled;
 
