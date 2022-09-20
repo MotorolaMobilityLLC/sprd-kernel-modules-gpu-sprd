@@ -59,6 +59,14 @@
 
 extern bool read_memrepaied(void);
 
+#include <linux/trusty/smcall.h>
+extern s32 trusty_fast_call32(struct device *dev, u32 smcnr, u32 a0, u32 a1, u32 a2);
+
+enum sprd_fw_attr {
+	FW_ATTR_NON_SECURE = 0,
+	FW_ATTR_SECURE,
+};
+
 #ifdef CONFIG_MALI_CORESTACK
 bool corestack_driver_control = true;
 #else
@@ -2781,6 +2789,17 @@ static int kbase_pm_do_reset(struct kbase_device *kbdev)
 
 int kbase_pm_protected_mode_enable(struct kbase_device *const kbdev)
 {
+	int ret = 0;
+
+	//pr_info("unisoc firewall - protected_mode_ENABLE in, secure_mode_global = %d\n", kbdev->secure_mode_global);
+	if(kbdev->secure_mode_global == false) {
+		ret = trusty_fast_call32(NULL, SMC_FC_MALI_GPU_SECURITY, FW_ATTR_SECURE, 0, 0);
+		if (ret)
+			pr_err("Trusty fastcall SMC_FC_MALI_GPU_SECURITY : FW_ATTR_SECURE  failed, ret = %d\n", ret);
+		else
+			kbdev->secure_mode_global = true;
+	}
+
 	kbase_reg_write(kbdev, GPU_CONTROL_REG(GPU_COMMAND),
 		GPU_COMMAND_SET_PROTECTED_MODE);
 	return 0;
@@ -2788,7 +2807,31 @@ int kbase_pm_protected_mode_enable(struct kbase_device *const kbdev)
 
 int kbase_pm_protected_mode_disable(struct kbase_device *const kbdev)
 {
+	int ret = 0;
+
+	unsigned long irq_flags;
+	bool secure_mode_local;
+
 	lockdep_assert_held(&kbdev->pm.lock);
+
+	spin_lock_irqsave(&kbdev->hwaccess_lock, irq_flags);
+	secure_mode_local = kbdev->secure_mode_global;
+	spin_unlock_irqrestore(&kbdev->hwaccess_lock, irq_flags);
+
+	//pr_info("unisoc firewall - protected_mode_DISABLE in, secure_mode_global = %d\n", secure_mode_local);
+
+	if(secure_mode_local == true) {
+		ret = trusty_fast_call32(NULL, SMC_FC_MALI_GPU_SECURITY, FW_ATTR_NON_SECURE, 0, 0);
+		if (ret)
+			pr_err("Trusty fastcall SMC_FC_MALI_GPU_SECURITY : FW_ATTR_NON_SECURE  failed, ret = %d\n", ret);
+		else
+		{
+			secure_mode_local = false;
+			spin_lock_irqsave(&kbdev->hwaccess_lock, irq_flags);
+			kbdev->secure_mode_global = secure_mode_local;
+			spin_unlock_irqrestore(&kbdev->hwaccess_lock, irq_flags);
+		}
+	}
 
 	return kbase_pm_do_reset(kbdev);
 }

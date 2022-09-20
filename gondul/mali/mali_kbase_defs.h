@@ -1162,6 +1162,9 @@ struct kbase_device {
 	struct work_struct protected_mode_hwcnt_disable_work;
 
 
+	bool secure_mode_global;
+
+
 	bool irq_reset_flush;
 
 	u32 inited_subsys;

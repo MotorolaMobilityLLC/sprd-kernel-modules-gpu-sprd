@@ -47,6 +47,7 @@
 #include <gpu,qogirn6l-mask.h>
 #include "mali_kbase_gpu_sys_qogirn6l_qos.h"
 
+
 #define MOVE_BIT_LEFT(x,n) ((unsigned long)x << n)
 
 #define VENDOR_FTRACE_MODULE_NAME    "unisoc-gpu"
@@ -55,6 +56,7 @@
 #define PM_RUNTIME_DELAY_MS 50
 #define UP_THRESHOLD        9/10
 #define FREQ_KHZ            1000
+#define VOLT_KMV            1000
 #define GPU_MIN_FREQ_INDEX  3
 
 #define GPU_26M_FREQ        26000000
@@ -68,6 +70,10 @@
 #define GPU_680M_FREQ       680000000
 #define GPU_850M_FREQ       850000000
 
+#define VOLT_650mV 650000
+#define VOLT_700mV 700000
+#define VOLT_750mV 750000
+#define VOLT_800mV 800000
 unsigned long gpll_T770_1950M, gpll_T770_1716M, gpll_T760_1638M;
 
 #if 0
@@ -83,7 +89,7 @@ struct gpu_freq_info {
 	struct clk* clk_src;
 	int freq;	//kHz
 	int volt;	//uV
-	int dvfs_index;
+	//int dvfs_index;
 };
 
 struct gpu_reg_info {
@@ -116,7 +122,6 @@ struct gpu_dvfs_context {
 	struct gpu_reg_info gpu_top_state_reg;
 	struct gpu_reg_info gpll_cfg_force_off_reg;
 	struct gpu_reg_info gpll_cfg_force_on_reg;
-	struct gpu_reg_info soft_rst_reg;
 	struct gpu_reg_info dcdc_gpu_voltage0;
 	struct gpu_reg_info dcdc_gpu_voltage1;
 	struct gpu_reg_info dcdc_gpu_voltage2;
@@ -141,32 +146,39 @@ struct gpu_dvfs_context {
 	struct regmap* gpu_apb_base_ptr;
 	struct regmap* gpu_dvfs_apb_base_ptr;
 
+	struct reset_control* gpu_soft_rst;
+
 	struct regulator *gpu_reg_ptr;
 
-	char auto_efuse[HWFEATURE_STR_SIZE_LIMIT];
+	const char* auto_efuse;
 	u32 gpu_binning;
+
+	int last_gpu_temperature;
+	int gpu_temperature;
 };
 
 DEFINE_SEMAPHORE(gpu_dfs_sem);
 static struct gpu_dvfs_context gpu_dvfs_ctx=
 {
-	.gpu_clock_on=0,
-	.gpu_power_on=0,
-
-	.sem=&gpu_dfs_sem,
+	.gpu_clock_on = 0,
+	.gpu_power_on = 0,
+	.last_gpu_temperature = 0,
+	.gpu_temperature = 0,
+	.sem = &gpu_dfs_sem,
 };
 
 #if 0
 static struct gpu_qos_config gpu_qos_cfg=
 {
-	.arqos=0,
-	.awqos=0,
-	.arqos_threshold=0,
-	.awqos_threshold=0,
+	.arqos = 0,
+	.awqos = 0,
+	.arqos_threshold = 0,
+	.awqos_threshold = 0,
 };
 #endif
 
 int gpu_boost_level;
+#if 0
 void __iomem *mali_qos_reg_base_mtx_m0;
 void __iomem *mali_qos_reg_base_mtx_m1;
 void __iomem *mali_qos_reg_base_apb_rf;
@@ -198,7 +210,9 @@ static void DeinitFreqStats(struct kbase_device *kbdev)
 }
 
 #endif
+#endif
 
+#if 0
 static int sprd_gpu_cal_read(struct device_node *np, const char *cell_id, u32 *val)
 {
 	struct nvmem_cell *cell;
@@ -223,14 +237,20 @@ static int sprd_gpu_cal_read(struct device_node *np, const char *cell_id, u32 *v
 
 	return 0;
 }
+#endif
 
+#if 0
 static inline void mali_freq_init(struct device *dev)
 {
 	int i = 0, clk_cnt = 0, ret = 0;
 	//struct device_node *qos_node = NULL;
+	struct device_node *hwf;
 
 	gpu_dvfs_ctx.gpu_reg_ptr = devm_regulator_get(dev, "gpu");
 	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.gpu_reg_ptr);
+
+	gpu_dvfs_ctx.gpu_soft_rst = devm_reset_control_get(dev, "gpu_soft_rst");
+	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.gpu_soft_rst);
 
 	gpu_dvfs_ctx.top_dvfs_cfg_reg.regmap_ptr = syscon_regmap_lookup_by_phandle_args(dev->of_node,"top_dvfs_cfg", 2, (uint32_t *)gpu_dvfs_ctx.top_dvfs_cfg_reg.args);
 	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.top_dvfs_cfg_reg.regmap_ptr);
@@ -265,9 +285,6 @@ static inline void mali_freq_init(struct device *dev)
 
 	gpu_dvfs_ctx.gpll_cfg_force_on_reg.regmap_ptr = syscon_regmap_lookup_by_phandle_args(dev->of_node,"gpll_cfg_frc_on", 2, (uint32_t *)gpu_dvfs_ctx.gpll_cfg_force_on_reg.args);
 	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.gpll_cfg_force_on_reg.regmap_ptr);
-
-	gpu_dvfs_ctx.soft_rst_reg.regmap_ptr = syscon_regmap_lookup_by_phandle_args(dev->of_node,"gpu_soft_rst", 2, (uint32_t *)gpu_dvfs_ctx.soft_rst_reg.args);
-	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.soft_rst_reg.regmap_ptr);
 
 	gpu_dvfs_ctx.gpu_apb_base_ptr = syscon_regmap_lookup_by_phandle(dev->of_node, "sprd,gpu-apb-syscon");
 	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.gpu_apb_base_ptr);
@@ -403,7 +420,10 @@ static inline void mali_freq_init(struct device *dev)
 		gpu_dvfs_ctx.freq_list[i].dvfs_index = i;
 	}
 	//adjust freq list
-	sprd_kproperty_get("auto/efuse", gpu_dvfs_ctx.auto_efuse, "-1");
+	hwf = of_find_node_by_path("/hwfeature/auto");
+	if (hwf) {
+		gpu_dvfs_ctx.auto_efuse = of_get_property(hwf, "efuse", NULL);
+	}
 
 	//T760 table: 384M, 512M, 650M
 	//T770 table: 384M, 512M, 680M, 780M
@@ -454,6 +474,9 @@ static inline void mali_freq_init(struct device *dev)
 	gpu_dvfs_ctx.freq_cur = &gpu_dvfs_ctx.freq_list[GPU_MIN_FREQ_INDEX];
 	gpu_dvfs_ctx.cur_voltage = gpu_dvfs_ctx.freq_cur->volt;
 }
+#endif
+
+#if 0
 /* SPRD:gpu_qos_reg_map */
 static void gpu_qos_reg_map(void)
 {
@@ -521,13 +544,181 @@ static void mali_kbase_gpu_sys_qos_cfg(void)
 				 sizeof(gpu_apb_rf_qos_list[0]));
 }
 #endif
+#endif
+
+#if 0
 u32 top_pwr = 0;
 u32 top_pwr_mask = MOVE_BIT_LEFT(0x1f,16);
 u32 top_pwr_wakeup = MOVE_BIT_LEFT(0,16);
+#endif
+
+#if 0
+static inline int mali_top_state_check(void)
+{
+	int counter = 0;//count the time of check
+	int res = 0;
+	//check if the top_state ready or not
+	regmap_read(gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_top_state_reg.args[0], &top_pwr);
+	top_pwr = top_pwr & top_pwr_mask;
+	while( top_pwr != top_pwr_wakeup)
+	{
+		udelay(50);
+		regmap_read(gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_top_state_reg.args[0], &top_pwr);
+		top_pwr = top_pwr & top_pwr_mask;
+		printk(KERN_ERR "SPRDDEBUG gpu_top_pwr = 0x%x, counter = %d\n ", top_pwr, counter);
+		if(counter++ > 200)
+		{
+			printk(KERN_ERR "gpu top power on is timeout ! ");
+			WARN_ON(1);
+			res = -1;
+			return res;
+		}
+
+	}
+	return res;
+}
+#endif
+
+int kbase_platform_set_DVFS_table(struct kbase_device *kbdev)
+{
+#if 0
+	//get gpu temperature
+	thermal_zone_get_temp(kbdev->gpu_tz, &gpu_dvfs_ctx.gpu_temperature);
+	down(gpu_dvfs_ctx.sem);
+	if (gpu_dvfs_ctx.gpu_power_on && gpu_dvfs_ctx.gpu_clock_on)
+	{
+		if ((gpu_dvfs_ctx.last_gpu_temperature <= 65000 && gpu_dvfs_ctx.gpu_temperature >= 65000) || (gpu_dvfs_ctx.last_gpu_temperature >= 65000 && gpu_dvfs_ctx.gpu_temperature <= 65000))
+		{
+			if (mali_top_state_check() != 0)
+			{
+				printk(KERN_ERR "mali GPU_set_DVFS_table failed.\n");
+				up(gpu_dvfs_ctx.sem);
+				return -1;
+			}
+			else
+			{
+				printk(KERN_ERR "mali GPU_set_DVFS_table %s gpu_power_on = %d gpu_clock_on = %d,gpu_temperature = %d, last_gpu_temperature = %d.\n",
+						__func__, gpu_dvfs_ctx.gpu_power_on, gpu_dvfs_ctx.gpu_clock_on, gpu_dvfs_ctx.gpu_temperature, gpu_dvfs_ctx.last_gpu_temperature);
+			}
+			if (!strcmp(gpu_dvfs_ctx.auto_efuse, "T770"))
+			{
+				//T770: GPU max freq is 780M, the corresponding GPLL freq is 1950M
+				//modify index6_map sel from 6(gpll_850M) to 5(clk_gpll)
+				//T770-BIN1 FF index3-384M-0(0.65v), index4-512M-0(0.65v), index5-680M-1(0.70v), index6-780M-1(0.70v)
+				//T770-BIN1 FF index3-384M-0(0.65v), index4-512M-0(0.65v), index5-680M-1(0.70v), index6-780M-2(0.75v) 65c
+				if (1 == gpu_dvfs_ctx.gpu_binning)
+				{
+					if (gpu_dvfs_ctx.gpu_temperature < 65000)
+					{
+						regmap_update_bits(gpu_dvfs_ctx.core_index6_map.regmap_ptr, gpu_dvfs_ctx.core_index6_map.args[0], gpu_dvfs_ctx.core_index6_map.args[1], 1 << 6);
+						gpu_dvfs_ctx.freq_list[6].volt = VOLT_700mV;
+					}
+					else
+					{
+						regmap_update_bits(gpu_dvfs_ctx.core_index6_map.regmap_ptr, gpu_dvfs_ctx.core_index6_map.args[0], gpu_dvfs_ctx.core_index6_map.args[1], 2 << 6);
+						gpu_dvfs_ctx.freq_list[6].volt = VOLT_750mV;
+					}
+				}
+				//T770-BIN2 TT index3-384M-0(0.65v), index4-512M-0(0.65v), index5-680M-1(0.70v), index6-780M-2(0.75v)
+				//T770-BIN2 TT index3-384M-0(0.65v), index4-512M-0(0.65v), index5-680M-2(0.75v), index6-780M-2(0.75v) 65c
+				else if (2 == gpu_dvfs_ctx.gpu_binning)
+				{
+					if (gpu_dvfs_ctx.gpu_temperature < 65000)
+					{
+						regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 1 << 6);
+						gpu_dvfs_ctx.freq_list[5].volt = VOLT_700mV;
+					}
+					else
+					{
+						regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 2 << 6);
+						gpu_dvfs_ctx.freq_list[5].volt = VOLT_750mV;
+					}
+				}
+				//T770-BIN3 SS index3-384M-0(0.65v), index4-512M-1(0.70v), index5-680M-2(0.75v), index6-780M-3(0.80v)
+				//T770-BIN3 SS index3-384M-0(0.65v), index4-512M-1(0.70v), index5-680M-3(0.80v), index6-780M-3(0.80v) 65C
+				else if (3 == gpu_dvfs_ctx.gpu_binning || 0 == gpu_dvfs_ctx.gpu_binning)
+				{
+					if (gpu_dvfs_ctx.gpu_temperature < 65000)
+					{
+						regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 2 << 6);
+						gpu_dvfs_ctx.freq_list[5].volt = VOLT_750mV;
+					}
+					else
+					{
+						regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 3 << 6);
+						gpu_dvfs_ctx.freq_list[5].volt = VOLT_800mV;
+					}
+				}
+			}
+			else if (!strcmp(gpu_dvfs_ctx.auto_efuse, "T790") || !strcmp(gpu_dvfs_ctx.auto_efuse, "UTS6560S"))
+			{
+				//T790-BIN1 FF index3-384M-0(0.65v), index4-512M-0(0.65v), index5-680M-1(0.70v), index6-850M-2(0.75v)
+				//T790-BIN1 FF index3-384M-0(0.65v), index4-512M-0(0.65v), index5-680M-1(0.70v), index6-850M-2(0.75v) 65c
+				if (1 == gpu_dvfs_ctx.gpu_binning)
+                                {}
+				//T790-BIN2 TT index3-384M-0(0.65v), index4-512M-0(0.65v), index5-680M-1(0.70v), index6-850M-3(0.80v)
+				//T790-BIN2 TT index3-384M-0(0.65v), index4-512M-0(0.65v), index5-680M-2(0.75v), index6-850M-3(0.80v) 65c
+				else if (2 == gpu_dvfs_ctx.gpu_binning)
+				{
+					if (gpu_dvfs_ctx.gpu_temperature < 65000)
+					{
+						regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 1 << 6);
+						gpu_dvfs_ctx.freq_list[5].volt = VOLT_700mV;
+					}
+					else
+					{
+						regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 2 << 6);
+						gpu_dvfs_ctx.freq_list[5].volt = VOLT_750mV;
+					}
+				}
+				//T790-BIN3 SS index3-384M-0(0.65v), index4-512M-1(0.70v), index5-680M-2(0.75v), index6-850M-3(0.80v)
+				//T790-BIN3 SS index3-384M-0(0.65v), index4-512M-1(0.70v), index5-680M-3(0.80v), index6-680M-3(0.80v) 65c
+				else if (3 == gpu_dvfs_ctx.gpu_binning || 0 == gpu_dvfs_ctx.gpu_binning)
+				{
+					if (gpu_dvfs_ctx.gpu_temperature < 65000)
+					{
+						regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 2 << 6);
+						gpu_dvfs_ctx.freq_list[5].volt = VOLT_750mV;
+					}
+					else
+					{
+						regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 3 << 6);
+						gpu_dvfs_ctx.freq_list[5].volt = VOLT_800mV;
+					}
+				}
+			}
+			gpu_dvfs_ctx.last_gpu_temperature = gpu_dvfs_ctx.gpu_temperature;
+		}
+	}
+	up(gpu_dvfs_ctx.sem);
+#endif
+	return 0;
+}
+
+#if 0
+/*gpu_soft_reset function*/
+static void gpu_reset_assert(struct reset_control* rst_ctrl)
+{
+	int ret = 0;
+	ret = reset_control_assert(rst_ctrl);
+	if (ret)
+		printk(KERN_ERR "GPU_RESET %s error = %d\n", __func__, ret);
+
+}
+
+static void gpu_reset_deassert(struct reset_control* rst_ctrl)
+{
+	int ret = 0;
+	ret = reset_control_deassert(rst_ctrl);
+	if (ret)
+		printk(KERN_ERR "GPU_RESET %s error = %d\n", __func__, ret);
+
+}
+#endif
 
 static inline void mali_power_on(void)
 {
-	int counter = 0;//count the time of check
+#if 0
 	//gpll force off: 0:not force off; 1:force off
 	regmap_update_bits(gpu_dvfs_ctx.gpll_cfg_force_off_reg.regmap_ptr, gpu_dvfs_ctx.gpll_cfg_force_off_reg.args[0], gpu_dvfs_ctx.gpll_cfg_force_off_reg.args[1], ~gpu_dvfs_ctx.gpll_cfg_force_off_reg.args[1]);
 	udelay(100);
@@ -545,28 +736,15 @@ static inline void mali_power_on(void)
 	regmap_update_bits(gpu_dvfs_ctx.top_force_reg.regmap_ptr, gpu_dvfs_ctx.top_force_reg.args[0], gpu_dvfs_ctx.top_force_reg.args[1], ~gpu_dvfs_ctx.top_force_reg.args[1]);
 
 	//reset gpu sys
-	regmap_update_bits(gpu_dvfs_ctx.soft_rst_reg.regmap_ptr, gpu_dvfs_ctx.soft_rst_reg.args[0], gpu_dvfs_ctx.soft_rst_reg.args[1], gpu_dvfs_ctx.soft_rst_reg.args[1]);
-	regmap_update_bits(gpu_dvfs_ctx.soft_rst_reg.regmap_ptr, gpu_dvfs_ctx.soft_rst_reg.args[0], gpu_dvfs_ctx.soft_rst_reg.args[1], ~gpu_dvfs_ctx.soft_rst_reg.args[1]);
+	gpu_reset_assert(gpu_dvfs_ctx.gpu_soft_rst);
+	udelay(10);
+	gpu_reset_deassert(gpu_dvfs_ctx.gpu_soft_rst);
 	udelay(300);
 	//check if the top_state ready or not
-	regmap_read(gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_top_state_reg.args[0], &top_pwr);
-	top_pwr = top_pwr & top_pwr_mask;
-	while(top_pwr != top_pwr_wakeup)
-	{
-		udelay(50);
-		regmap_read(gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_top_state_reg.args[0], &top_pwr);
-		top_pwr = top_pwr & top_pwr_mask;
-		printk(KERN_ERR "SPRDDEBUG gpu_top_pwr = 0x%x, counter = %d\n ", top_pwr, counter);
-		if(counter++ > 200)
-		{
-			printk(KERN_ERR "gpu top power on is timeout ! ");
-			WARN_ON(1);
-			counter = 0;
-			break;
-		}
+	mali_top_state_check();
+#endif
 
-	}
-
+	udelay(100);
 	gpu_dvfs_ctx.gpu_power_on = 1;
 }
 
@@ -574,7 +752,7 @@ static inline void mali_power_on(void)
 static inline void mali_power_off(void)
 {
 	gpu_dvfs_ctx.gpu_power_on = 0;
-
+#if 0
 	regmap_update_bits(gpu_dvfs_ctx.top_force_reg.regmap_ptr, gpu_dvfs_ctx.top_force_reg.args[0], gpu_dvfs_ctx.top_force_reg.args[1], gpu_dvfs_ctx.top_force_reg.args[1]);
 
 	//gpu regulator disable
@@ -588,6 +766,7 @@ static inline void mali_power_off(void)
 	regmap_update_bits(gpu_dvfs_ctx.gpll_cfg_force_off_reg.regmap_ptr, gpu_dvfs_ctx.gpll_cfg_force_off_reg.args[0], gpu_dvfs_ctx.gpll_cfg_force_off_reg.args[1], gpu_dvfs_ctx.gpll_cfg_force_off_reg.args[1]);
 	//gpll force on: 0:not force on; 1:force on
 	regmap_update_bits(gpu_dvfs_ctx.gpll_cfg_force_on_reg.regmap_ptr, gpu_dvfs_ctx.gpll_cfg_force_on_reg.args[0], gpu_dvfs_ctx.gpll_cfg_force_on_reg.args[1], ~gpu_dvfs_ctx.gpll_cfg_force_on_reg.args[1]);
+#endif
 }
 
 #if 0
@@ -600,13 +779,9 @@ static void maliQosConfig(void)
 
 static inline void mali_clock_on(void)
 {
-	int i, gpu_temperature = 0;
+#if 0
+	int i;
 	static int clock_on_count = 0;
-	//struct thermal_zone_device *gpu_tz;
-
-	//get gpu temperature
-	//gpu_tz = thermal_zone_get_zone_by_name("gpu-thmzone");
-	//gpu_tz->ops->get_temp(gpu_tz, &gpu_temperature);
 
 	//enable all clocks
 	for(i = 0; i < gpu_dvfs_ctx.gpu_clk_num; i++)
@@ -618,33 +793,44 @@ static inline void mali_clock_on(void)
 	//enable gpu clock
 	clk_prepare_enable(gpu_dvfs_ctx.clk_gpu_core_eb);
 	udelay(400);
+	//check if the top_state ready or not
+	mali_top_state_check();
 
 	//set core index map and clk rate
 	//GPU_INDEX_MAP [9:6]default index0-0, index1-0, index2-0, index3-1, index4-2, index5-3,index6-4;
-	if (!strcmp(gpu_dvfs_ctx.auto_efuse, "T760"))
+	if (!strcmp(gpu_dvfs_ctx.auto_efuse, "T760") || !strcmp(gpu_dvfs_ctx.auto_efuse, "UTS6560"))
 	{
 		//T760: GPU max freq is 650M, the corresponding GPLL freq is 1638M
 		clk_set_rate(gpu_dvfs_ctx.freq_list[gpu_dvfs_ctx.freq_list_len-1].clk_src, gpll_T760_1638M);
 		//T760-BIN1 FF index3-384M-0(0.65v), index4-512M-0(0.65v), index5-650M-0(0.65v)
 		if (1 == gpu_dvfs_ctx.gpu_binning)
 		{
-			regmap_update_bits(gpu_dvfs_ctx.core_index3_map.regmap_ptr, gpu_dvfs_ctx.core_index3_map.args[0], gpu_dvfs_ctx.core_index3_map.args[1], 0<<6);
-			regmap_update_bits(gpu_dvfs_ctx.core_index4_map.regmap_ptr, gpu_dvfs_ctx.core_index4_map.args[0], gpu_dvfs_ctx.core_index4_map.args[1], 0<<6);
-			regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 0<<6);
+			regmap_update_bits(gpu_dvfs_ctx.core_index3_map.regmap_ptr, gpu_dvfs_ctx.core_index3_map.args[0], gpu_dvfs_ctx.core_index3_map.args[1], 0 << 6);
+			gpu_dvfs_ctx.freq_list[3].volt = VOLT_650mV;
+			regmap_update_bits(gpu_dvfs_ctx.core_index4_map.regmap_ptr, gpu_dvfs_ctx.core_index4_map.args[0], gpu_dvfs_ctx.core_index4_map.args[1], 0 << 6);
+			gpu_dvfs_ctx.freq_list[4].volt = VOLT_650mV;
+			regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 0 << 6);
+			gpu_dvfs_ctx.freq_list[5].volt = VOLT_650mV;
 		}
 		//T760-BIN2 TT index3-384M-0(0.65v), index4-512M-0(0.65v), index5-650M-1(0.70v)
 		else if (2 == gpu_dvfs_ctx.gpu_binning)
 		{
-			regmap_update_bits(gpu_dvfs_ctx.core_index3_map.regmap_ptr, gpu_dvfs_ctx.core_index3_map.args[0], gpu_dvfs_ctx.core_index3_map.args[1], 0<<6);
-			regmap_update_bits(gpu_dvfs_ctx.core_index4_map.regmap_ptr, gpu_dvfs_ctx.core_index4_map.args[0], gpu_dvfs_ctx.core_index4_map.args[1], 0<<6);
-			regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 1<<6);
+			regmap_update_bits(gpu_dvfs_ctx.core_index3_map.regmap_ptr, gpu_dvfs_ctx.core_index3_map.args[0], gpu_dvfs_ctx.core_index3_map.args[1], 0 << 6);
+			gpu_dvfs_ctx.freq_list[3].volt = VOLT_650mV;
+			regmap_update_bits(gpu_dvfs_ctx.core_index4_map.regmap_ptr, gpu_dvfs_ctx.core_index4_map.args[0], gpu_dvfs_ctx.core_index4_map.args[1], 0 << 6);
+			gpu_dvfs_ctx.freq_list[4].volt = VOLT_650mV;
+			regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 1 << 6);
+			gpu_dvfs_ctx.freq_list[5].volt = VOLT_700mV;
 		}
 		//T760-BIN3 SS index3-384M-0(0.65v), index4-512M-1(0.70v), index5-650M-2(0.75v)
 		else if (3 == gpu_dvfs_ctx.gpu_binning || 0 == gpu_dvfs_ctx.gpu_binning)
 		{
-			regmap_update_bits(gpu_dvfs_ctx.core_index3_map.regmap_ptr, gpu_dvfs_ctx.core_index3_map.args[0], gpu_dvfs_ctx.core_index3_map.args[1], 0<<6);
-			regmap_update_bits(gpu_dvfs_ctx.core_index4_map.regmap_ptr, gpu_dvfs_ctx.core_index4_map.args[0], gpu_dvfs_ctx.core_index4_map.args[1], 1<<6);
-			regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 2<<6);
+			regmap_update_bits(gpu_dvfs_ctx.core_index3_map.regmap_ptr, gpu_dvfs_ctx.core_index3_map.args[0], gpu_dvfs_ctx.core_index3_map.args[1], 0 << 6);
+			gpu_dvfs_ctx.freq_list[3].volt = VOLT_650mV;
+			regmap_update_bits(gpu_dvfs_ctx.core_index4_map.regmap_ptr, gpu_dvfs_ctx.core_index4_map.args[0], gpu_dvfs_ctx.core_index4_map.args[1], 1 << 6);
+			gpu_dvfs_ctx.freq_list[4].volt = VOLT_700mV;
+			regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 2 << 6);
+			gpu_dvfs_ctx.freq_list[3].volt = VOLT_750mV;
 		}
 	}
 	else if (!strcmp(gpu_dvfs_ctx.auto_efuse, "T770"))
@@ -656,93 +842,122 @@ static inline void mali_clock_on(void)
 		//T770-BIN1 FF index3-384M-0(0.65v), index4-512M-0(0.65v), index5-680M-1(0.70v), index6-780M-2(0.75v) 65c
 		if (1 == gpu_dvfs_ctx.gpu_binning)
 		{
-			regmap_update_bits(gpu_dvfs_ctx.core_index3_map.regmap_ptr, gpu_dvfs_ctx.core_index3_map.args[0], gpu_dvfs_ctx.core_index3_map.args[1], 0<<6);
-			regmap_update_bits(gpu_dvfs_ctx.core_index4_map.regmap_ptr, gpu_dvfs_ctx.core_index4_map.args[0], gpu_dvfs_ctx.core_index4_map.args[1], 0<<6);
-			regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 1<<6);
-			if (gpu_temperature < 65000)
+			regmap_update_bits(gpu_dvfs_ctx.core_index3_map.regmap_ptr, gpu_dvfs_ctx.core_index3_map.args[0], gpu_dvfs_ctx.core_index3_map.args[1], 0 << 6);
+			gpu_dvfs_ctx.freq_list[3].volt = VOLT_650mV;
+			regmap_update_bits(gpu_dvfs_ctx.core_index4_map.regmap_ptr, gpu_dvfs_ctx.core_index4_map.args[0], gpu_dvfs_ctx.core_index4_map.args[1], 0 << 6);
+			gpu_dvfs_ctx.freq_list[4].volt = VOLT_650mV;
+			regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 1 << 6);
+			gpu_dvfs_ctx.freq_list[5].volt = VOLT_700mV;
+			if (gpu_dvfs_ctx.gpu_temperature < 65000)
 			{
-				regmap_update_bits(gpu_dvfs_ctx.core_index6_map.regmap_ptr, gpu_dvfs_ctx.core_index6_map.args[0], gpu_dvfs_ctx.core_index6_map.args[1], 1<<6);
+				regmap_update_bits(gpu_dvfs_ctx.core_index6_map.regmap_ptr, gpu_dvfs_ctx.core_index6_map.args[0], gpu_dvfs_ctx.core_index6_map.args[1], 1 << 6);
+				gpu_dvfs_ctx.freq_list[6].volt = VOLT_700mV;
 			}
 			else
 			{
-				regmap_update_bits(gpu_dvfs_ctx.core_index6_map.regmap_ptr, gpu_dvfs_ctx.core_index6_map.args[0], gpu_dvfs_ctx.core_index6_map.args[1], 2<<6);
+				regmap_update_bits(gpu_dvfs_ctx.core_index6_map.regmap_ptr, gpu_dvfs_ctx.core_index6_map.args[0], gpu_dvfs_ctx.core_index6_map.args[1], 2 << 6);
+				gpu_dvfs_ctx.freq_list[6].volt = VOLT_750mV;
 			}
 		}
 		//T770-BIN2 TT index3-384M-0(0.65v), index4-512M-0(0.65v), index5-680M-1(0.70v), index6-780M-2(0.75v)
 		//T770-BIN2 TT index3-384M-0(0.65v), index4-512M-0(0.65v), index5-680M-2(0.75v), index6-780M-2(0.75v) 65c
 		else if (2 == gpu_dvfs_ctx.gpu_binning)
 		{
-			regmap_update_bits(gpu_dvfs_ctx.core_index3_map.regmap_ptr, gpu_dvfs_ctx.core_index3_map.args[0], gpu_dvfs_ctx.core_index3_map.args[1], 0<<6);
-			regmap_update_bits(gpu_dvfs_ctx.core_index4_map.regmap_ptr, gpu_dvfs_ctx.core_index4_map.args[0], gpu_dvfs_ctx.core_index4_map.args[1], 0<<6);
-			if (gpu_temperature < 65000)
+			regmap_update_bits(gpu_dvfs_ctx.core_index3_map.regmap_ptr, gpu_dvfs_ctx.core_index3_map.args[0], gpu_dvfs_ctx.core_index3_map.args[1], 0 << 6);
+			gpu_dvfs_ctx.freq_list[3].volt = VOLT_650mV;
+			regmap_update_bits(gpu_dvfs_ctx.core_index4_map.regmap_ptr, gpu_dvfs_ctx.core_index4_map.args[0], gpu_dvfs_ctx.core_index4_map.args[1], 0 << 6);
+			gpu_dvfs_ctx.freq_list[4].volt = VOLT_650mV;
+			if (gpu_dvfs_ctx.gpu_temperature < 65000)
 			{
-				regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 1<<6);
+				regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 1 << 6);
+				gpu_dvfs_ctx.freq_list[5].volt = VOLT_700mV;
 			}
 			else
 			{
-				regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 2<<6);
+				regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 2 << 6);
+				gpu_dvfs_ctx.freq_list[5].volt = VOLT_750mV;
 			}
-			regmap_update_bits(gpu_dvfs_ctx.core_index6_map.regmap_ptr, gpu_dvfs_ctx.core_index6_map.args[0], gpu_dvfs_ctx.core_index6_map.args[1], 2<<6);
+			regmap_update_bits(gpu_dvfs_ctx.core_index6_map.regmap_ptr, gpu_dvfs_ctx.core_index6_map.args[0], gpu_dvfs_ctx.core_index6_map.args[1], 2 << 6);
+			gpu_dvfs_ctx.freq_list[6].volt = VOLT_750mV;
 		}
 		//T770-BIN3 SS index3-384M-0(0.65v), index4-512M-1(0.70v), index5-680M-2(0.75v), index6-780M-3(0.80v)
 		//T770-BIN3 SS index3-384M-0(0.65v), index4-512M-1(0.70v), index5-680M-3(0.80v), index6-780M-3(0.80v) 65C
 		else if (3 == gpu_dvfs_ctx.gpu_binning || 0 == gpu_dvfs_ctx.gpu_binning)
 		{
-			regmap_update_bits(gpu_dvfs_ctx.core_index3_map.regmap_ptr, gpu_dvfs_ctx.core_index3_map.args[0], gpu_dvfs_ctx.core_index3_map.args[1], 0<<6);
-			regmap_update_bits(gpu_dvfs_ctx.core_index4_map.regmap_ptr, gpu_dvfs_ctx.core_index4_map.args[0], gpu_dvfs_ctx.core_index4_map.args[1], 1<<6);
-			if (gpu_temperature < 65000)
+			regmap_update_bits(gpu_dvfs_ctx.core_index3_map.regmap_ptr, gpu_dvfs_ctx.core_index3_map.args[0], gpu_dvfs_ctx.core_index3_map.args[1], 0 << 6);
+			gpu_dvfs_ctx.freq_list[3].volt = VOLT_650mV;
+			regmap_update_bits(gpu_dvfs_ctx.core_index4_map.regmap_ptr, gpu_dvfs_ctx.core_index4_map.args[0], gpu_dvfs_ctx.core_index4_map.args[1], 1 << 6);
+			gpu_dvfs_ctx.freq_list[4].volt = VOLT_700mV;
+			if (gpu_dvfs_ctx.gpu_temperature < 65000)
 			{
-				regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 2<<6);
+				regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 2 << 6);
+				gpu_dvfs_ctx.freq_list[5].volt = VOLT_750mV;
 			}
 			else
 			{
-				regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 3<<6);
+				regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 3 << 6);
+				gpu_dvfs_ctx.freq_list[5].volt = VOLT_800mV;
 			}
-			regmap_update_bits(gpu_dvfs_ctx.core_index6_map.regmap_ptr, gpu_dvfs_ctx.core_index6_map.args[0], gpu_dvfs_ctx.core_index6_map.args[1], 3<<6);
+			regmap_update_bits(gpu_dvfs_ctx.core_index6_map.regmap_ptr, gpu_dvfs_ctx.core_index6_map.args[0], gpu_dvfs_ctx.core_index6_map.args[1], 3 << 6);
+			gpu_dvfs_ctx.freq_list[6].volt = VOLT_800mV;
 		}
 	}
-	else if (!strcmp(gpu_dvfs_ctx.auto_efuse, "T790"))
+	else if (!strcmp(gpu_dvfs_ctx.auto_efuse, "T790") || !strcmp(gpu_dvfs_ctx.auto_efuse, "UTS6560S"))
 	{
 		//T790-BIN1 FF index3-384M-0(0.65v), index4-512M-0(0.65v), index5-680M-1(0.70v), index6-850M-2(0.75v)
 		//T790-BIN1 FF index3-384M-0(0.65v), index4-512M-0(0.65v), index5-680M-1(0.70v), index6-850M-2(0.75v) 65c
 		if (1 == gpu_dvfs_ctx.gpu_binning)
 		{
-			regmap_update_bits(gpu_dvfs_ctx.core_index3_map.regmap_ptr, gpu_dvfs_ctx.core_index3_map.args[0], gpu_dvfs_ctx.core_index3_map.args[1], 0<<6);
-			regmap_update_bits(gpu_dvfs_ctx.core_index4_map.regmap_ptr, gpu_dvfs_ctx.core_index4_map.args[0], gpu_dvfs_ctx.core_index4_map.args[1], 0<<6);
-			regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 1<<6);
-			regmap_update_bits(gpu_dvfs_ctx.core_index6_map.regmap_ptr, gpu_dvfs_ctx.core_index6_map.args[0], gpu_dvfs_ctx.core_index6_map.args[1], 2<<6);
+			regmap_update_bits(gpu_dvfs_ctx.core_index3_map.regmap_ptr, gpu_dvfs_ctx.core_index3_map.args[0], gpu_dvfs_ctx.core_index3_map.args[1], 0 << 6);
+			gpu_dvfs_ctx.freq_list[3].volt = VOLT_650mV;
+			regmap_update_bits(gpu_dvfs_ctx.core_index4_map.regmap_ptr, gpu_dvfs_ctx.core_index4_map.args[0], gpu_dvfs_ctx.core_index4_map.args[1], 0 << 6);
+			gpu_dvfs_ctx.freq_list[4].volt = VOLT_650mV;
+			regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 1 << 6);
+			gpu_dvfs_ctx.freq_list[5].volt = VOLT_700mV;
+			regmap_update_bits(gpu_dvfs_ctx.core_index6_map.regmap_ptr, gpu_dvfs_ctx.core_index6_map.args[0], gpu_dvfs_ctx.core_index6_map.args[1], 2 << 6);
+			gpu_dvfs_ctx.freq_list[6].volt = VOLT_750mV;
 		}
 		//T790-BIN2 TT index3-384M-0(0.65v), index4-512M-0(0.65v), index5-680M-1(0.70v), index6-850M-3(0.80v)
 		//T790-BIN2 TT index3-384M-0(0.65v), index4-512M-0(0.65v), index5-680M-2(0.75v), index6-850M-3(0.80v) 65c
 		else if (2 == gpu_dvfs_ctx.gpu_binning)
 		{
-			regmap_update_bits(gpu_dvfs_ctx.core_index3_map.regmap_ptr, gpu_dvfs_ctx.core_index3_map.args[0], gpu_dvfs_ctx.core_index3_map.args[1], 0<<6);
-			regmap_update_bits(gpu_dvfs_ctx.core_index4_map.regmap_ptr, gpu_dvfs_ctx.core_index4_map.args[0], gpu_dvfs_ctx.core_index4_map.args[1], 0<<6);
-			if (gpu_temperature < 65000)
+			regmap_update_bits(gpu_dvfs_ctx.core_index3_map.regmap_ptr, gpu_dvfs_ctx.core_index3_map.args[0], gpu_dvfs_ctx.core_index3_map.args[1], 0 << 6);
+			gpu_dvfs_ctx.freq_list[3].volt = VOLT_650mV;
+			regmap_update_bits(gpu_dvfs_ctx.core_index4_map.regmap_ptr, gpu_dvfs_ctx.core_index4_map.args[0], gpu_dvfs_ctx.core_index4_map.args[1], 0 << 6);
+			gpu_dvfs_ctx.freq_list[4].volt = VOLT_650mV;
+			if (gpu_dvfs_ctx.gpu_temperature < 65000)
 			{
-				regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 1<<6);
+				regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 1 << 6);
+				gpu_dvfs_ctx.freq_list[5].volt = VOLT_700mV;
 			}
 			else
 			{
-				regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 2<<6);
+				regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 2 << 6);
+				gpu_dvfs_ctx.freq_list[5].volt = VOLT_750mV;
 			}
-			regmap_update_bits(gpu_dvfs_ctx.core_index6_map.regmap_ptr, gpu_dvfs_ctx.core_index6_map.args[0], gpu_dvfs_ctx.core_index6_map.args[1], 3<<6);
+			regmap_update_bits(gpu_dvfs_ctx.core_index6_map.regmap_ptr, gpu_dvfs_ctx.core_index6_map.args[0], gpu_dvfs_ctx.core_index6_map.args[1], 3 << 6);
+			gpu_dvfs_ctx.freq_list[6].volt = VOLT_800mV;
 		}
 		//T790-BIN3 SS index3-384M-0(0.65v), index4-512M-1(0.70v), index5-680M-2(0.75v), index6-850M-3(0.80v)
 		//T790-BIN3 SS index3-384M-0(0.65v), index4-512M-1(0.70v), index5-680M-3(0.80v), index6-680M-3(0.80v) 65c
 		else if (3 == gpu_dvfs_ctx.gpu_binning || 0 == gpu_dvfs_ctx.gpu_binning)
 		{
-			regmap_update_bits(gpu_dvfs_ctx.core_index3_map.regmap_ptr, gpu_dvfs_ctx.core_index3_map.args[0], gpu_dvfs_ctx.core_index3_map.args[1], 0<<6);
-			regmap_update_bits(gpu_dvfs_ctx.core_index4_map.regmap_ptr, gpu_dvfs_ctx.core_index4_map.args[0], gpu_dvfs_ctx.core_index4_map.args[1], 1<<6);
-			if (gpu_temperature < 65000)
+			regmap_update_bits(gpu_dvfs_ctx.core_index3_map.regmap_ptr, gpu_dvfs_ctx.core_index3_map.args[0], gpu_dvfs_ctx.core_index3_map.args[1], 0 << 6);
+			gpu_dvfs_ctx.freq_list[3].volt = VOLT_650mV;
+			regmap_update_bits(gpu_dvfs_ctx.core_index4_map.regmap_ptr, gpu_dvfs_ctx.core_index4_map.args[0], gpu_dvfs_ctx.core_index4_map.args[1], 1 << 6);
+			gpu_dvfs_ctx.freq_list[4].volt = VOLT_700mV;
+			if (gpu_dvfs_ctx.gpu_temperature < 65000)
 			{
-				regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 2<<6);
+				regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 2 << 6);
+				gpu_dvfs_ctx.freq_list[5].volt = VOLT_750mV;
 			}
 			else
 			{
-				regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 3<<6);
+				regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 3 << 6);
+				gpu_dvfs_ctx.freq_list[5].volt = VOLT_800mV;
 			}
-			regmap_update_bits(gpu_dvfs_ctx.core_index6_map.regmap_ptr, gpu_dvfs_ctx.core_index6_map.args[0], gpu_dvfs_ctx.core_index6_map.args[1], 3<<6);
+			regmap_update_bits(gpu_dvfs_ctx.core_index6_map.regmap_ptr, gpu_dvfs_ctx.core_index6_map.args[0], gpu_dvfs_ctx.core_index6_map.args[1], 3 << 6);
+			gpu_dvfs_ctx.freq_list[6].volt = VOLT_800mV;
 		}
 	}
 
@@ -766,16 +981,17 @@ static inline void mali_clock_on(void)
         //SPRD:PCIe Qos Config gpu_sys_qos_config
         mali_kbase_gpu_sys_qos_cfg();
 #endif
+#endif
 	udelay(200);
 	gpu_dvfs_ctx.gpu_clock_on = 1;
 }
 
 static inline void mali_clock_off(void)
 {
-	int i;
+//	int i;
 
 	gpu_dvfs_ctx.gpu_clock_on = 0;
-
+#if 0
 	//disable gpu clock
 	clk_disable_unprepare(gpu_dvfs_ctx.clk_gpu_core_eb);
 	clk_disable_unprepare(gpu_dvfs_ctx.clk_gpu_i);
@@ -785,18 +1001,149 @@ static inline void mali_clock_off(void)
 	{
 		clk_disable_unprepare(gpu_dvfs_ctx.gpu_clk_src[i]);
 	}
+#endif
 }
 
 static int mali_platform_init(struct kbase_device *kbdev)
 {
-	//gpu freq
-	mali_freq_init(kbdev->dev);
+	#define REG_RAW_READ(addr)              (*(volatile uint32_t*)(addr))
+        #define REG_RAW_WRITE(addr,value)       (*(volatile uint32_t*)(addr) = (value))
+        #define REG_RAW_CLEAR(addr,bit)         (*(volatile uint32_t*)(addr) &= ~(1UL<<(bit)))
+        #define REG_RAW_SET(addr,bit)           (*(volatile uint32_t*)(addr) |= (1UL<<(bit)))
+        #define REG_RAW_OR(addr,value)          (*(volatile uint32_t*)(addr) |= (value))
+        #define REG_RAW_AND(addr,value)         (*(volatile uint32_t*)(addr) &= (value))
 
+        uint32_t *GPU_EB = (uint32_t*)ioremap(0x64900000, 4);
+        uint32_t *PD_GPU_TOP_FORCE_SHUTDOWN = (uint32_t*)ioremap(0x649102c4, 4);
+        uint32_t *CLK_GPU = (uint32_t*)ioremap(0x23010028, 4);
+        //uint32_t *CLK_AP_MM = (uint32_t*)ioremap(0x23010040, 4);
+        uint32_t *GPLL_REL_CFG = (uint32_t*)ioremap(0x64910a20, 4);
+	uint32_t *RESET_GPU = (uint32_t*)ioremap(0x64910b98, 4);
+	uint32_t *GPU2EMC_DIV = (uint32_t*)ioremap(0x649203a8, 4); //n6lite:03a8 //n6p:039c
+	uint32_t *GPU2EMC_SEL = (uint32_t*)ioremap(0x649203ac, 4); //n6lite:03ac //n6p:03a0
+	uint32_t *POWERON_CORE0 = (uint32_t*)ioremap(0x649102c8, 4);
+	uint32_t *POWERON_CORE1 = (uint32_t*)ioremap(0x649102cc, 4);
+	//uint32_t *POWERON_CORE2 = (uint32_t*)ioremap(0x649102d0, 4);
+	//uint32_t *POWERON_CORE3 = (uint32_t*)ioremap(0x649102d4, 4);
+	uint32_t *CGM_GPU_CORE_EB = (uint32_t*)ioremap(0x23000000, 4);
+	uint32_t *GPU_DVFS_FREQ_UPDATE_BYPASS0 = (uint32_t*)ioremap(0x23014048, 4);
+	uint32_t *CGM_GPU_DIV = (uint32_t*)ioremap(0x23010024, 4);
+	//uint32_t *MALI_POWER_SECURITY = (uint32_t*)ioremap(0x23100050, 4);
+
+	uint32_t value_GPU_EB, value_PD_GPU_TOP_FORCE_SHUTDOWN, value_CLK_GPU, value_GPLL_REL_CFG, value_RESET_GPU, value_GPU2EMC_DIV, value_GPU2EMC_SEL, value_POWERON_CORE0, value_POWERON_CORE1, value_CGM_GPU_CORE_EB, value_GPU_DVFS_FREQ_UPDATE_BYPASS0, value_CGM_GPU_DIV;
+	//value_CLK_AP_MM, value_POWERON_CORE2, value_POWERON_CORE3, value_MALI_POWER_SECURITY
+
+	printk(KERN_INFO "shinian.zhou_mali----start gpu enable\n");
+
+	//enable GPLL for gpu 850M
+	REG_RAW_CLEAR(GPLL_REL_CFG, 1);
+	udelay(900);
+	REG_RAW_SET(GPLL_REL_CFG, 0);
+	udelay(900);
+	REG_RAW_SET(GPLL_REL_CFG, 2);
+	udelay(900);
+	printk(KERN_INFO "mali----GPLL_REL_CFG -soft config-01-");
+
+	REG_RAW_CLEAR(PD_GPU_TOP_FORCE_SHUTDOWN, 25);
+        udelay(900);
+	REG_RAW_SET(GPU_EB, 11);
+	mdelay(100);
+	printk(KERN_INFO "mali----PD_GPU_TOP_FORCE_SHUTDOWN,GPU_EB -soft config-02-");
+
+
+	//reset gpu
+	REG_RAW_SET(RESET_GPU, 2);
+	udelay(900);
+	REG_RAW_CLEAR(RESET_GPU,2);
+	udelay(900);
+	printk(KERN_INFO "mali----RESET_GPU -soft config-03-");
+
+	REG_RAW_WRITE(GPU2EMC_DIV,0x0);
+	udelay(900);
+	REG_RAW_WRITE(GPU2EMC_SEL,0x6); //the speed of transport data is 856M
+	udelay(900);
+	printk(KERN_INFO "mali----GPU2EMC_DIV,GPU2EMC_SEL -soft config-04-");
+
+	//power on core0,1,2,3
+	REG_RAW_OR(POWERON_CORE0,0x400000f);
+	REG_RAW_OR(POWERON_CORE1,0x400000f);
+	//REG_RAW_OR(POWERON_CORE2,0x400000f);
+	//REG_RAW_OR(POWERON_CORE3,0x400000f);
+	mdelay(200);
+	printk(KERN_INFO "mali----POWERON_CORE0,2 -soft config-05-");
+
+	REG_RAW_SET(CGM_GPU_CORE_EB,2);
+	REG_RAW_SET(GPU_DVFS_FREQ_UPDATE_BYPASS0,0);
+	udelay(900);
+	printk(KERN_INFO "mali----CGM_GPU_CORE_EB,GPU_DVFS_FREQ_UPDATE_BYPASS0 -soft config-07-");
+
+	REG_RAW_AND(CGM_GPU_DIV,0xFFFFFFF8);
+	udelay(900);
+	printk(KERN_INFO "mali----CGM_GPU_DIV -soft config-08-");
+
+	REG_RAW_WRITE(CLK_GPU, 0x6);
+	udelay(900);
+	printk(KERN_INFO "mali----GPLL_REL_CFG -soft config-09-");
+	//udelay(900);
+	//REG_RAW_WRITE(CLK_AP_MM, 0x2); // gpu read ddr freq,maybe crash 1/5
+	//printk(KERN_INFO "mali----CLK_AP_MM -soft config--");
+	//mdelay(50);
+
+	//REG_RAW_WRITE(MALI_POWER_SECURITY,0x2968a819);
+	//udelay(500);
+
+	REG_RAW_SET(CGM_GPU_CORE_EB,0);
+	udelay(500);
+	REG_RAW_CLEAR(CGM_GPU_CORE_EB,0);
+	mdelay(100);
+	printk(KERN_INFO "mali----GPLL_REL_CFG -soft config-10-");
+
+
+	value_GPLL_REL_CFG = REG_RAW_READ(GPLL_REL_CFG); //0x5
+	value_GPU_EB = REG_RAW_READ(GPU_EB);
+	value_PD_GPU_TOP_FORCE_SHUTDOWN = REG_RAW_READ(PD_GPU_TOP_FORCE_SHUTDOWN);
+	value_CLK_GPU = REG_RAW_READ(CLK_GPU); //0x6
+	//value_CLK_AP_MM = REG_RAW_READ(CLK_AP_MM);
+	value_RESET_GPU = REG_RAW_READ(RESET_GPU);
+	value_GPU2EMC_DIV = REG_RAW_READ(GPU2EMC_DIV);
+	value_GPU2EMC_SEL = REG_RAW_READ(GPU2EMC_SEL);
+	value_POWERON_CORE0 = REG_RAW_READ(POWERON_CORE0);
+	value_POWERON_CORE1 = REG_RAW_READ(POWERON_CORE1);
+	//value_POWERON_CORE2 = REG_RAW_READ(POWERON_CORE2);
+	//value_POWERON_CORE3 = REG_RAW_READ(POWERON_CORE3);
+	value_CGM_GPU_CORE_EB = REG_RAW_READ(CGM_GPU_CORE_EB);
+	value_GPU_DVFS_FREQ_UPDATE_BYPASS0 = REG_RAW_READ(GPU_DVFS_FREQ_UPDATE_BYPASS0);
+	value_CGM_GPU_DIV = REG_RAW_READ(CGM_GPU_DIV);
+	//value_MALI_POWER_SECURITY = REG_RAW_READ(MALI_POWER_SECURITY);
+
+
+	printk(KERN_INFO "mali----GPLL_REL_CFG(0x64910a20) = 0x%x\n", value_GPLL_REL_CFG);
+	printk(KERN_INFO "mali----GPU_EB(0x64900000) = 0x%x\n", value_GPU_EB);//0x2043c880
+	printk(KERN_INFO "mali----PD_GPU_TOP_FORCE_SHUTDOWN(0x649102c4) = 0x%x\n", value_PD_GPU_TOP_FORCE_SHUTDOWN);//0x205804
+	printk(KERN_INFO "mali----CLK_GPU(0x23010028) = 0x%x\n", value_CLK_GPU);
+	//printk(KERN_INFO "mali----CLK_AP_MM(0x23010040) = 0x%x\n", value_CLK_AP_MM);
+	printk(KERN_INFO "mali----RESET_GPU (0x64910b98) = 0x%x\n", value_RESET_GPU);
+	printk(KERN_INFO "mali----GPU2EMC_DIV(0x6492039c) = 0x%x\n", value_GPU2EMC_DIV);
+	printk(KERN_INFO "mali----GPU2EMC_SEL(0x649203a0) = 0x%x\n", value_GPU2EMC_SEL);
+	printk(KERN_INFO "mali----POWERON_CORE0(0x649102c8) = 0x%x\n", value_POWERON_CORE0);
+	printk(KERN_INFO "mali----POWERON_CORE1(0x649102cc) = 0x%x\n", value_POWERON_CORE1);
+	//printk(KERN_INFO "mali----POWERON_CORE2(0x649102d0) = 0x%x\n", value_POWERON_CORE2);
+	//printk(KERN_INFO "mali----POWERON_CORE3(0x649102d4) = 0x%x\n", value_POWERON_CORE3);
+	printk(KERN_INFO "mali----CGM_GPU_CORE_EB(0x23000000) = 0x%x\n", value_CGM_GPU_CORE_EB);
+	printk(KERN_INFO "mali----GPU_DVFS_FREQ_UPDATE_BYPASS0(0x23014048) = 0x%x\n", value_GPU_DVFS_FREQ_UPDATE_BYPASS0);
+	printk(KERN_INFO "mali----CGM_GPU_DIV(0x23010024) = 0x%x\n", value_CGM_GPU_DIV);
+	//printk(KERN_INFO "mali----MALI_POWER_SECURITY(0x23100050) = 0x%x\n", value_MALI_POWER_SECURITY);
+
+    printk(KERN_INFO "shinian.zhou_mali----end gpu enable\n");
+
+	//gpu freq
+//	mali_freq_init(kbdev->dev);
+#if 0
 #ifdef CONFIG_MALI_DEVFREQ
 	InitFreqStats(kbdev);
 	kbase_pm_statistics_FreqInit(kbdev);
 #endif
-
+#endif
 	mali_power_on();
 
 	//clock on
@@ -807,7 +1154,7 @@ static int mali_platform_init(struct kbase_device *kbdev)
 
 static void mali_platform_term(struct kbase_device *kbdev)
 {
-	down(gpu_dvfs_ctx.sem);
+//	down(gpu_dvfs_ctx.sem);
 
 	//clock off
 	mali_clock_off();
@@ -815,6 +1162,7 @@ static void mali_platform_term(struct kbase_device *kbdev)
 	//power off
 	mali_power_off();
 
+#if 0
 #ifdef CONFIG_MALI_DEVFREQ
 	kbase_pm_statistics_FreqDeinit(kbdev);
 	DeinitFreqStats(kbdev);
@@ -826,6 +1174,7 @@ static void mali_platform_term(struct kbase_device *kbdev)
 	vfree(gpu_dvfs_ctx.gpu_clk_src);
 
 	up(gpu_dvfs_ctx.sem);
+#endif
 }
 
 struct kbase_platform_funcs_conf platform_qogirn6l_funcs = {
@@ -833,6 +1182,7 @@ struct kbase_platform_funcs_conf platform_qogirn6l_funcs = {
 	.platform_term_func = mali_platform_term
 };
 
+#if 0
 static void mali_power_mode_change(struct kbase_device *kbdev, int power_mode)
 {
 	down(gpu_dvfs_ctx.sem);
@@ -871,9 +1221,11 @@ static void mali_power_mode_change(struct kbase_device *kbdev, int power_mode)
 	kbase_pm_set_statistics(kbdev, power_mode);
 	up(gpu_dvfs_ctx.sem);
 }
+#endif
 
 static void pm_callback_power_off(struct kbase_device *kbdev)
 {
+#if 0
 #ifdef KBASE_PM_RUNTIME
 	int res;
 
@@ -885,10 +1237,12 @@ static void pm_callback_power_off(struct kbase_device *kbdev)
 #endif
 
 	mali_power_mode_change(kbdev, 1);
+#endif
 }
 
 static int pm_callback_power_on(struct kbase_device *kbdev)
 {
+#if 0
 	mali_power_mode_change(kbdev, 0);
 
 #ifdef KBASE_PM_RUNTIME
@@ -902,28 +1256,35 @@ static int pm_callback_power_on(struct kbase_device *kbdev)
 		}
 	}
 #endif
+#endif
 
 	return 1;
 }
 
 static void pm_callback_power_suspend(struct kbase_device *kbdev)
 {
+#if 0
 	mali_power_mode_change(kbdev, 2);
+#endif
 }
 
 static void pm_callback_power_resume(struct kbase_device *kbdev)
 {
+#if 0
 	mali_power_mode_change(kbdev, 0);
+#endif
 }
 
 #ifdef KBASE_PM_RUNTIME
 static int pm_callback_power_runtime_init(struct kbase_device *kbdev)
 {
+#if 0
 	pm_runtime_set_active(kbdev->dev);
 	pm_suspend_ignore_children(kbdev->dev, true);
 	pm_runtime_set_autosuspend_delay(kbdev->dev, PM_RUNTIME_DELAY_MS);
 	pm_runtime_use_autosuspend(kbdev->dev);
 	pm_runtime_enable(kbdev->dev);
+#endif
 
 	return 0;
 }
@@ -962,6 +1323,7 @@ int kbase_platform_early_init(void)
 	return 0;
 }
 
+#if 0
 #if defined(CONFIG_MALI_DEVFREQ)
 static int freq_search(struct gpu_freq_info freq_list[], int len, int key)
 {
@@ -991,24 +1353,39 @@ static int freq_search(struct gpu_freq_info freq_list[], int len, int key)
 	}
 	return -1;
 }
+#endif
+#endif
 
 int kbase_platform_get_init_freq(void)
 {
+#if 0
 	return (gpu_dvfs_ctx.freq_list[GPU_MIN_FREQ_INDEX].freq * FREQ_KHZ);
+#endif
+    //gpu_freq = 850Mhz
+    return GPU_850M_FREQ;
 }
 
 int kbase_platform_get_min_freq(void)
 {
+#if 0
 	return (gpu_dvfs_ctx.freq_list[GPU_MIN_FREQ_INDEX].freq * FREQ_KHZ);
+#endif
+    //gpu_freq = 850Mhz
+    return GPU_850M_FREQ;
 }
 
 int kbase_platform_get_max_freq(void)
 {
+#if 0
 	return (gpu_dvfs_ctx.freq_list[gpu_dvfs_ctx.freq_list_len -1].freq * FREQ_KHZ);
+#endif
+    //gpu_freq = 850Mhz
+    return GPU_850M_FREQ;
 }
 
 void kbase_platform_limit_max_freq(struct device *dev)
 {
+#if 0
 	int ret = 0;
 
 	//disable 26M/76.8M/153.6M
@@ -1044,21 +1421,19 @@ void kbase_platform_limit_max_freq(struct device *dev)
 			printk(KERN_ERR "%s: dev_pm_opp_add return %d\n", __func__, ret);
 		}
 	}
+#endif
 }
 
 int kbase_platform_set_freq_volt(int freq, int volt)
 {
-	int index = -1, gpu_temperature = 0;
-	//struct thermal_zone_device *gpu_tz;
+#if 0
+	int index = -1;
 	freq = freq/FREQ_KHZ;
 	index = freq_search(gpu_dvfs_ctx.freq_list, gpu_dvfs_ctx.freq_list_len, freq);
-	printk(KERN_ERR "mali GPU_DVFS %s index = %d cur_freq = %d cur_volt = %d --> freq = %d volt = %d gpu_power_on = %d gpu_clock_on = %d cur_gpll_freq = %lu.\n",
-		__func__, index, gpu_dvfs_ctx.freq_cur->freq, gpu_dvfs_ctx.cur_voltage, freq, volt,
-		gpu_dvfs_ctx.gpu_power_on, gpu_dvfs_ctx.gpu_clock_on, clk_get_rate(gpu_dvfs_ctx.freq_list[gpu_dvfs_ctx.freq_list_len-1].clk_src));
-
-	//get gpu temperature
-	//gpu_tz = thermal_zone_get_zone_by_name("gpu-thmzone");
-	//gpu_tz->ops->get_temp(gpu_tz, &gpu_temperature);
+	printk(KERN_ERR "mali GPU_DVFS %s index = %d cur_freq = %d MHz cur_volt = %d mV --> freq = %d MHz volt = %d mV gpu_power_on = %d gpu_clock_on = %d gpu_temperature = %u.%lu, auto_efuse = %s, gpu_binning = %d.\n",
+		__func__, index, gpu_dvfs_ctx.freq_cur->freq / FREQ_KHZ, gpu_dvfs_ctx.cur_voltage / VOLT_KMV, freq / FREQ_KHZ, volt / VOLT_KMV,
+		gpu_dvfs_ctx.gpu_power_on, gpu_dvfs_ctx.gpu_clock_on, (unsigned)gpu_dvfs_ctx.gpu_temperature / 1000,
+		(unsigned long)gpu_dvfs_ctx.gpu_temperature % 1000, gpu_dvfs_ctx.auto_efuse, gpu_dvfs_ctx.gpu_binning);
 
 	if (0 <= index)
 	{
@@ -1067,13 +1442,6 @@ int kbase_platform_set_freq_volt(int freq, int volt)
 		//set frequency
 		if (gpu_dvfs_ctx.gpu_power_on && gpu_dvfs_ctx.gpu_clock_on)
 		{
-			//T790 SS gpu_temperature >= 65 the max freq of gpu is 680MHz
-			if (gpu_dvfs_ctx.freq_list_len-1 == index && (!strcmp(gpu_dvfs_ctx.auto_efuse, "T790"))
-			    && (3 == gpu_dvfs_ctx.gpu_binning || 0 == gpu_dvfs_ctx.gpu_binning)
-				&& gpu_temperature >= 65000)
-			{
-				index -= 1;
-			}
 			//T770 the clk src of 680MHz and 780MHz are both clk_gpll
 			//set gpll VCO 1950M(780M*2.5)
 			if (gpu_dvfs_ctx.freq_list_len-1 == index && (!strcmp(gpu_dvfs_ctx.auto_efuse, "T770")))
@@ -1095,13 +1463,15 @@ int kbase_platform_set_freq_volt(int freq, int volt)
 		trace_clock_set_rate(VENDOR_FTRACE_MODULE_NAME, gpu_dvfs_ctx.freq_cur->freq, raw_smp_processor_id());
 		up(gpu_dvfs_ctx.sem);
 	}
+#endif
 	return 0;
 }
 
 #ifdef CONFIG_MALI_BOOST
 void kbase_platform_modify_target_freq(struct device *dev, unsigned long *target_freq)
 {
-        int min_index = -1, max_index = -1, modify_flag = 0,user_max_freq, user_min_freq;
+#if 0
+	int min_index = -1, max_index = -1, modify_flag = 0,user_max_freq, user_min_freq;
 	struct gpu_freq_info *freq_max, *freq_min;
 
 	switch(gpu_boost_level)
@@ -1155,13 +1525,21 @@ void kbase_platform_modify_target_freq(struct device *dev, unsigned long *target
 		*target_freq = (unsigned long)freq_max->freq*FREQ_KHZ;
 		modify_flag = 1;
 	}
+	//T790 SS gpu_temperature >= 65 the max freq of gpu is 680MHz
+	if ((*target_freq == (unsigned long)gpu_dvfs_ctx.freq_list[gpu_dvfs_ctx.freq_list_len-1].freq*FREQ_KHZ ) && (!strcmp(gpu_dvfs_ctx.auto_efuse, "T790") || !strcmp(gpu_dvfs_ctx.auto_efuse, "UTS6560S"))
+		&& (3 == gpu_dvfs_ctx.gpu_binning || 0 == gpu_dvfs_ctx.gpu_binning)
+		&& gpu_dvfs_ctx.gpu_temperature >= 65000)
+	{
+		*target_freq = (unsigned long)gpu_dvfs_ctx.freq_list[gpu_dvfs_ctx.freq_list_len-2].freq*FREQ_KHZ;
+		modify_flag = 1;
+	}
 	if(1 == modify_flag)
 	{
 		printk(KERN_ERR "GPU_DVFS %s gpu_boost_level:%d min_freq=%dMHz max_freq=%dMHz target_freq=%dMHz \n",
 			__func__, gpu_boost_level, freq_min->freq / FREQ_KHZ, freq_max->freq / FREQ_KHZ, *target_freq / (FREQ_KHZ * FREQ_KHZ));
 	}
-}
 #endif
+}
 #endif
 
 #ifdef CONFIG_MALI_BOOST
@@ -1175,8 +1553,3 @@ void kbase_platform_set_boost(struct kbase_device *kbdev, int boost_level)
 }
 #endif
 
-//fake function for N6pro
-int kbase_platform_set_DVFS_table(struct kbase_device *kbdev)
-{
-	return 0;
-}
