@@ -50,6 +50,9 @@
 
 #define MOVE_BIT_LEFT(x,n) ((unsigned long)x << n)
 
+//temp define
+#define Qogirn6Lite_Bringup 0
+
 #define VENDOR_FTRACE_MODULE_NAME    "unisoc-gpu"
 
 #define DTS_CLK_OFFSET      2
@@ -89,7 +92,7 @@ struct gpu_freq_info {
 	struct clk* clk_src;
 	int freq;	//kHz
 	int volt;	//uV
-	//int dvfs_index;
+	int dvfs_index;
 };
 
 struct gpu_reg_info {
@@ -178,7 +181,7 @@ static struct gpu_qos_config gpu_qos_cfg=
 #endif
 
 int gpu_boost_level;
-#if 0
+#if Qogirn6Lite_Bringup
 void __iomem *mali_qos_reg_base_mtx_m0;
 void __iomem *mali_qos_reg_base_mtx_m1;
 void __iomem *mali_qos_reg_base_apb_rf;
@@ -212,7 +215,7 @@ static void DeinitFreqStats(struct kbase_device *kbdev)
 #endif
 #endif
 
-#if 0
+#if Qogirn6Lite_Bringup
 static int sprd_gpu_cal_read(struct device_node *np, const char *cell_id, u32 *val)
 {
 	struct nvmem_cell *cell;
@@ -239,7 +242,7 @@ static int sprd_gpu_cal_read(struct device_node *np, const char *cell_id, u32 *v
 }
 #endif
 
-#if 0
+#if Qogirn6Lite_Bringup
 static inline void mali_freq_init(struct device *dev)
 {
 	int i = 0, clk_cnt = 0, ret = 0;
@@ -476,7 +479,7 @@ static inline void mali_freq_init(struct device *dev)
 }
 #endif
 
-#if 0
+#if Qogirn6Lite_Bringup
 /* SPRD:gpu_qos_reg_map */
 static void gpu_qos_reg_map(void)
 {
@@ -546,13 +549,13 @@ static void mali_kbase_gpu_sys_qos_cfg(void)
 #endif
 #endif
 
-#if 0
+#if Qogirn6Lite_Bringup
 u32 top_pwr = 0;
 u32 top_pwr_mask = MOVE_BIT_LEFT(0x1f,16);
 u32 top_pwr_wakeup = MOVE_BIT_LEFT(0,16);
 #endif
 
-#if 0
+#if Qogirn6Lite_Bringup
 static inline int mali_top_state_check(void)
 {
 	int counter = 0;//count the time of check
@@ -581,7 +584,7 @@ static inline int mali_top_state_check(void)
 
 int kbase_platform_set_DVFS_table(struct kbase_device *kbdev)
 {
-#if 0
+#if Qogirn6Lite_Bringup
 	//get gpu temperature
 	thermal_zone_get_temp(kbdev->gpu_tz, &gpu_dvfs_ctx.gpu_temperature);
 	down(gpu_dvfs_ctx.sem);
@@ -695,7 +698,7 @@ int kbase_platform_set_DVFS_table(struct kbase_device *kbdev)
 	return 0;
 }
 
-#if 0
+#if Qogirn6Lite_Bringup
 /*gpu_soft_reset function*/
 static void gpu_reset_assert(struct reset_control* rst_ctrl)
 {
@@ -718,7 +721,7 @@ static void gpu_reset_deassert(struct reset_control* rst_ctrl)
 
 static inline void mali_power_on(void)
 {
-#if 0
+#if Qogirn6Lite_Bringup
 	//gpll force off: 0:not force off; 1:force off
 	regmap_update_bits(gpu_dvfs_ctx.gpll_cfg_force_off_reg.regmap_ptr, gpu_dvfs_ctx.gpll_cfg_force_off_reg.args[0], gpu_dvfs_ctx.gpll_cfg_force_off_reg.args[1], ~gpu_dvfs_ctx.gpll_cfg_force_off_reg.args[1]);
 	udelay(100);
@@ -752,7 +755,7 @@ static inline void mali_power_on(void)
 static inline void mali_power_off(void)
 {
 	gpu_dvfs_ctx.gpu_power_on = 0;
-#if 0
+#if Qogirn6Lite_Bringup
 	regmap_update_bits(gpu_dvfs_ctx.top_force_reg.regmap_ptr, gpu_dvfs_ctx.top_force_reg.args[0], gpu_dvfs_ctx.top_force_reg.args[1], gpu_dvfs_ctx.top_force_reg.args[1]);
 
 	//gpu regulator disable
@@ -779,7 +782,7 @@ static void maliQosConfig(void)
 
 static inline void mali_clock_on(void)
 {
-#if 0
+#if Qogirn6Lite_Bringup
 	int i;
 	static int clock_on_count = 0;
 
@@ -991,7 +994,7 @@ static inline void mali_clock_off(void)
 //	int i;
 
 	gpu_dvfs_ctx.gpu_clock_on = 0;
-#if 0
+#if Qogirn6Lite_Bringup
 	//disable gpu clock
 	clk_disable_unprepare(gpu_dvfs_ctx.clk_gpu_core_eb);
 	clk_disable_unprepare(gpu_dvfs_ctx.clk_gpu_i);
@@ -1138,7 +1141,7 @@ static int mali_platform_init(struct kbase_device *kbdev)
 
 	//gpu freq
 //	mali_freq_init(kbdev->dev);
-#if 0
+#if Qogirn6Lite_Bringup
 #ifdef CONFIG_MALI_DEVFREQ
 	InitFreqStats(kbdev);
 	kbase_pm_statistics_FreqInit(kbdev);
@@ -1162,7 +1165,7 @@ static void mali_platform_term(struct kbase_device *kbdev)
 	//power off
 	mali_power_off();
 
-#if 0
+#if Qogirn6Lite_Bringup
 #ifdef CONFIG_MALI_DEVFREQ
 	kbase_pm_statistics_FreqDeinit(kbdev);
 	DeinitFreqStats(kbdev);
@@ -1182,7 +1185,7 @@ struct kbase_platform_funcs_conf platform_qogirn6l_funcs = {
 	.platform_term_func = mali_platform_term
 };
 
-#if 0
+#if Qogirn6Lite_Bringup
 static void mali_power_mode_change(struct kbase_device *kbdev, int power_mode)
 {
 	down(gpu_dvfs_ctx.sem);
@@ -1225,7 +1228,7 @@ static void mali_power_mode_change(struct kbase_device *kbdev, int power_mode)
 
 static void pm_callback_power_off(struct kbase_device *kbdev)
 {
-#if 0
+#if Qogirn6Lite_Bringup
 #ifdef KBASE_PM_RUNTIME
 	int res;
 
@@ -1242,7 +1245,7 @@ static void pm_callback_power_off(struct kbase_device *kbdev)
 
 static int pm_callback_power_on(struct kbase_device *kbdev)
 {
-#if 0
+#if Qogirn6Lite_Bringup
 	mali_power_mode_change(kbdev, 0);
 
 #ifdef KBASE_PM_RUNTIME
@@ -1263,14 +1266,14 @@ static int pm_callback_power_on(struct kbase_device *kbdev)
 
 static void pm_callback_power_suspend(struct kbase_device *kbdev)
 {
-#if 0
+#if Qogirn6Lite_Bringup
 	mali_power_mode_change(kbdev, 2);
 #endif
 }
 
 static void pm_callback_power_resume(struct kbase_device *kbdev)
 {
-#if 0
+#if Qogirn6Lite_Bringup
 	mali_power_mode_change(kbdev, 0);
 #endif
 }
@@ -1278,7 +1281,7 @@ static void pm_callback_power_resume(struct kbase_device *kbdev)
 #ifdef KBASE_PM_RUNTIME
 static int pm_callback_power_runtime_init(struct kbase_device *kbdev)
 {
-#if 0
+#if Qogirn6Lite_Bringup
 	pm_runtime_set_active(kbdev->dev);
 	pm_suspend_ignore_children(kbdev->dev, true);
 	pm_runtime_set_autosuspend_delay(kbdev->dev, PM_RUNTIME_DELAY_MS);
@@ -1323,7 +1326,7 @@ int kbase_platform_early_init(void)
 	return 0;
 }
 
-#if 0
+#if Qogirn6Lite_Bringup
 #if defined(CONFIG_MALI_DEVFREQ)
 static int freq_search(struct gpu_freq_info freq_list[], int len, int key)
 {
@@ -1358,7 +1361,7 @@ static int freq_search(struct gpu_freq_info freq_list[], int len, int key)
 
 int kbase_platform_get_init_freq(void)
 {
-#if 0
+#if Qogirn6Lite_Bringup
 	return (gpu_dvfs_ctx.freq_list[GPU_MIN_FREQ_INDEX].freq * FREQ_KHZ);
 #endif
     //gpu_freq = 850Mhz
@@ -1367,7 +1370,7 @@ int kbase_platform_get_init_freq(void)
 
 int kbase_platform_get_min_freq(void)
 {
-#if 0
+#if Qogirn6Lite_Bringup
 	return (gpu_dvfs_ctx.freq_list[GPU_MIN_FREQ_INDEX].freq * FREQ_KHZ);
 #endif
     //gpu_freq = 850Mhz
@@ -1376,7 +1379,7 @@ int kbase_platform_get_min_freq(void)
 
 int kbase_platform_get_max_freq(void)
 {
-#if 0
+#if Qogirn6Lite_Bringup
 	return (gpu_dvfs_ctx.freq_list[gpu_dvfs_ctx.freq_list_len -1].freq * FREQ_KHZ);
 #endif
     //gpu_freq = 850Mhz
@@ -1385,7 +1388,7 @@ int kbase_platform_get_max_freq(void)
 
 void kbase_platform_limit_max_freq(struct device *dev)
 {
-#if 0
+#if Qogirn6Lite_Bringup
 	int ret = 0;
 
 	//disable 26M/76.8M/153.6M
@@ -1426,7 +1429,7 @@ void kbase_platform_limit_max_freq(struct device *dev)
 
 int kbase_platform_set_freq_volt(int freq, int volt)
 {
-#if 0
+#if Qogirn6Lite_Bringup
 	int index = -1;
 	freq = freq/FREQ_KHZ;
 	index = freq_search(gpu_dvfs_ctx.freq_list, gpu_dvfs_ctx.freq_list_len, freq);
@@ -1470,7 +1473,7 @@ int kbase_platform_set_freq_volt(int freq, int volt)
 #ifdef CONFIG_MALI_BOOST
 void kbase_platform_modify_target_freq(struct device *dev, unsigned long *target_freq)
 {
-#if 0
+#if Qogirn6Lite_Bringup
 	int min_index = -1, max_index = -1, modify_flag = 0,user_max_freq, user_min_freq;
 	struct gpu_freq_info *freq_max, *freq_min;
 
