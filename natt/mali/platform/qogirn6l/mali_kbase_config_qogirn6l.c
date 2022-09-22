@@ -183,7 +183,6 @@ static struct gpu_qos_config gpu_qos_cfg=
 int gpu_boost_level;
 #if Qogirn6Lite_Bringup
 void __iomem *mali_qos_reg_base_mtx_m0;
-void __iomem *mali_qos_reg_base_mtx_m1;
 void __iomem *mali_qos_reg_base_apb_rf;
 #ifdef CONFIG_MALI_DEVFREQ
 static void InitFreqStats(struct kbase_device *kbdev)
@@ -485,7 +484,6 @@ static void gpu_qos_reg_map(void)
 {
        u32 qos_offset = 0x100;
        mali_qos_reg_base_mtx_m0 = ioremap(nic400_gpu_sys_mtx_m0_qos_list[0].base_addr,qos_offset);
-       mali_qos_reg_base_mtx_m1 = ioremap(nic400_gpu_sys_mtx_m1_qos_list[0].base_addr,qos_offset);
        mali_qos_reg_base_apb_rf = ioremap(gpu_apb_rf_qos_list[0].base_addr,qos_offset);
 
 }
@@ -493,7 +491,6 @@ static void gpu_qos_reg_map(void)
 static void gpu_qos_reg_unmap(void)
 {
        iounmap(mali_qos_reg_base_mtx_m0);
-       iounmap(mali_qos_reg_base_mtx_m1);
        iounmap(mali_qos_reg_base_apb_rf);
 }
 
@@ -509,10 +506,6 @@ static void mali_kbase_gpu_sys_qos_reg_rw(struct qos_reg gpu_qos_list_name[], in
         if(gpu_qos_list_name[0].base_addr == nic400_gpu_sys_mtx_m0_qos_list[0].base_addr)
         {
           mali_qos_reg_base = mali_qos_reg_base_mtx_m0;
-        }
-        else if(gpu_qos_list_name[0].base_addr == nic400_gpu_sys_mtx_m1_qos_list[0].base_addr)
-        {
-          mali_qos_reg_base = mali_qos_reg_base_mtx_m1;
         }
         else
         {
@@ -539,9 +532,6 @@ static void mali_kbase_gpu_sys_qos_cfg(void)
 	mali_kbase_gpu_sys_qos_reg_rw(nic400_gpu_sys_mtx_m0_qos_list,
 				 sizeof(nic400_gpu_sys_mtx_m0_qos_list) /
 				 sizeof(nic400_gpu_sys_mtx_m0_qos_list[0]));
-	mali_kbase_gpu_sys_qos_reg_rw(nic400_gpu_sys_mtx_m1_qos_list,
-				 sizeof(nic400_gpu_sys_mtx_m1_qos_list) /
-				 sizeof(nic400_gpu_sys_mtx_m1_qos_list[0]));
 	mali_kbase_gpu_sys_qos_reg_rw(gpu_apb_rf_qos_list,
 				 sizeof(gpu_apb_rf_qos_list) /
 				 sizeof(gpu_apb_rf_qos_list[0]));
