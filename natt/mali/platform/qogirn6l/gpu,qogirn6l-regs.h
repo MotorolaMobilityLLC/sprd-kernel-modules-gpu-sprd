@@ -11,8 +11,8 @@
  ********************************************************************
  */
 
-#ifndef __GPU_QOGIRN6PRO_REGS_H
-#define __GPU_QOGIRN6PRO_REGS_H
+#ifndef __GPU_QOGIRN6L_REGS_H
+#define __GPU_QOGIRN6L_REGS_H
 
 #define REG_GPU_DVFS_APB_RF_GPU_SW_DVFS_CTRL         0x0038
 #define REG_GPU_DVFS_APB_RF_GPU_INDEX0_MAP           0x0154
@@ -27,4 +27,4 @@
 #define REG_GPU_DVFS_APB_RF_GPU_FREQ_UPD_TYPE_CFG0   0x09ac
 
 #define REG_GPU_APB_RF_GPU_NIC400_QOS                0x0010
-#endif /* __GPU_QOGIRN6PRO_REGS_H */
+#endif /* __GPU_QOGIRN6L_REGS_H */

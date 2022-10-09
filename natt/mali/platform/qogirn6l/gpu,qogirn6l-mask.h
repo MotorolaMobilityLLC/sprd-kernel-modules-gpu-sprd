@@ -11,8 +11,8 @@
  ********************************************************************
  */
 
-#ifndef __GPU_QOGIRN6PRO_MASK_H
-#define __GPU_QOGIRN6PRO_MASK_H
+#ifndef __GPU_QOGIRN6L_MASK_H
+#define __GPU_QOGIRN6L_MASK_H
 
 #define MASK_GPU_DVFS_APB_RF_GPU_DVFS_ACK             0x100
 #define MASK_GPU_DVFS_APB_RF_GPU_DVFS_VOLTAGE_SW      0x70
@@ -30,4 +30,4 @@
 #define MASK_GPU_DVFS_APB_RF_GPU_FREQ_UPD_DELAY_EN    0x2
 #define MASK_GPU_DVFS_APB_RF_GPU_FREQ_UPD_HDSK_EN     0x1
 
-#endif /* __GPU_QOGIRN6PRO_MASK_H */
+#endif /* __GPU_QOGIRN6L_MASK_H */
