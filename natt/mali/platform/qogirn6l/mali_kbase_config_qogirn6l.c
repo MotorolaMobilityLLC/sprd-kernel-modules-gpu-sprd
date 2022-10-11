@@ -53,7 +53,7 @@
 
 #define VENDOR_FTRACE_MODULE_NAME    "unisoc-gpu"
 
-#define DTS_CLK_OFFSET      2
+#define DTS_CLK_OFFSET      1
 #define PM_RUNTIME_DELAY_MS 50
 #define UP_THRESHOLD        9/10
 #define FREQ_KHZ            1000
@@ -94,7 +94,6 @@ struct gpu_dvfs_context {
 	int cur_voltage;
 
 	struct clk*  clk_gpu_i;
-	struct clk*  clk_gpu_core_eb;
 	struct clk** gpu_clk_src;
 	int gpu_clk_num;
 
@@ -111,6 +110,7 @@ struct gpu_dvfs_context {
 	struct gpu_reg_info gpu_sw_dvfs_ctrl_reg;
 	struct gpu_reg_info top_force_reg;
 	struct gpu_reg_info gpu_top_state_reg;
+	struct gpu_reg_info clk_core_gpu_eb_reg;
 
 	struct gpu_reg_info gpu_core0_state_reg;
 	struct gpu_reg_info gpu_core1_state_reg;
@@ -235,14 +235,6 @@ static inline void mali_freq_init(struct device *dev)
 	gpu_dvfs_ctx.gpu_reg_ptr = devm_regulator_get(dev, "gpu");
 	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.gpu_reg_ptr);
 
-	//N6P vddgpu is used for gpu alone, allow force disable.
-	//If in other projects, vddgpu is shared by mutiple sys, not allow force disable.
-	if (regulator_is_enabled(gpu_dvfs_ctx.gpu_reg_ptr))
-	{
-		regulator_force_disable(gpu_dvfs_ctx.gpu_reg_ptr);
-		udelay(10);
-	}
-
 	gpu_dvfs_ctx.gpu_soft_rst = devm_reset_control_get(dev, "gpu_soft_rst");
 	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.gpu_soft_rst);
 
@@ -273,6 +265,9 @@ static inline void mali_freq_init(struct device *dev)
 
 	gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr = syscon_regmap_lookup_by_phandle_args(dev->of_node,"gpu_top_state", 2, (uint32_t *)gpu_dvfs_ctx.gpu_top_state_reg.args);
 	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr);
+
+	gpu_dvfs_ctx.clk_core_gpu_eb_reg.regmap_ptr = syscon_regmap_lookup_by_phandle_args(dev->of_node,"clk_core_gpu_eb", 2, (uint32_t *)gpu_dvfs_ctx.clk_core_gpu_eb_reg.args);
+	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.clk_core_gpu_eb_reg.regmap_ptr);
 
 	gpu_dvfs_ctx.gpu_core0_state_reg.regmap_ptr = syscon_regmap_lookup_by_phandle_args(dev->of_node,"gpu_core0_state", 2, (uint32_t *)gpu_dvfs_ctx.gpu_core0_state_reg.args);
 	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.gpu_core0_state_reg.regmap_ptr);
@@ -395,9 +390,6 @@ static inline void mali_freq_init(struct device *dev)
 
 	gpu_dvfs_ctx.clk_gpu_i = of_clk_get(dev->of_node, 0);
 	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.clk_gpu_i);
-
-	gpu_dvfs_ctx.clk_gpu_core_eb = of_clk_get(dev->of_node, 1);
-	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.clk_gpu_core_eb);
 
 	clk_cnt = of_clk_get_parent_count(dev->of_node);
 	gpu_dvfs_ctx.gpu_clk_num = clk_cnt - DTS_CLK_OFFSET;
@@ -682,7 +674,8 @@ static inline void mali_clock_on(void)
 	clk_prepare_enable(gpu_dvfs_ctx.clk_gpu_i);
 
 	//enable gpu clock
-	clk_prepare_enable(gpu_dvfs_ctx.clk_gpu_core_eb);
+	regmap_update_bits(gpu_dvfs_ctx.clk_core_gpu_eb_reg.regmap_ptr, gpu_dvfs_ctx.clk_core_gpu_eb_reg.args[0],
+						gpu_dvfs_ctx.clk_core_gpu_eb_reg.args[1], gpu_dvfs_ctx.clk_core_gpu_eb_reg.args[1]);
 	udelay(400);
 	//check if the top_state ready or not
 	mali_top_state_check();
@@ -751,7 +744,8 @@ static inline void mali_clock_off(void)
 	atomic_dec(&gpu_dvfs_ctx.gpu_clock_state);
 
 	//disable gpu clock
-	clk_disable_unprepare(gpu_dvfs_ctx.clk_gpu_core_eb);
+	regmap_update_bits(gpu_dvfs_ctx.clk_core_gpu_eb_reg.regmap_ptr, gpu_dvfs_ctx.clk_core_gpu_eb_reg.args[0],
+						gpu_dvfs_ctx.clk_core_gpu_eb_reg.args[1], ~gpu_dvfs_ctx.clk_core_gpu_eb_reg.args[1]);
 	clk_disable_unprepare(gpu_dvfs_ctx.clk_gpu_i);
 
 	//disable all clocks
