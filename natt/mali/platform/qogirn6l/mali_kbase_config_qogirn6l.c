@@ -232,6 +232,14 @@ static inline void mali_freq_init(struct device *dev)
 	gpu_dvfs_ctx.gpu_reg_ptr = devm_regulator_get(dev, "gpu");
 	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.gpu_reg_ptr);
 
+	//N6P vddgpu is used for gpu alone, allow force disable.
+	//If in other projects, vddgpu is shared by mutiple sys, not allow force disable.
+	if (regulator_is_enabled(gpu_dvfs_ctx.gpu_reg_ptr))
+	{
+		regulator_force_disable(gpu_dvfs_ctx.gpu_reg_ptr);
+		udelay(10);
+	}
+
 	gpu_dvfs_ctx.gpu_soft_rst = devm_reset_control_get(dev, "gpu_soft_rst");
 	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.gpu_soft_rst);
 
@@ -536,7 +544,7 @@ static void gpu_reset_deassert(struct reset_control* rst_ctrl)
 }
 static inline void mali_power_on(void)
 {
-	//int ret = 0;
+	int ret = 0;
 
 	//gpll force off: 0:not force off; 1:force off
 	regmap_update_bits(gpu_dvfs_ctx.gpll_cfg_force_off_reg.regmap_ptr, gpu_dvfs_ctx.gpll_cfg_force_off_reg.args[0], gpu_dvfs_ctx.gpll_cfg_force_off_reg.args[1], ~gpu_dvfs_ctx.gpll_cfg_force_off_reg.args[1]);
@@ -546,14 +554,14 @@ static inline void mali_power_on(void)
 	udelay(150);
 
 	//gpu regulator enable
-	//if (!regulator_is_enabled(gpu_dvfs_ctx.gpu_reg_ptr))
-	//{
-	//	ret = regulator_enable(gpu_dvfs_ctx.gpu_reg_ptr);
-	//	if (ret) {
-	//		printk(KERN_ERR "%s failed to enable vddgpu, error =%d\n", __func__, ret);
-	//	}
-	//	udelay(400);
-	//}
+	if (!regulator_is_enabled(gpu_dvfs_ctx.gpu_reg_ptr))
+	{
+		ret = regulator_enable(gpu_dvfs_ctx.gpu_reg_ptr);
+		if (ret) {
+			printk(KERN_ERR "%s failed to enable vddgpu, error =%d\n", __func__, ret);
+		}
+		udelay(400);
+	}
 
 	regmap_update_bits(gpu_dvfs_ctx.top_force_reg.regmap_ptr, gpu_dvfs_ctx.top_force_reg.args[0], gpu_dvfs_ctx.top_force_reg.args[1], ~gpu_dvfs_ctx.top_force_reg.args[1]);
 
@@ -571,20 +579,20 @@ static inline void mali_power_on(void)
 
 static inline void mali_power_off(void)
 {
-	//int ret = 0;
+	int ret = 0;
 	gpu_dvfs_ctx.gpu_power_on = 0;
 
 	regmap_update_bits(gpu_dvfs_ctx.top_force_reg.regmap_ptr, gpu_dvfs_ctx.top_force_reg.args[0], gpu_dvfs_ctx.top_force_reg.args[1], gpu_dvfs_ctx.top_force_reg.args[1]);
 
 	//gpu regulator disable
-	//if (regulator_is_enabled(gpu_dvfs_ctx.gpu_reg_ptr))
-	//{
-	//	ret = regulator_disable(gpu_dvfs_ctx.gpu_reg_ptr);
-	//	if (ret) {
-	//		printk(KERN_ERR "%s failed to disable vddgpu, error =%d\n", __func__, ret);
-	//	}
-	//	udelay(10);
-	//}
+	if (regulator_is_enabled(gpu_dvfs_ctx.gpu_reg_ptr))
+	{
+		ret = regulator_disable(gpu_dvfs_ctx.gpu_reg_ptr);
+		if (ret) {
+			printk(KERN_ERR "%s failed to disable vddgpu, error =%d\n", __func__, ret);
+		}
+		udelay(10);
+	}
 
 	//gpll force off: 0:not force off; 1:force off
 	regmap_update_bits(gpu_dvfs_ctx.gpll_cfg_force_off_reg.regmap_ptr, gpu_dvfs_ctx.gpll_cfg_force_off_reg.args[0], gpu_dvfs_ctx.gpll_cfg_force_off_reg.args[1], gpu_dvfs_ctx.gpll_cfg_force_off_reg.args[1]);
