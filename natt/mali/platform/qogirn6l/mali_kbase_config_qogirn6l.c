@@ -410,6 +410,8 @@ static inline void mali_freq_init(struct device *dev)
 	if (hwf) {
 		gpu_dvfs_ctx.auto_efuse = of_get_property(hwf, "efuse", NULL);
 		pr_info ("find  in %s was %s\n", __func__, gpu_dvfs_ctx.auto_efuse);
+		if(!strcmp(gpu_dvfs_ctx.auto_efuse, "-1"))
+			gpu_dvfs_ctx.auto_efuse = "T765";
 	}
 
 	//T750 table: 384M, 512M, 680M
@@ -625,6 +627,37 @@ static inline void mali_clock_on(void)
 	udelay(400);
 	//check if the top_state ready or not
 	mali_top_state_check();
+
+	if (!strcmp(gpu_dvfs_ctx.auto_efuse, "T750"))
+	{
+		//T750-BIN1 FF index3-384M(0.65v), index4-512M(0.65v), index5-680M(0.70v)
+		if (1 == gpu_dvfs_ctx.gpu_binning)
+		{
+		}
+		//T750-BIN2 TT index3-384M(0.65v), index4-512M(0.65v), index5-680M(0.70v)
+		else if (2 == gpu_dvfs_ctx.gpu_binning)
+		{
+		}
+		//T750-BIN3 SS index3-384M(0.65v), index4-512M(0.65v), index5-680M(0.70v)
+		else if (3 == gpu_dvfs_ctx.gpu_binning || 0 == gpu_dvfs_ctx.gpu_binning)
+		{
+		}
+	}
+	else if (!strcmp(gpu_dvfs_ctx.auto_efuse, "T765"))
+	{
+		//T765-BIN1 FF index3-384M(0.65v), index4-512M(0.65v), index5-680M(0.70v), index6-850M(0.75v)
+		if (1 == gpu_dvfs_ctx.gpu_binning)
+		{
+		}
+		//T765-BIN2 TT index3-384M(0.65v), index4-512M(0.65v), index5-680M(0.70v), index6-850M(0.75v)
+		else if (2 == gpu_dvfs_ctx.gpu_binning)
+		{
+		}
+		//T765-BIN3 SS index3-384M(0.65v), index4-512M(0.65v), index5-680M(0.70v), index6-850M(0.75v)
+		else if (3 == gpu_dvfs_ctx.gpu_binning || 0 == gpu_dvfs_ctx.gpu_binning)
+		{
+		}
+	}
 
 	//update freq cfg
 	regmap_update_bits(gpu_dvfs_ctx.freq_upd_cfg.regmap_ptr, gpu_dvfs_ctx.freq_upd_cfg.args[0], gpu_dvfs_ctx.freq_upd_cfg.args[1], 1);
