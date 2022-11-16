@@ -850,8 +850,7 @@ int kbase_platform_set_freq_volt(int freq, int volt)
 #ifdef CONFIG_MALI_BOOST
 void kbase_platform_modify_target_freq(struct device *dev, unsigned long *target_freq)
 {
-	int min_index = -1, max_index = -1, modify_flag = 0;
-	struct kbase_device *kbdev = dev_get_drvdata(dev);
+	int min_index = -1, max_index = -1, modify_flag = 0, user_max_freq, user_min_freq;
 	struct gpu_freq_info *freq_max, *freq_min;
 
 	switch(gpu_boost_level)
@@ -866,9 +865,10 @@ void kbase_platform_modify_target_freq(struct device *dev, unsigned long *target
 		freq_min = &gpu_dvfs_ctx.freq_list[0];
 		break;
 	}
-
+	user_max_freq = dev_pm_qos_read_value(dev, DEV_PM_QOS_MAX_FREQUENCY);
+	user_min_freq = dev_pm_qos_read_value(dev, DEV_PM_QOS_MIN_FREQUENCY);
 	//limit min freq
-	min_index = freq_search(gpu_dvfs_ctx.freq_list, gpu_dvfs_ctx.freq_list_len, kbdev->devfreq->min_freq/FREQ_KHZ);
+	min_index = freq_search(gpu_dvfs_ctx.freq_list, gpu_dvfs_ctx.freq_list_len, user_min_freq/FREQ_KHZ);
 	if ((0 <= min_index) &&
 		(freq_min->freq < gpu_dvfs_ctx.freq_list[min_index].freq))
 	{
@@ -880,7 +880,7 @@ void kbase_platform_modify_target_freq(struct device *dev, unsigned long *target
 	}
 
 	//limit max freq
-	max_index = freq_search(gpu_dvfs_ctx.freq_list, gpu_dvfs_ctx.freq_list_len, kbdev->devfreq->max_freq/FREQ_KHZ);
+	max_index = freq_search(gpu_dvfs_ctx.freq_list, gpu_dvfs_ctx.freq_list_len, user_max_freq/FREQ_KHZ);
 	if ((0 <= max_index) &&
 		(freq_max->freq > gpu_dvfs_ctx.freq_list[max_index].freq))
 	{
