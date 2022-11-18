@@ -1283,7 +1283,7 @@ int kbase_jd_submit(struct kbase_context *kctx,
 	}
 
 #ifdef CONFIG_MALI_BOOST
-	kbase_platform_set_boost(kbdev, jctx->level);
+	kbase_platform_set_boost(kbdev, kctx, jctx->level);
 #endif
 
 	/* All atoms submitted in this call have the same flush ID */

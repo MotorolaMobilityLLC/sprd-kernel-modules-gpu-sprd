@@ -143,7 +143,7 @@ static struct gpu_qos_config gpu_qos_cfg=
 	.awqos_threshold=0,
 };
 
-int gpu_boost_level;
+int gpu_boost_level = 0;
 
 #ifdef CONFIG_MALI_DEVFREQ
 static void InitFreqStats(struct kbase_device *kbdev)
@@ -891,7 +891,7 @@ void kbase_platform_modify_target_freq(struct device *dev, unsigned long *target
 		}
 	}
 
-	gpu_boost_level = 0;
+	//gpu_boost_level = 0;
 
 	//set target frequency
 	if (*target_freq < (unsigned long)freq_min->freq*FREQ_KHZ)
@@ -915,13 +915,25 @@ void kbase_platform_modify_target_freq(struct device *dev, unsigned long *target
 #endif
 
 #ifdef CONFIG_MALI_BOOST
-void kbase_platform_set_boost(struct kbase_device *kbdev, int boost_level)
+
+int boost_tgid = 0;
+int boost_pid = 0;
+
+void kbase_platform_set_boost(struct kbase_device *kbdev, struct kbase_context *kctx, int boost_level)
 {
-	if (gpu_boost_level < boost_level)
+	if (boost_level == 0 || boost_level == 10)
 	{
+		if (boost_level == 0 && kctx->tgid == boost_tgid && kctx->pid != boost_pid)
+		{
+			printk(KERN_INFO "GPU_DVFS %s boost_level = %d, gpu_boost_level = %d, tgid = %d, pid = %d, previous tgid = %d, previous pid = %d",
+					__func__, boost_level, gpu_boost_level, kctx->tgid, kctx->pid, boost_tgid, boost_pid);
+			return;
+		}
 		gpu_boost_level = boost_level;
-		printk(KERN_ERR "GPU_DVFS %s gpu_boost_level =%d \n", __func__, gpu_boost_level);
+		//printk(KERN_INFO "GPU_DVFS %s gpu_boost_level =%d \n", __func__, gpu_boost_level);
 	}
+	boost_tgid = kctx->tgid;
+	boost_pid = kctx->pid;
 }
 #endif
 
