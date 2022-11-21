@@ -102,6 +102,7 @@ struct gpu_dvfs_context {
 
 	struct semaphore* sem;
 
+	struct gpu_reg_info top_dvfs_cfg_reg;
 	struct gpu_reg_info top_force_reg;
 	struct gpu_reg_info gpu_qos_sel;
 	struct gpu_reg_info gpu_qos;
@@ -207,6 +208,8 @@ static inline void mali_freq_init(struct device *dev)
 	const char *auto_efuse = NULL;
 	struct regmap* topdvfs_controller_base_ptr = NULL;
 
+	gpu_dvfs_ctx.top_dvfs_cfg_reg.regmap_ptr = syscon_regmap_lookup_by_phandle_args(dev->of_node,"top_dvfs_cfg", 2, (uint32_t *)gpu_dvfs_ctx.top_dvfs_cfg_reg.args);
+	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.top_dvfs_cfg_reg.regmap_ptr);
 	gpu_dvfs_ctx.top_force_reg.regmap_ptr = syscon_regmap_lookup_by_phandle_args(dev->of_node,"top-force-shutdown", 2, (uint32_t *)gpu_dvfs_ctx.top_force_reg.args);
 	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.top_force_reg.regmap_ptr);
 
@@ -221,6 +224,9 @@ static inline void mali_freq_init(struct device *dev)
 	gpu_dvfs_ctx.dvfs_voltage_value1.regmap_ptr = topdvfs_controller_base_ptr;
 	gpu_dvfs_ctx.dvfs_voltage_value1.args[0] = 0x00E8;
 	gpu_dvfs_ctx.dvfs_voltage_value1.args[1] = 0x1FF;
+
+	//enable gpu hw dvfs
+	regmap_update_bits(gpu_dvfs_ctx.top_dvfs_cfg_reg.regmap_ptr, gpu_dvfs_ctx.top_dvfs_cfg_reg.args[0], gpu_dvfs_ctx.top_dvfs_cfg_reg.args[1], ~gpu_dvfs_ctx.top_dvfs_cfg_reg.args[1]);
 
 	//qos
 	gpu_dvfs_ctx.gpu_qos_sel.regmap_ptr = gpu_dvfs_ctx.gpu_apb_base_ptr;
