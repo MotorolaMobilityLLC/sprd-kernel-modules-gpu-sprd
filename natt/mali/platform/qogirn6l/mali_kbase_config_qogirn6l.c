@@ -116,6 +116,8 @@ struct gpu_dvfs_context {
 	struct gpu_reg_info dcdc_gpu_voltage1;
 	struct gpu_reg_info dcdc_gpu_voltage2;
 	struct gpu_reg_info dcdc_gpu_voltage3;
+
+	struct gpu_reg_info bridge_trans_idle_reg;
 #if 0
 	struct gpu_reg_info gpu_qos_sel;
 	struct gpu_reg_info gpu_qos;
@@ -281,6 +283,9 @@ static inline void mali_freq_init(struct device *dev)
 	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.gpu_apb_base_ptr);
 	gpu_dvfs_ctx.gpu_dvfs_apb_base_ptr = syscon_regmap_lookup_by_phandle(dev->of_node, "sprd,gpu-dvfs-apb-syscon");
 	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.gpu_dvfs_apb_base_ptr);
+
+	gpu_dvfs_ctx.bridge_trans_idle_reg.regmap_ptr = gpu_dvfs_ctx.gpu_apb_base_ptr;
+	gpu_dvfs_ctx.bridge_trans_idle_reg.args[0] = REG_GPU_APB_RF_ASYBC_BRIDGE_TOP_W;
 
 #if 0
 	//qos
@@ -520,6 +525,31 @@ static inline int mali_top_state_check(void)
 	return res;
 }
 
+static inline void mali_check_bridge_trans_idle(void)
+{
+	u32 bridge_trans_idle_bit = 0;
+	int counter = 0;
+
+	regmap_read(gpu_dvfs_ctx.bridge_trans_idle_reg.regmap_ptr, gpu_dvfs_ctx.bridge_trans_idle_reg.args[0], &bridge_trans_idle_bit);
+	bridge_trans_idle_bit = ((bridge_trans_idle_bit & MASK_GPU_APB_RF_BRIDGE_TRANS_IDLE_RO) >> 1);
+
+	while(bridge_trans_idle_bit == 0)
+	{
+		udelay(10);
+		regmap_read(gpu_dvfs_ctx.bridge_trans_idle_reg.regmap_ptr, gpu_dvfs_ctx.bridge_trans_idle_reg.args[0], &bridge_trans_idle_bit);
+		bridge_trans_idle_bit = ((bridge_trans_idle_bit & MASK_GPU_APB_RF_BRIDGE_TRANS_IDLE_RO) >> 1);
+		printk(KERN_ERR "SPRDDEBUG mali gpu bridge_trans_idle_bit is FALSE:0(not idle), cannot clock off and power off, counter = %d\n ", counter);
+		if(counter++ > 200)
+		{
+			printk(KERN_ERR "gpu polling mali_check_bridge_trans_idle timeout !");
+			WARN_ON(1);
+			return;
+		}
+	}
+
+	udelay(10);
+	return;
+}
 
 int kbase_platform_set_DVFS_table(struct kbase_device *kbdev)
 {
@@ -686,6 +716,8 @@ static inline void mali_clock_on(void)
 static inline void mali_clock_off(void)
 {
 	int i;
+
+	mali_check_bridge_trans_idle();
 
 	gpu_dvfs_ctx.gpu_clock_on = 0;
 

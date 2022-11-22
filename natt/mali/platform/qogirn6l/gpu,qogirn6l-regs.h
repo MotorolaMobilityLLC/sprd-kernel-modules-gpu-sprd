@@ -27,4 +27,6 @@
 #define REG_GPU_DVFS_APB_RF_GPU_FREQ_UPD_TYPE_CFG0   0x09ac
 
 #define REG_GPU_APB_RF_GPU_NIC400_QOS                0x0010
+
+#define REG_GPU_APB_RF_ASYBC_BRIDGE_TOP_W                0x0024
 #endif /* __GPU_QOGIRN6L_REGS_H */
