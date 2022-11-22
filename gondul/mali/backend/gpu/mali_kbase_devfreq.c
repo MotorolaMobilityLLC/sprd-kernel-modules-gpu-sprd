@@ -695,6 +695,7 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 	dp->get_cur_freq = kbase_devfreq_cur_freq;
 	dp->exit = kbase_devfreq_exit;
 
+	kbase_platform_limit_max_freq(kbdev->dev);
 	if (kbase_devfreq_init_freq_table(kbdev, dp))
 		return -EFAULT;
 
@@ -747,7 +748,6 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 		goto opp_notifier_failed;
 	}
 
-	kbase_platform_limit_max_freq(kbdev->dev);
 #if IS_ENABLED(CONFIG_UNISOC_GPU_COOLING_DEVICE)
 	err = create_gpu_cooling_device(kbdev->devfreq, &kbdev->pm.debug_core_mask_all);
 	if (err) {
