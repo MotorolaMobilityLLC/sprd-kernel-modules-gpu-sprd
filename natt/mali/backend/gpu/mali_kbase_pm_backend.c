@@ -76,7 +76,8 @@ int kbase_pm_runtime_init(struct kbase_device *kbdev)
 					callbacks->power_runtime_gpu_idle_callback;
 		kbdev->pm.backend.callback_power_runtime_gpu_active =
 					callbacks->power_runtime_gpu_active_callback;
-
+		kbdev->pm.backend.callback_power_off_second_part =
+					callbacks->power_off_second_part_callback;
 		if (callbacks->power_runtime_init_callback)
 			return callbacks->power_runtime_init_callback(kbdev);
 		else
@@ -133,6 +134,9 @@ void kbase_pm_register_access_disable(struct kbase_device *kbdev)
 
 	if (callbacks)
 		callbacks->power_off_callback(kbdev);
+
+	if (callbacks->power_off_second_part_callback)
+		callbacks->power_off_second_part_callback(kbdev);
 }
 
 int kbase_hwaccess_pm_init(struct kbase_device *kbdev)
@@ -389,6 +393,9 @@ static void kbase_pm_gpu_poweroff_wait_wq(struct work_struct *data)
 	spin_unlock_irqrestore(&kbdev->hwaccess_lock, flags);
 
 	kbase_pm_unlock(kbdev);
+
+	if (backend->callback_power_off_second_part)
+		backend->callback_power_off_second_part(kbdev);
 
 	wake_up(&kbdev->pm.backend.poweroff_wait);
 }
