@@ -112,6 +112,11 @@ struct gpu_dvfs_context {
 	struct gpu_reg_info top_force_reg;
 	struct gpu_reg_info gpu_top_state_reg;
 
+	struct gpu_reg_info gpu_core0_state_reg;
+	struct gpu_reg_info gpu_core1_state_reg;
+	struct gpu_reg_info cur_st_st0_reg;
+	struct gpu_reg_info cur_st_st1_reg;
+
 	struct gpu_reg_info gpll_cfg_force_off_reg;
 	struct gpu_reg_info gpll_cfg_force_on_reg;
 	struct gpu_reg_info dcdc_gpu_voltage0;
@@ -268,6 +273,18 @@ static inline void mali_freq_init(struct device *dev)
 
 	gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr = syscon_regmap_lookup_by_phandle_args(dev->of_node,"gpu_top_state", 2, (uint32_t *)gpu_dvfs_ctx.gpu_top_state_reg.args);
 	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr);
+
+	gpu_dvfs_ctx.gpu_core0_state_reg.regmap_ptr = syscon_regmap_lookup_by_phandle_args(dev->of_node,"gpu_core0_state", 2, (uint32_t *)gpu_dvfs_ctx.gpu_core0_state_reg.args);
+	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.gpu_core0_state_reg.regmap_ptr);
+
+	gpu_dvfs_ctx.gpu_core1_state_reg.regmap_ptr = syscon_regmap_lookup_by_phandle_args(dev->of_node,"gpu_core1_state", 2, (uint32_t *)gpu_dvfs_ctx.gpu_core1_state_reg.args);
+	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.gpu_core1_state_reg.regmap_ptr);
+
+	gpu_dvfs_ctx.cur_st_st0_reg.regmap_ptr = syscon_regmap_lookup_by_phandle_args(dev->of_node,"cur_st_st0", 2, (uint32_t *)gpu_dvfs_ctx.cur_st_st0_reg.args);
+	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.cur_st_st0_reg.regmap_ptr);
+
+	gpu_dvfs_ctx.cur_st_st1_reg.regmap_ptr = syscon_regmap_lookup_by_phandle_args(dev->of_node,"cur_st_st1", 2, (uint32_t *)gpu_dvfs_ctx.cur_st_st1_reg.args);
+	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.cur_st_st1_reg.regmap_ptr);
 
 	gpu_dvfs_ctx.gpll_cfg_force_off_reg.regmap_ptr = syscon_regmap_lookup_by_phandle_args(dev->of_node,"gpll_cfg_frc_off", 2, (uint32_t *)gpu_dvfs_ctx.gpll_cfg_force_off_reg.args);
 	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.gpll_cfg_force_off_reg.regmap_ptr);
@@ -898,13 +915,15 @@ static void pm_callback_power_runtime_term(struct kbase_device *kbdev)
 }
 #endif/*CONFIG_PM_RUNTIME*/
 
+static void pm_callback_shader_polling(struct kbase_device *kbdev);
+
 struct kbase_pm_callback_conf pm_qogirn6l_callbacks = {
 	.power_off_callback = pm_callback_power_off,
 	.power_on_callback = pm_callback_power_on,
 	.power_suspend_callback = pm_callback_power_suspend,
 	.power_resume_callback = pm_callback_power_resume,
 	.power_off_second_part_callback = pm_callback_second_part,
-	.power_shader_polling_callback = NULL,
+	.power_shader_polling_callback = pm_callback_shader_polling,
 #ifdef KBASE_PM_RUNTIME
 	.power_runtime_init_callback = pm_callback_power_runtime_init,
 	.power_runtime_term_callback = pm_callback_power_runtime_term,
@@ -1106,4 +1125,81 @@ void kbase_platform_set_boost(struct kbase_device *kbdev, struct kbase_context *
 	boost_pid = kctx->pid;
 }
 #endif
+
+
+u32 core0_pwr = 0;
+u32 core1_pwr = 0;
+u32 cur_st_st0_pwr = 0;
+u32 cur_st_st1_pwr = 0;
+u32 core0_pwr_mask = MOVE_BIT_LEFT(0x1f,24);
+u32 core1_pwr_mask = MOVE_BIT_LEFT(0x1f,0);
+u32 core0_pwr_wakeup = MOVE_BIT_LEFT(8,24);
+u32 core1_pwr_wakeup = MOVE_BIT_LEFT(8,0);
+
+u32 cur_st_mask = MOVE_BIT_LEFT(0xf0,0);
+u32 st_pwr_mode = MOVE_BIT_LEFT(7,4);
+
+
+bool is_shader_ready(void)
+{
+    //check if the gpu_core_state ready or not
+    regmap_read(gpu_dvfs_ctx.gpu_core0_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_core0_state_reg.args[0], &core0_pwr);
+    core0_pwr = core0_pwr & core0_pwr_mask ;
+    regmap_read(gpu_dvfs_ctx.gpu_core1_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_core1_state_reg.args[0], &core1_pwr);
+    core1_pwr = core1_pwr & core1_pwr_mask ;
+    //read the st reg state
+    regmap_read(gpu_dvfs_ctx.cur_st_st0_reg.regmap_ptr, gpu_dvfs_ctx.cur_st_st0_reg.args[0], &cur_st_st0_pwr);
+    cur_st_st0_pwr = cur_st_st0_pwr & cur_st_mask ;
+    regmap_read(gpu_dvfs_ctx.cur_st_st1_reg.regmap_ptr, gpu_dvfs_ctx.cur_st_st1_reg.args[0], &cur_st_st1_pwr);
+    cur_st_st1_pwr = cur_st_st1_pwr & cur_st_mask ;
+
+    //printk(KERN_INFO "SPRDDEBUG gpu core power enter is_shader_ready(). After regmap_read once.");
+
+    return  ( core0_pwr == core0_pwr_wakeup )&&( core1_pwr == core1_pwr_wakeup )
+		&&(cur_st_st0_pwr == st_pwr_mode)&&(cur_st_st1_pwr == st_pwr_mode);
+}
+
+//to check if the gpu core state is ready or not
+void mali_core_state_check(void)
+{
+    const int pass_retry = 5;//the time of consecutive passes
+    int pass_counter = 0;
+    int counter = 0;//count the time of check
+
+    //printk(KERN_ERR "SPRDDEBUG Original state : gpu_core0_pwr = 0x%x,gpu_core1_pwr = 0x%x,cur_st_st0_pwr = 0x%x,cur_st_st1_pwr = 0x%x, counter = %d",
+    //       core0_pwr,core1_pwr,cur_st_st0_pwr,cur_st_st1_pwr, counter);
+    while(1)
+    {
+        udelay(5);
+	//printk(KERN_ERR "SPRDDEBUG Polling state : gpu_core0_pwr = 0x%x,gpu_core1_pwr = 0x%x,cur_st_st0_pwr = 0x%x,cur_st_st1_pwr = 0x%x, counter = %d",
+	//	core0_pwr,core1_pwr,cur_st_st0_pwr,cur_st_st1_pwr, counter);
+        if(is_shader_ready()){
+            pass_counter=0;
+            while(pass_counter < pass_retry){
+                if(!is_shader_ready()){
+                        break;
+                }else pass_counter++;
+            }
+            if(pass_counter>=pass_retry){
+                printk(KERN_INFO "SPRDDEBUG gpu core power on polling SUCCESS !");
+                //printk(KERN_ERR "SPRDDEBUG Final state : gpu_core0_pwr = 0x%x,gpu_core1_pwr = 0x%x,cur_st_st0_pwr = 0x%x,cur_st_st1_pwr = 0x%x, counter = %d",
+			//core0_pwr,core1_pwr,cur_st_st0_pwr,cur_st_st1_pwr, counter);
+                break;
+            }
+        }
+        if(counter++ > 2000 && !is_shader_ready() ){
+            printk(KERN_ERR "SPRDDEBUG gpu core power on TIMEOUT !");
+		printk(KERN_ERR "SPRDDEBUG TIMEOUT state : gpu_core0_pwr = 0x%x,gpu_core1_pwr = 0x%x,cur_st_st0_pwr = 0x%x,cur_st_st1_pwr = 0x%x, counter = %d",
+			core0_pwr,core1_pwr,cur_st_st0_pwr,cur_st_st1_pwr, counter);
+            WARN_ON(1);
+            break;
+        }
+    }
+}
+
+static void pm_callback_shader_polling(struct kbase_device *kbdev)
+{
+	CSTD_UNUSED(kbdev);
+	mali_core_state_check();
+}
 
