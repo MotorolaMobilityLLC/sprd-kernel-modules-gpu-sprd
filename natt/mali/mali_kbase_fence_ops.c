@@ -23,6 +23,7 @@
 #include <linux/list.h>
 #include <mali_kbase_fence_defs.h>
 #include <mali_kbase.h>
+#include <mali_kbase_fence.h>
 
 static const char *
 #if (KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE)
@@ -41,6 +42,9 @@ kbase_fence_get_timeline_name(struct fence *fence)
 kbase_fence_get_timeline_name(struct dma_fence *fence)
 #endif
 {
+	struct mali_fence *mali_fence = to_mali_fence(fence);
+	if (mali_fence)
+		return mali_fence->name;
 	return kbase_timeline_name;
 }
 

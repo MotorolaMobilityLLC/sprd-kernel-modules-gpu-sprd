@@ -385,6 +385,10 @@ typedef __u32 base_jd_core_req;
 /* Requires value writeback */
 #define BASE_JD_REQ_V  ((base_jd_core_req)1 << 4)
 
+#define BASE_JD_REQ_HARD_JOB \
+	(BASE_JD_REQ_FS | BASE_JD_REQ_CS | \
+	 BASE_JD_REQ_T | BASE_JD_REQ_CF | BASE_JD_REQ_V)
+
 /* SW-only requirements - the HW does not expose these as part of the job slot
  * capabilities
  */

@@ -382,6 +382,8 @@ jsctx_tree_add(struct kbase_context *kctx, struct kbase_jd_atom *katom)
 	struct rb_node **new = &(queue->runnable_tree.rb_node), *parent = NULL;
 
 	lockdep_assert_held(&kctx->kbdev->hwaccess_lock);
+	// add katom add runnable tree time
+	katom->job_process_timestamp.job_add_time = ktime_get();
 
 	dev_dbg(kbdev->dev, "Adding atom %pK to runnable tree of kctx %pK (s:%d)\n",
 		(void *)katom, (void *)kctx, js);
@@ -1533,7 +1535,7 @@ bool kbasep_js_add_job(struct kbase_context *kctx,
 	mutex_lock(&js_devdata->queue_mutex);
 	mutex_lock(&js_kctx_info->ctx.jsctx_mutex);
 
-	atom->run_status = kRunOn_JsAddJob;
+	atom->run_status |= KRun_JsAddJob;
 	if (atom->core_req & BASE_JD_REQ_START_RENDERPASS)
 		err = js_add_start_rp(atom);
 	else if (atom->core_req & BASE_JD_REQ_END_RENDERPASS)
@@ -3474,8 +3476,8 @@ struct kbase_jd_atom *kbase_js_complete_atom(struct kbase_jd_atom *katom,
 
 	lockdep_assert_held(&kctx->kbdev->hwaccess_lock);
 
-	katom->run_status |= kRunOn_JsCompleteAtom;
-	katom->js_complete_time = ktime_get();
+	katom->run_status |= KRun_JsCompleteAtom;
+	katom->job_process_timestamp.js_complete_time = ktime_get();
 	if ((katom->core_req & BASE_JD_REQ_END_RENDERPASS) &&
 		!js_end_rp_is_complete(katom)) {
 		katom->event_code = BASE_JD_EVENT_END_RP_DONE;

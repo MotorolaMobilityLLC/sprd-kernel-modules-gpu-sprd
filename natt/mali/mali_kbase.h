@@ -106,8 +106,8 @@
 #define KBASE_MEM_GROUP_SINK BASE_MEM_GROUP_DEFAULT
 
 /* SPRD:The error types of GPU are counted and displayed on the device node.*/
-#define FAULT_KEYWORD_NUM 13
-//#define SPRD_SUPPORT_FAULT_KEYWORD 1
+#define FAULT_KEYWORD_NUM 16
+#define SPRD_SUPPORT_FAULT_KEYWORD 1
 
 #ifdef SPRD_SUPPORT_FAULT_KEYWORD
 #define DONE 0
@@ -123,6 +123,9 @@
 #define GPU_BUS_FAULT 10
 #define GPU_MMU_BUS_ERROR 11
 #define TRANSLATION_TABLE_BUS_FAULT 12
+#define FENCE_SHOW_INFO 13
+#define FENCE_CANCELLED 14
+#define ATOM_DUMPED 15
 #endif
 
 /*
@@ -254,6 +257,15 @@ void kbase_jd_exit(struct kbase_context *kctx);
 int kbase_jd_submit(struct kbase_context *kctx,
 		void __user *user_addr, u32 nr_atoms, u32 stride,
 		bool uk6_atom);
+
+/*
+ * dump/reset atom information
+ */
+void kbase_dump_pm_status(struct kbase_context* kctx);
+void kbase_dump_job_chain_list(struct kbase_context* kctx);
+int kbase_dump_atoms(struct kbase_context *kctx);
+void kbase_atom_dump_execption(struct kbase_jd_atom *katom, bool reset);
+void kbase_atom_dump_reset(struct kbase_jd_atom *katom);
 
 /**
  * kbase_jd_done_worker - Handle a job completion
@@ -401,18 +413,15 @@ static inline void kbase_free_user_buffer(
 *      by seconds.
 *
 *      return the seconds of rigth_now .
-
-static inline time_t seconds_right_now(void)
+*/
+static inline ktime_t seconds_right_now(void)
 {
-	time_t rigth_now;
+	ktime_t rigth_now;
 
-	struct timespec64 now;
-	ktime_get_real_ts64(&now);
-	rigth_now = 1000 * now.tv_sec;
+	rigth_now = ktime_get();
 
 	return rigth_now ;
 }
-*/
 
 /**
  * kbase_mem_copy_from_extres() - Copy from external resources.

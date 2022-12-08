@@ -949,7 +949,7 @@ static int kbase_pm_mcu_update_state(struct kbase_device *kbdev)
 }
 #endif
 
-static const char *kbase_l2_core_state_to_string(enum kbase_l2_core_state state)
+const char *kbase_l2_core_state_to_string(enum kbase_l2_core_state state)
 {
 	const char *const strings[] = {
 #define KBASEP_L2_STATE(n) #n,
@@ -1366,7 +1366,7 @@ static void shader_poweroff_timer_queue_cancel(struct kbase_device *kbdev)
 }
 
 #if !MALI_USE_CSF
-static const char *kbase_shader_core_state_to_string(
+const char *kbase_shader_core_state_to_string(
 	enum kbase_shader_core_state state)
 {
 	const char *const strings[] = {

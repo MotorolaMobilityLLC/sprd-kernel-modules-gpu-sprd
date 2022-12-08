@@ -357,46 +357,68 @@ struct kbase_ext_res {
  * enum kbase_jd_atom_run_status
  **/
 enum kbase_jd_atom_run_status {
-	kRunOn_Invalid = 0,
-	kRunOn_JdSubmit = 1 << 0,
-	kRunOn_ProcessSoftJob = 1 << 1,
-	kRunOn_JdDoneNolock = 1 << 2,
-	kRunOn_PostExternalResources = 1 << 3,
+	KRun_Invalid = 0,
+	KRun_JdSubmit = 1 << 0,
+	KRun_PrepareSoftJob = 1 << 1,
+	KRun_ProcessSoftJob = 1 << 2,
+	KRun_FinishSoftJob = 1 << 3,
 
-	kRunOn_DmaFenceCb = 1 << 4,
-	kRunOn_EventPost = 1 << 5,
-	kRunOn_SoftEventWaitCallback = 1 << 6,
-	kRunOn_FinishSoftJob = 1 << 7,
+	KRun_DmaFenceCb = 1 << 4,
+	KRun_EventPost = 1 << 5,
+	KRun_SoftEventWaitCallback = 1 << 6,
+	KRun_PostExternalResources = 1 << 7,
 
-	kRunOn_JdDoneWorker = 1 << 8,
-	kRunOn_DmaFenceWork = 1 << 9,
-	kRunOn_SyncFenceWaitWorker = 1 << 10,
-	kRunOn_SoftEventCompleteJob = 1 << 11,
-	kRunOn_WorkDone = kRunOn_JdDoneWorker | kRunOn_DmaFenceWork |
-					  kRunOn_SyncFenceWaitWorker | kRunOn_SoftEventCompleteJob,
+	KRun_JdDoneWorker = 1 << 8,
+	KRun_DmaFenceWork = 1 << 9,
+	KRun_SyncFenceWaitWorker = 1 << 10,
+	KRun_SoftEventCompleteJob = 1 << 11,
+	KRun_WorkDone = KRun_JdDoneWorker | KRun_DmaFenceWork |
+					  KRun_SyncFenceWaitWorker | KRun_SoftEventCompleteJob,
 
-	kRunOn_SoftJobTimeoutOrEventAndQueueWork = 1 << 12,
-	kRunOn_SyncFenceInWaitAndQueueWork = 1 << 13,
-	kRunOn_DmaFenceQueueWork = 1 << 14,
-	kRunOn_JdDoneAndQueueWork = 1 << 15,
-	kRunOn_UnderQueueWork = kRunOn_SoftJobTimeoutOrEventAndQueueWork | kRunOn_SyncFenceInWaitAndQueueWork |
-							kRunOn_DmaFenceQueueWork | kRunOn_JdDoneAndQueueWork,
+	KRun_SoftJobTimeoutOrEventAndQueueWork = 1 << 12,
+	KRun_SyncFenceInWaitAndQueueWork = 1 << 13,
+	KRun_DmaFenceQueueWork = 1 << 14,
+	KRun_JdDoneAndQueueWork = 1 << 15,
+	KRun_UnderQueueWork = KRun_SoftJobTimeoutOrEventAndQueueWork | KRun_SyncFenceInWaitAndQueueWork |
+							KRun_DmaFenceQueueWork | KRun_JdDoneAndQueueWork,
 
-	kRunOn_JdDepSet = 1 << 16,
-	kRunOn_PrepareSoftJob = 1 << 17,
-	kRunOn_JsAddJob = 1 << 18,
-	kRunOn_ResolveDep = 1 << 19,
-	kRunOn_BackendRunAtom = 1 << 20,
+	KRun_JdDepSet = 1 << 16,
+	KRun_JdDoneNolock = 1 << 17,
+	KRun_JsAddJob = 1 << 18,
+	KRun_ResolveDep = 1 << 19,
+	KRun_BackendRunAtom = 1 << 20,
+	kRun_FenceOutTrigger = 1 << 21,
 
-	kRunOn_JsCompleteAtom = 1 << 21,
-	kRunOn_EventWakeup = 1 << 22
+	KRun_JobHWSubmit = 1 << 22,
+	KRun_GpuCompleteHW = 1 << 23,
+
+	KRun_JsCompleteAtom = 1 << 24,
+	KRun_EventWakeup = 1 << 25,
+	kRun_EventProcess = 1 << 26,
+	KRun_AddSoftJobWaitQueue = 1 << 27,
+	KRun_FenceWaitTimeOut = 1 << 28,
+	KRun_FenceInAddCallbackFail = 1 << 29,
+	KRun_FenceInAddCallbackSuccess = 1 << 30,
 };
 
+
 struct kbase_work_time_spent {
-	int execute_num;
 	ktime_t queue_work_time;
 	ktime_t done_work_time;
-	ktime_t work_time_spent;
+};
+
+struct kbase_job_process_timestamp {
+	ktime_t job_submit_time;
+	ktime_t post_event_time;
+	ktime_t wake_up_time;
+	ktime_t js_complete_time;
+	ktime_t hw_job_start_time;
+	ktime_t hw_job_end_time;
+	ktime_t process_event_time;
+	ktime_t fence_trigger_signal_time;
+	ktime_t job_nolock_time;
+	ktime_t job_add_time;
+	ktime_t job_pull_time;
 };
 
 /**
@@ -692,17 +714,16 @@ struct kbase_jd_atom {
 
 	base_atom_id atom_number;
 
-	ktime_t job_submit_time;
-	ktime_t post_event_time;
-	ktime_t wake_up_time;
-	ktime_t js_complete_time;
-
+	bool early_brk;
+	u32 completion_code;
+	int user_dep[2];
+	bool fence_info_showed;
+	enum kbase_jd_atom_run_status run_status;
+	struct kbase_job_process_timestamp job_process_timestamp;
 	struct kbase_work_time_spent jd_done_work;
 	struct kbase_work_time_spent dma_fence_work;
 	struct kbase_work_time_spent sync_wait_fence_work;
 	struct kbase_work_time_spent soft_event_complete_work;
-
-	enum kbase_jd_atom_run_status run_status;
 };
 
 static inline bool kbase_jd_katom_is_protected(

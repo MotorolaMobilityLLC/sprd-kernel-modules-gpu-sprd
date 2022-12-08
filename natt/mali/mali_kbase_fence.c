@@ -41,12 +41,15 @@ kbase_fence_out_new(struct kbase_jd_atom *katom)
 #else
 	struct dma_fence *fence;
 #endif
+	struct mali_fence *mali_fence;
 
 	WARN_ON(katom->dma_fence.fence);
 
-	fence = kzalloc(sizeof(*fence), GFP_KERNEL);
-	if (!fence)
+	mali_fence = kzalloc(sizeof(*mali_fence), GFP_KERNEL);
+	if (!mali_fence)
 		return NULL;
+
+	fence = &mali_fence->base;
 
 	dma_fence_init(fence,
 		       &kbase_fence_ops,
@@ -55,6 +58,9 @@ kbase_fence_out_new(struct kbase_jd_atom *katom)
 		       atomic_inc_return(&katom->dma_fence.seqno));
 
 	katom->dma_fence.fence = fence;
+
+	snprintf(mali_fence->name,sizeof(mali_fence->name), "M-%d-%dP", katom->kctx->tgid, katom->kctx->pid);
+	mali_fence->kctx = katom->kctx;
 
 	return fence;
 }

@@ -1448,6 +1448,18 @@ struct kbase_sub_alloc {
 	DECLARE_BITMAP(sub_pages, SZ_2M / SZ_4K);
 };
 
+struct job_chain_record {
+	ktime_t time;
+	int nr_atoms;
+	u32 flush_id;
+	int atom_number_array[256];
+};
+
+struct poll_status {
+	ktime_t poll_time_newest;
+	bool event_pending;
+};
+
 /**
  * struct kbase_context - Kernel base context
  *
@@ -1853,6 +1865,11 @@ struct kbase_context {
 #if !MALI_USE_CSF
 	void *platform_data;
 #endif
+
+	unsigned int ioctl;
+	atomic_t jd_submit_num;
+	struct job_chain_record jd_submit_list[50];
+	struct poll_status poll_status;
 };
 
 #ifdef CONFIG_MALI_CINSTR_GWT
@@ -1945,5 +1962,18 @@ static inline bool kbase_device_is_cpu_coherent(struct kbase_device *kbdev)
 #define KBASE_CLEAN_CACHE_MAX_LOOPS     100000
 /* Maximum number of loops polling the GPU for an AS command to complete before we assume the GPU has hung */
 #define KBASE_AS_INACTIVE_MAX_LOOPS     100000
+
+
+struct mali_fence {
+#if defined(CONFIG_SYNC_FILE)
+#if (KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE)
+	struct fence base;
+#else
+	struct dma_fence base;
+#endif
+#endif
+	char name[36];
+	struct kbase_context *kctx;
+};
 
 #endif				/* _KBASE_DEFS_H_ */

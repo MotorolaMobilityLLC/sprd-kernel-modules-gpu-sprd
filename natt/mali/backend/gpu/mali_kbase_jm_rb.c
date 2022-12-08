@@ -39,7 +39,7 @@
 
 #ifdef SPRD_SUPPORT_FAULT_KEYWORD
 #include <string.h>
-extern time_t time[FAULT_KEYWORD_NUM];
+extern ktime_t time[FAULT_KEYWORD_NUM];
 #endif
 
 extern void kbase_trace_gpu_work_period(struct kbase_device *kbdev, struct kbase_jd_atom *katom, ktime_t end_timestamp);
@@ -1053,7 +1053,7 @@ void kbase_backend_run_atom(struct kbase_device *kbdev,
 	lockdep_assert_held(&kbdev->hwaccess_lock);
 	dev_dbg(kbdev->dev, "Backend running atom %pK\n", (void *)katom);
 
-	katom->run_status |= kRunOn_BackendRunAtom;
+	katom->run_status |= KRun_BackendRunAtom;
 	kbase_gpu_enqueue_atom(kbdev, katom);
 	kbase_backend_slot_update(kbdev);
 }
@@ -1180,13 +1180,15 @@ void kbase_gpu_complete_hw(struct kbase_device *kbdev, int js,
 	struct kbase_jd_atom *katom = kbase_gpu_inspect(kbdev, js, 0);
 	struct kbase_context *kctx = katom->kctx;
 #ifdef SPRD_SUPPORT_FAULT_KEYWORD
-	time_t now;
+	ktime_t now;
 #endif
-
 	dev_dbg(kbdev->dev,
 		"Atom %pK completed on hw with code 0x%x and job_tail 0x%llx (s:%d)\n",
 		(void *)katom, completion_code, job_tail, js);
 
+	katom->run_status |= KRun_GpuCompleteHW;
+	katom->job_process_timestamp.hw_job_end_time = *end_timestamp;
+	katom->completion_code = completion_code;
 	if ( completion_code == BASE_JD_EVENT_DONE)
 		kbase_trace_gpu_work_period(kbdev, katom, *end_timestamp);
 

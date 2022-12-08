@@ -794,6 +794,10 @@ struct kbase_ioctl_tlstream_stats {
  *         _IOWR(KBASE_IOCTL_EXTRA_TYPE, 0, struct my_ioctl_args)
  */
 
+/* sprd debug dump kernel atoms state
+ */
+#define KBASE_IOCTL_DUMP_ATOMS_STATE \
+	_IO(KBASE_IOCTL_EXTRA_TYPE, 1)
 
 /**********************************
  * Definitions for GPU properties *

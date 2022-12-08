@@ -34,16 +34,25 @@
 #include <mali_kbase_hwaccess_jm.h>
 #include <tl/mali_kbase_tracepoints.h>
 #include <mali_linux_trace.h>
-
+#include <mali_kbase_fence.h>
 #include "mali_kbase_dma_fence.h"
 #include <mali_kbase_cs_experimental.h>
+#include <mali_kbase_sync.h>
 
 #include <mali_kbase_caps.h>
 #include <mali_kbase_config_platform.h>
 
-#define TIMEOUT 100000000
+#define TIMEOUT 1000000000
+#define TIMEOUT_2s 2000000000
+#define TIMEOUT_3s 3000000000
+#define TIMEOUT_4s 4000000000
+#define PROCESS_TIMEOUT(a, b, c) ((b != 0) && (a - b > c))
 
 #define beenthere(kctx, f, a...)  dev_dbg(kctx->kbdev->dev, "%s:" f, __func__, ##a)
+#ifdef SPRD_SUPPORT_FAULT_KEYWORD
+#include <linux/sunrpc/cache.h>
+extern ktime_t time[FAULT_KEYWORD_NUM];
+#endif
 
 /* Return whether katom will run on the GPU or not. Currently only soft jobs and
  * dependency-only atoms do not run on the GPU
@@ -51,6 +60,10 @@
 #define IS_GPU_ATOM(katom) (!((katom->core_req & BASE_JD_REQ_SOFT_JOB) ||  \
 			((katom->core_req & BASE_JD_REQ_ATOM_TYPE) ==    \
 							BASE_JD_REQ_DEP)))
+
+extern const char *kbase_l2_core_state_to_string(enum kbase_l2_core_state state);
+extern const char *kbase_shader_core_state_to_string(enum kbase_shader_core_state state);
+void kbase_atom_fence_judge_timeout(struct kbase_jd_atom *katom);
 
 /*
  * This is the kernel side of the API. Only entry points are:
@@ -188,7 +201,7 @@ static void kbase_jd_post_external_resources(struct kbase_jd_atom *katom)
 	if (katom->extres) {
 		u32 res_no;
 
-		katom->run_status |= kRunOn_PostExternalResources;
+		katom->run_status |= KRun_PostExternalResources;
 		res_no = katom->nr_extres;
 		while (res_no-- > 0) {
 			struct kbase_mem_phy_alloc *alloc = katom->extres[res_no].alloc;
@@ -413,7 +426,7 @@ static inline void jd_resolve_dep(struct list_head *out_list,
 {
 	u8 other_d = !d;
 
-	katom->run_status |= kRunOn_ResolveDep;
+	katom->run_status |= KRun_ResolveDep;
 	while (!list_empty(&katom->dep_head[d])) {
 		struct kbase_jd_atom *dep_atom;
 		struct kbase_jd_atom *other_dep_atom;
@@ -749,7 +762,8 @@ bool jd_done_nolock(struct kbase_jd_atom *katom,
 		}
 	}
 
-	katom->run_status |= kRunOn_JdDoneNolock;
+	katom->run_status |= KRun_JdDoneNolock;
+	katom->job_process_timestamp.job_nolock_time = ktime_get();
 	jd_mark_atom_complete(katom);
 
 	list_add_tail(&katom->jd_item, &completed_jobs);
@@ -953,6 +967,9 @@ static bool jd_submit_atom(struct kbase_context *const kctx,
 	katom->x_post_dep = NULL;
 	katom->will_fail_event_code = BASE_JD_EVENT_NOT_STARTED;
 	katom->softjob_data = NULL;
+	katom->early_brk = false;
+	katom->user_dep[0] = -1;
+	katom->user_dep[1] = -1;
 
 	trace_sysgraph(SGR_ARRIVE, kctx->id, user_atom->atom_number);
 
@@ -1052,9 +1069,10 @@ static bool jd_submit_atom(struct kbase_context *const kctx,
 
 		} else {
 			/* Atom is in progress, add this atom to the list */
-			katom->run_status |= kRunOn_JdDepSet;
+			katom->run_status |= KRun_JdDepSet;
 			list_add_tail(&katom->dep_item[i], &dep_atom->dep_head[i]);
 			kbase_jd_katom_dep_set(&katom->dep[i], dep_atom, dep_atom_type);
+			katom->user_dep[i] = dep_atom_number;
 			queued = 1;
 		}
 	}
@@ -1199,8 +1217,10 @@ static bool jd_submit_atom(struct kbase_context *const kctx,
 			kbasep_map_core_reqs_to_string(katom->core_req));
 #endif
 
-	if (queued && !IS_GPU_ATOM(katom))
+	if (queued && !IS_GPU_ATOM(katom)) {
+		katom->early_brk = true;
 		return false;
+	}
 
 #ifdef CONFIG_MALI_DMA_FENCE
 	if (kbase_fence_dep_count_read(katom) != -1)
@@ -1213,6 +1233,7 @@ static bool jd_submit_atom(struct kbase_context *const kctx,
 			kbase_finish_soft_job(katom);
 			return jd_done_nolock(katom, NULL);
 		}
+		katom->early_brk = true;
 		return false;
 	}
 
@@ -1225,8 +1246,9 @@ static bool jd_submit_atom(struct kbase_context *const kctx,
 
 		need_to_try_schedule_context = kbasep_js_add_job(kctx, katom);
 		/* If job was cancelled then resolve immediately */
-		if (katom->event_code != BASE_JD_EVENT_JOB_CANCELLED)
+		if (katom->event_code != BASE_JD_EVENT_JOB_CANCELLED) {
 			return need_to_try_schedule_context;
+		}
 
 		/* Synchronize with backend reset */
 		spin_lock_irqsave(&kbdev->hwaccess_lock, flags);
@@ -1251,14 +1273,14 @@ int kbase_jd_submit(struct kbase_context *kctx,
 	struct kbase_jd_context *jctx = &kctx->jctx;
 	int err = 0;
 	int i;
-	int atom_number_ = 0;
 	bool need_to_try_schedule_context = false;
 	struct kbase_device *kbdev;
 	u32 latest_flush;
+	struct job_chain_record *jd_record = &(kctx->jd_submit_list[atomic_read(&kctx->jd_submit_num) % 50]);
 
 	bool jd_atom_is_v2 = (stride == sizeof(struct base_jd_atom_v2) ||
 	                      stride == offsetof(struct base_jd_atom_v2, renderpass_id));
-
+	atomic_inc(&kctx->jd_submit_num);
 	/*
 	 * kbase_jd_submit isn't expected to fail and so all errors with the
 	 * jobs are reported by immediately failing them (through event system)
@@ -1288,6 +1310,10 @@ int kbase_jd_submit(struct kbase_context *kctx,
 
 	/* All atoms submitted in this call have the same flush ID */
 	latest_flush = kbase_backend_get_current_flush_id(kbdev);
+
+	memset(jd_record->atom_number_array, 0, 256 * sizeof(int));
+	jd_record->nr_atoms = nr_atoms;
+	jd_record->flush_id = latest_flush;
 
 	for (i = 0; i < nr_atoms; i++) {
 		struct base_jd_atom user_atom;
@@ -1375,60 +1401,14 @@ while (false)
 #undef compiletime_assert_defined
 #endif
 		katom = &jctx->atoms[user_atom.atom_number];
+
+		kbase_atom_dump_reset(katom);
+		katom->run_status |= KRun_JdSubmit;
+		katom->job_process_timestamp.job_submit_time = ktime_get();
 		katom->atom_number = user_atom.atom_number;
-		katom->run_status = kRunOn_Invalid;
-		memset(&katom->job_submit_time, 0, sizeof(ktime_t) * 4);
-		memset(&katom->jd_done_work, 0, sizeof(struct kbase_work_time_spent) * 4);
-		katom->run_status = kRunOn_JdSubmit;
-		katom->job_submit_time = ktime_get();
-		atom_number_ = user_atom.atom_number;
-		while (atom_number_--) {
-			struct kbase_jd_atom *datom;
-			datom = &jctx->atoms[atom_number_];
-			if (datom)
-			{
-				ktime_t current_time = ktime_get();
-				bool multi_print_ = false;
-
-				if (datom->job_submit_time != 0) {
-					if (datom->wake_up_time - datom->job_submit_time > TIMEOUT) {
-						multi_print_ = true;
-						printk("datom = 0x%p, atom_number = %d, event_code = 0x%x, core_req = 0x%x, status = 0x%x, run_status = 0x%x, gpu_rb_state = 0x%x, will_fail_event_code = 0x%x, user_atom.atom_number = %d",
-								datom, datom->atom_number, datom->event_code, datom->core_req, datom->status, datom->run_status, datom->gpu_rb_state, datom->will_fail_event_code, user_atom.atom_number);
-						printk("jd_done_worker(%ldns), dma_fence_work(%ldns), sync_wait_fence_work(%ldns), soft_event_complete_work(%ldns), time_process = %ldns",
-								datom->jd_done_work.work_time_spent, datom->dma_fence_work.work_time_spent,
-								datom->sync_wait_fence_work.work_time_spent, datom->soft_event_complete_work.work_time_spent,
-								datom->wake_up_time - datom->job_submit_time);
-					}
-
-					if (current_time - datom->job_submit_time > TIMEOUT) {
-						if (datom->run_status & kRunOn_EventWakeup) {
-							datom->run_status = kRunOn_Invalid;
-							memset(&datom->job_submit_time, 0, sizeof(ktime_t) * 4);
-							memset(&datom->jd_done_work, 0, sizeof(struct kbase_work_time_spent) * 4);
-							continue;
-						}
-
-						if (!multi_print_)
-							printk("datom = 0x%p, atom_number = %d, event_code = 0x%x, core_req = 0x%x, status = 0x%x, run_status = 0x%x, gpu_rb_state = 0x%x, will_fail_event_code = 0x%x, user_atom.atom_number = %d",
-									datom, datom->atom_number, datom->event_code, datom->core_req, datom->status, datom->run_status, datom->gpu_rb_state, datom->will_fail_event_code, user_atom.atom_number);
-
-						if ((datom->run_status & kRunOn_UnderQueueWork) &&
-							((datom->run_status & kRunOn_WorkDone) != kRunOn_WorkDone)) {
-							printk("under queue work: job_submit_time = %ldns, jd_done_worker(%ldns, %d(num)), dma_fence_work(%ldns, %d(num)), sync_wait_fence_work(%ldns, %d(num)), soft_event_complete_work(%ldns, %d(num)), current_time(%ldns)",
-									datom->job_submit_time, datom->jd_done_work.queue_work_time, datom->jd_done_work.execute_num, datom->dma_fence_work.queue_work_time, datom->dma_fence_work.execute_num,
-									datom->sync_wait_fence_work.queue_work_time, datom->sync_wait_fence_work.execute_num, datom->soft_event_complete_work.queue_work_time, datom->soft_event_complete_work.execute_num, current_time);
-						} else {
-							if (!multi_print_)
-								printk("jd_done_worker(%ldns), dma_fence_work(%ldns), sync_wait_fence_work(%ldns), soft_event_complete_work(%ldns), time_process = %ldns",
-									datom->jd_done_work.work_time_spent, datom->dma_fence_work.work_time_spent,
-									datom->sync_wait_fence_work.work_time_spent, datom->soft_event_complete_work.work_time_spent,
-									datom->wake_up_time - datom->job_submit_time);
-						}
-					}
-				}
-			}
-		}
+		jd_record->atom_number_array[i] = user_atom.atom_number;
+		if (i == 0)
+			jd_record->time = katom->job_process_timestamp.job_submit_time;
 
 		/* Record the flush ID for the cache flush optimisation */
 		katom->flush_id = latest_flush;
@@ -1470,6 +1450,14 @@ while (false)
 		mutex_unlock(&jctx->lock);
 	}
 
+	for (i = 0; i < 256; i++) {
+		struct kbase_jd_atom *datom;
+		datom = &jctx->atoms[i];
+		if (datom->job_process_timestamp.job_submit_time != 0) {
+			kbase_atom_fence_judge_timeout(datom);
+		}
+	}
+
 	if (need_to_try_schedule_context)
 		kbase_js_sched_all(kbdev);
 
@@ -1477,6 +1465,308 @@ while (false)
 }
 
 KBASE_EXPORT_TEST_API(kbase_jd_submit);
+
+void kbase_dump_pm_status(struct kbase_context* kctx)
+{
+	struct kbase_device *kbdev = kctx->kbdev;
+	struct kbasep_js_device_data *js_devdata =  &kbdev->js_data;
+	struct kbase_pm_backend_data *backend = &kctx->kbdev->pm.backend;
+
+	printk("GPU Kctx State:kctx{%px}, {pid:%d tgid:%d} refcount{%d},flags{0x%x},pulled_all_slots{%d},"
+			"as_nr{%d},age_count{%d},slots_pullable{0x%x},event_count{%d},event_closed{%d},poll_status:{time{%ld.%ldms}, event_pending{%d}},submit_allowed{0x%x},priority{%d}\n",
+			kctx, kctx->pid, kctx->tgid, atomic_read(&kctx->refcount), atomic_read(&kctx->flags), atomic_read(&kctx->atoms_pulled_all_slots),
+			kctx->as_nr, kctx->age_count, kctx->slots_pullable, atomic_read(&kctx->event_count), atomic_read(&kctx->event_closed),
+			kctx->poll_status.poll_time_newest / (1000*1000), kctx->poll_status.poll_time_newest % (1000*1000),
+			kctx->poll_status.event_pending, js_devdata->runpool_irq.submit_allowed, kctx->priority);
+
+	printk("GPU Power State:active_count{%d},suspending{%d},gpu_powered{%d},l2_state{%s},shaders_state{%s},"
+			"wait_in_progress{%d},invoke_poweroff_wait{%d},poweron_required{%d}\n",
+			kbdev->pm.active_count, kbdev->pm.suspending, backend->gpu_powered,
+			kbase_l2_core_state_to_string(backend->l2_state), kbase_shader_core_state_to_string(backend->shaders_state),
+			backend->poweroff_wait_in_progress, backend->invoke_poweroff_wait_wq_when_l2_off, backend->poweron_required);
+}
+
+void kbase_dump_job_chain_list(struct kbase_context* kctx)
+{
+	int i, j, t = 0;
+	for (i = 0; i < min(50, atomic_read(&kctx->jd_submit_num)); i++) {
+		struct job_chain_record *jcr = &kctx->jd_submit_list[i];
+		char nums_list[4 * 256 + 2];
+		for (j = 0; j < jcr->nr_atoms; j++) {
+			if (j == jcr->nr_atoms - 1)
+				t += sprintf(nums_list + t,"%d", jcr->atom_number_array[j]);
+			else
+				t += sprintf(nums_list + t,"%d-", jcr->atom_number_array[j]);
+		}
+		printk("job_chain_list:i{%d},job_submit_time{%ld.%ldms},flush_id{0x%x},nr_atoms{%d},atom_list{%s}",
+				i, jcr->time / (1000 *1000), jcr->time % (1000 *1000), jcr->flush_id, jcr->nr_atoms, nums_list);
+		t = 0;
+	}
+}
+
+int kbase_dump_atoms(struct kbase_context* kctx)
+{
+	struct kbase_jd_atom *atoms;
+	int i = 0;
+	ktime_t current_time = ktime_get();
+	atoms = kctx->jctx.atoms;
+#ifdef SPRD_SUPPORT_FAULT_KEYWORD
+	time[ATOM_DUMPED] = current_time;
+#endif
+	printk("------------------------Dump atoms info---------------------");
+	kbase_dump_job_chain_list(kctx);
+	kbase_dump_pm_status(kctx);
+	for (i = 0; i != BASE_JD_ATOM_COUNT; ++i) {
+		struct kbase_jd_atom *atom = &atoms[i];
+		if (atom && (atom->job_process_timestamp.job_submit_time != 0))
+			kbase_atom_dump_execption(atom, false);
+	}
+	return 0;
+}
+
+void kbase_atom_fence_judge_timeout(struct kbase_jd_atom *katom)
+{
+	int i = 0, err = 0;
+	struct kbase_jd_atom *atoms;
+	ktime_t current_time = ktime_get();
+	struct kbase_context* kctx = katom->kctx;
+#if (KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE)
+	struct fence *fence;
+#else
+	struct dma_fence *fence;
+#endif
+	atoms = katom->kctx->jctx.atoms;
+
+	if (katom->core_req & BASE_JD_REQ_SOFT_JOB_TYPE)
+		fence = dma_fence_get(katom->dma_fence.fence_in);
+	else
+		fence = NULL;
+
+	if (fence) {
+		if (katom->fence_info_showed == false && !(katom->run_status & KRun_EventPost)
+			&& PROCESS_TIMEOUT(current_time, katom->job_process_timestamp.job_submit_time, TIMEOUT)) {
+#ifdef SPRD_SUPPORT_FAULT_KEYWORD
+			time[FENCE_SHOW_INFO] = current_time;
+#endif
+			katom->fence_info_showed = true;
+			printk("software job fence wait info-1s katom{0x%px atom_number{%d} flush_id{0x%x}},"
+					"core_req{0x%x},status{0x%x},run_status{0x%x},gpu_rb_state{0x%x} {pid:%d tgid:%d, kctx:%px}\n",
+					katom, katom->atom_number, katom->flush_id, katom->core_req, katom->status,
+					katom->run_status, katom->gpu_rb_state, kctx->pid, kctx->tgid, kctx);
+			printk("software job fence wait infos-1s{ fence_status(0x%px  Drv:%s TL:%s Context:%llu Seqo:%llu err:%d, flags:%lu, timestamp:%lldns) signal_time:%ldms , job waittime:%ldms}",
+					fence, fence->ops->get_driver_name(fence), fence->ops->get_timeline_name(fence),
+					fence->context, fence->seqno, err, fence->flags, fence->timestamp,
+					katom->job_process_timestamp.fence_trigger_signal_time / (1000*1000),
+					(current_time - katom->job_process_timestamp.job_submit_time) / (1000*1000));
+		} else if (fence && !(katom->run_status & KRun_EventPost)
+					&& PROCESS_TIMEOUT(current_time, katom->job_process_timestamp.job_submit_time, TIMEOUT_4s)) {
+			printk("software job fence wait infos-4s {pid:%d tgid:%d, kctx:%px}", kctx->pid, kctx->tgid, kctx);
+#ifdef SPRD_SUPPORT_FAULT_KEYWORD
+			time[FENCE_TIMEOUT] = current_time;
+#endif
+			kbase_dump_atoms(kctx);
+			if (is_mali_fence(fence) && to_mali_fence(fence)) {
+				struct mali_fence *mali_fence = to_mali_fence(fence);
+				printk("software job fence:kctx:%px, fence:%s", mali_fence->kctx, mali_fence->name);
+			}
+		}
+		dma_fence_put(fence);
+	}
+
+	if (((katom->job_process_timestamp.post_event_time == 0) &&
+		PROCESS_TIMEOUT(current_time, katom->job_process_timestamp.job_submit_time, TIMEOUT_2s))
+		|| ((katom->job_process_timestamp.post_event_time != 0) &&
+			PROCESS_TIMEOUT(katom->job_process_timestamp.post_event_time, katom->job_process_timestamp.job_submit_time, TIMEOUT_2s))) {
+		printk("katom{%d} has submitted over 2s", katom->atom_number);
+		for (i = 0; i <= katom->atom_number; i++) {
+			struct kbase_jd_atom *atom = &atoms[i];
+			if (atom && (atom->job_process_timestamp.job_submit_time != 0))
+				kbase_atom_dump_execption(atom, false);
+		}
+	}
+
+}
+
+void kbase_atom_dump_execption(struct kbase_jd_atom *katom, bool reset)
+{
+	ktime_t current_time = ktime_get();
+	int job_type = 0;
+	bool clear = false;
+	bool wakeup = false;
+	bool time_show = false;
+	const struct kbase_context* kctx = katom->kctx;
+	const struct kbase_device* kbdev = kctx->kbdev;
+#if (KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE)
+	struct fence *fence;
+#else
+	struct dma_fence *fence;
+#endif
+
+	if (katom->run_status & KRun_EventPost) {
+		if (PROCESS_TIMEOUT(katom->job_process_timestamp.post_event_time, katom->job_process_timestamp.job_submit_time, TIMEOUT)) {
+			time_show = true;
+			printk("KM_POST_EVENT Timeout state: atom:%d time processing = %ldms", katom->atom_number,
+					(katom->job_process_timestamp.post_event_time - katom->job_process_timestamp.job_submit_time) / (1000*1000));
+		}
+
+		if ((katom->core_req & BASE_JD_REQ_EVENT_ONLY_ON_FAILURE) ||
+			(katom->core_req & BASEP_JD_REQ_EVENT_NEVER)) {
+			clear = true;
+			if (!reset)
+				printk("Suppressing event, this atom:%d will not cause an event to be sent to userspace", katom->atom_number);
+		} else if (katom->core_req & BASE_JD_REQ_EVENT_COALESCE) {
+			if (katom->run_status & KRun_EventWakeup)
+				wakeup = true;
+		} else {
+			// UM needs to be wakeup immediately
+			wakeup = true;
+		}
+	} else {
+		if (PROCESS_TIMEOUT(current_time, katom->job_process_timestamp.job_submit_time, TIMEOUT)) {
+			time_show = true;
+			printk("KM_POST_EVENT Pending state: atom:%d time pending = %ldms",
+					katom->atom_number, (current_time - katom->job_process_timestamp.job_submit_time) / (1000*1000));
+		}
+	}
+
+	if (wakeup) {
+		// process event
+		if (katom->run_status & kRun_EventProcess) {
+			clear = true;
+			if (PROCESS_TIMEOUT(katom->job_process_timestamp.process_event_time, katom->job_process_timestamp.wake_up_time, TIMEOUT)) {
+				time_show = true;
+				printk("KM_PROCESS_EVENT timeout state, atom:%d coalesce:%s time_Process = %ldns",
+						katom->atom_number, katom->core_req & BASE_JD_REQ_EVENT_COALESCE ? "true" : "false",
+						(katom->job_process_timestamp.process_event_time - katom->job_process_timestamp.wake_up_time) / (1000*1000));
+			}
+		} else {
+			if (PROCESS_TIMEOUT(current_time, katom->job_process_timestamp.wake_up_time, TIMEOUT)) {
+				time_show = true;
+				printk("KM_PROCESS_EVENT pending state, atom:%d coalesce:%s time_pending = %ldns",
+						katom->atom_number,  katom->core_req & BASE_JD_REQ_EVENT_COALESCE ? "true" : "false",
+						(current_time - katom->job_process_timestamp.wake_up_time) / (1000*1000));
+			}
+		}
+	}
+
+	if (!time_show && reset)
+		goto dump_done;
+
+	// 0x202 0x203 0x201
+	if (katom->core_req & BASE_JD_REQ_SOFT_JOB)
+		job_type |= 0x1;
+	else if ((katom->core_req & BASE_JD_REQ_HARD_JOB))
+		job_type |= 0x2;
+
+	printk("Dump job infos-1 katom{0x%px atom_number{%d} flush_id{0x%x}},"
+			"core_req{0x%x},status{0x%x},run_status{0x%x},gpu_rb_state{0x%x}\n",
+			katom, katom->atom_number, katom->flush_id,
+			katom->core_req, katom->status, katom->run_status, katom->gpu_rb_state);
+
+	printk("Dump job infos-2 kctx_pulled_all_slots{%d},"
+			"atom_flags{0x%x},event_code{0x%x},will_fail_event_code{0x%x},"
+			"blocked{%d},priority{%d},slot_nr{%d},early_brk{%d},{pid:%d tgid:%d power_pend:%d}\n",
+			atomic_read(&kctx->atoms_pulled_all_slots),
+			katom->atom_flags, katom->event_code, katom->will_fail_event_code,
+			atomic_read(&katom->blocked), katom->sched_priority, katom->slot_nr, katom->early_brk,
+			kctx->pid, kctx->tgid, kbdev->poweroff_pending ? 0 : 1);
+
+	printk("Dump job infos-3 usr_dep[0]{%d},usr_dep[1]{%d},pre_dep{%d},x_pre_dep{%d},"
+			"post_dep{%d},x_post_dep{%d},dep_katom[0]{%d},dep_katom[1]{%d}",
+			katom->user_dep[0], katom->user_dep[1],
+			katom->pre_dep? katom->pre_dep->atom_number : -1, katom->x_pre_dep? katom->x_pre_dep->atom_number : -1,
+			katom->post_dep? katom->post_dep->atom_number : -1, katom->x_post_dep? katom->x_post_dep->atom_number : -1,
+			katom->dep[0].atom ? katom->dep[0].atom->atom_number : -1, katom->dep[1].atom ? katom->dep[1].atom->atom_number : -1);
+	/*
+	 * 1.job submit -> wake up
+	 * 2.wake up -> event process
+	 */
+	// software job
+	/* fence err
+	 * < 0 : error
+	 * 0 : active
+	 * 1 : signaled
+	 */
+
+	switch (katom->core_req & BASE_JD_REQ_SOFT_JOB_TYPE) {
+	case BASE_JD_REQ_SOFT_EVENT_WAIT:
+		printk("software job infos: work{ jd_req_soft_event_set:%d ioctl:%d soft_event(q:%ldms, w:%ldms) }",
+			katom->core_req & BASE_JD_REQ_SOFT_EVENT_SET ? 1 : 0, kctx->ioctl & KBASE_IOCTL_SOFT_EVENT_UPDATE ? 1 : 0,
+			katom->soft_event_complete_work.queue_work_time / (1000*1000), katom->soft_event_complete_work.done_work_time / (1000*1000));
+		break;
+	case BASE_JD_REQ_SOFT_FENCE_TRIGGER:
+		fence = dma_fence_get(katom->dma_fence.fence);
+		if (fence) {
+			printk("software job infos: fence trigger{ fence_status(0x%px Drv:%s TL:%s Context:%llu Seqo:%llu flags:%lu, timestamp:%lldns) signal_time:%ldms , job waittime:%ldms}",
+				fence, fence->ops->get_driver_name(fence), fence->ops->get_timeline_name(fence),
+				fence->context, fence->seqno, fence->flags, fence->timestamp,
+				katom->job_process_timestamp.fence_trigger_signal_time / (1000*1000),
+				(current_time - katom->job_process_timestamp.job_submit_time) / (1000*1000));
+			dma_fence_put(fence);
+		} else {
+			printk("software job infos: no fence in fence trigger or fence has signaled, run:%d signal_time:%ldms",
+					katom->run_status & kRun_FenceOutTrigger, katom->job_process_timestamp.fence_trigger_signal_time / (1000*1000));
+		}
+		break;
+	case BASE_JD_REQ_SOFT_FENCE_WAIT:
+		fence = dma_fence_get(katom->dma_fence.fence_in);
+		if (fence) {
+			printk("software job infos: work{ fence_status(0x%px Drv:%s TL:%s Context:%llu Seqo:%llu flags:%lu, timestamp:%lldns) soft_fence(q:%ldms, w:%ldms) job waittime:%ldms}",
+				fence, fence->ops->get_driver_name(fence), fence->ops->get_timeline_name(fence),
+				fence->context, fence->seqno, fence->flags, fence->timestamp,
+				katom->sync_wait_fence_work.queue_work_time / (1000*1000), katom->sync_wait_fence_work.done_work_time / (1000*1000),
+				(current_time - katom->job_process_timestamp.job_submit_time) / (1000*1000));
+			dma_fence_put(fence);
+		} else {
+			printk("software job infos: no fence in fence wait or fence has signaled, run:%d soft_fence:%ldms",
+					katom->run_status & KRun_SyncFenceInWaitAndQueueWork,
+					katom->sync_wait_fence_work.queue_work_time / (1000*1000), katom->sync_wait_fence_work.done_work_time / (1000*1000));
+		}
+		break;
+	default:
+		break;
+	}
+
+	// hardware job
+	if (job_type & 0x2)  {
+		printk("hardware job infos: work{ hw_job(js:%ldms, start:%ldms, end:%ldms, code:0x%x), jd_done_work(q:%ldms, w:%ldms) }",
+			katom->job_process_timestamp.hw_job_start_time / (1000*1000), katom->start_timestamp / (1000*1000), katom->job_process_timestamp.hw_job_end_time / (1000*1000),
+			katom->completion_code, katom->jd_done_work.queue_work_time / (1000*1000), katom->jd_done_work.done_work_time / (1000*1000));
+	}
+
+	if (katom->core_req & BASE_JD_REQ_EXTERNAL_RESOURCES)
+		printk("external resources: dma fence may exist, work{ dma_fence_work(q:%ldms, w:%ldms) }",
+			katom->dma_fence_work.queue_work_time / (1000*1000), katom->dma_fence_work.done_work_time / (1000*1000));
+
+	printk("Process timestamp: current_time(%ld.%ldms), job_submit(%ld.%ldms), js_add(%ld.%ldms), js_pull(%ld.%ldms),js_complete(%ld.%ldms), jd_nolock(%ld.%ldms), post_event(%ld.%ldms), wakeup_time(%ld.%ldms), process_event(%ld.%ldms), ",
+		current_time / (1000*1000), current_time % (1000*1000),
+		katom->job_process_timestamp.job_submit_time / (1000*1000), katom->job_process_timestamp.job_submit_time % (1000*1000),
+		katom->job_process_timestamp.job_add_time / (1000*1000), katom->job_process_timestamp.job_add_time % (1000*1000),
+		katom->job_process_timestamp.job_pull_time / (1000*1000), katom->job_process_timestamp.job_pull_time % (1000*1000),
+		katom->job_process_timestamp.js_complete_time / (1000*1000), katom->job_process_timestamp.js_complete_time % (1000*1000),
+		katom->job_process_timestamp.job_nolock_time / (1000*1000), katom->job_process_timestamp.job_nolock_time % (1000*1000),
+		katom->job_process_timestamp.post_event_time / (1000*1000), katom->job_process_timestamp.post_event_time % (1000*1000),
+		katom->job_process_timestamp.wake_up_time / (1000*1000), katom->job_process_timestamp.wake_up_time % (1000*1000),
+		katom->job_process_timestamp.process_event_time / (1000*1000), katom->job_process_timestamp.process_event_time % (1000*1000)
+		);
+
+	if (!reset)
+		return;
+
+dump_done:
+	if (clear)
+		kbase_atom_dump_reset(katom);
+}
+
+void kbase_atom_dump_reset(struct kbase_jd_atom *katom)
+{
+	katom->early_brk = false;
+	katom->fence_info_showed = false;
+	katom->completion_code = 0;
+	katom->run_status = KRun_Invalid;
+	memset(&katom->job_process_timestamp, 0, sizeof(struct kbase_job_process_timestamp));
+	memset(&katom->jd_done_work, 0, sizeof(struct kbase_work_time_spent) * 4);
+}
 
 void kbase_jd_done_worker(struct work_struct *data)
 {
@@ -1494,11 +1784,8 @@ void kbase_jd_done_worker(struct work_struct *data)
 	/* Soft jobs should never reach this function */
 	KBASE_DEBUG_ASSERT((katom->core_req & BASE_JD_REQ_SOFT_JOB) == 0);
 
-	katom->run_status |= kRunOn_JdDoneWorker;
-	katom->jd_done_work.execute_num--;
+	katom->run_status |= KRun_JdDoneWorker;
 	katom->jd_done_work.done_work_time = ktime_get();
-	katom->jd_done_work.work_time_spent = katom->jd_done_work.done_work_time -
-											katom->jd_done_work.queue_work_time;
 	kctx = katom->kctx;
 	jctx = &kctx->jctx;
 	kbdev = kctx->kbdev;
@@ -1768,8 +2055,7 @@ void kbase_jd_done(struct kbase_jd_atom *katom, int slot_nr,
 #endif
 
 	WARN_ON(work_pending(&katom->work));
-	katom->run_status |= kRunOn_JdDoneAndQueueWork;
-	katom->jd_done_work.execute_num++;
+	katom->run_status |= KRun_JdDoneAndQueueWork;
 	katom->jd_done_work.queue_work_time = ktime_get();
 	INIT_WORK(&katom->work, kbase_jd_done_worker);
 	queue_work(kctx->jctx.job_done_wq, &katom->work);

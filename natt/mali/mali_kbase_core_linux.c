@@ -138,7 +138,7 @@
 #define KBASE_API_MAJ(api_version) ((api_version >> 20) & 0xFFF)
 
 #ifdef SPRD_SUPPORT_FAULT_KEYWORD
-time_t time[FAULT_KEYWORD_NUM] = {0};
+ktime_t time[FAULT_KEYWORD_NUM] = {0};
 const char fault_keyword[FAULT_KEYWORD_NUM][30] = {
 	{"DONE"},
 	{"TRANSLATION_FAULT"},
@@ -152,7 +152,10 @@ const char fault_keyword[FAULT_KEYWORD_NUM][30] = {
 	{"FLUSH_FAIL"},
 	{"GPU_BUS_FAULT"},
 	{"MMU_BUS_ERROR"},
-	{"TRANSLATION_TABLE_BUS_FAULT"}
+	{"TRANSLATION_TABLE_BUS_FAULT"},
+	{"FENCE_SHOW_INFO"},
+	{"FENCE_CANCELLED"},
+	{"ATOM_DUMPED"},
 };
 #endif
 /**
@@ -797,6 +800,11 @@ static int kbase_api_set_flags(struct kbase_file *kfile,
 	}
 
 	return err;
+}
+
+static int kbase_api_dump_atoms_state(struct kbase_context *kctx)
+{
+	return kbase_dump_atoms(kctx);
 }
 
 #if !MALI_USE_CSF
@@ -1715,8 +1723,14 @@ static long kbase_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	if (unlikely(!kctx))
 		return -EPERM;
 
+	kctx->ioctl |= cmd;
 	/* Normal ioctls */
 	switch (cmd) {
+	case KBASE_IOCTL_DUMP_ATOMS_STATE:
+		KBASE_HANDLE_IOCTL(KBASE_IOCTL_DUMP_ATOMS_STATE,
+				kbase_api_dump_atoms_state,
+				kctx);
+		break;
 #if !MALI_USE_CSF
 	case KBASE_IOCTL_JOB_SUBMIT:
 		KBASE_HANDLE_IOCTL_IN(KBASE_IOCTL_JOB_SUBMIT,
@@ -2172,6 +2186,9 @@ static unsigned int kbase_poll(struct file *filp, poll_table *wait)
 	if (unlikely(!kctx))
 		return POLLERR;
 
+	kctx->poll_status.poll_time_newest = ktime_get();
+	kctx->poll_status.event_pending = kbase_event_pending(kctx);
+
 	poll_wait(filp, &kctx->event_queue, wait);
 	if (kbase_event_pending(kctx))
 		return POLLIN | POLLRDNORM;
@@ -2578,7 +2595,8 @@ static ssize_t show_fault_keyword(struct device *dev, struct device_attribute *a
 
 	for (i = 0; i < FAULT_KEYWORD_NUM; i++) {
 		if(time[i] != 0) {
-			ret += scnprintf(buf + ret, PAGE_SIZE - ret, "fault keywrd : %s, %ld\n", fault_keyword[i], time[i]);
+			ret += scnprintf(buf + ret, PAGE_SIZE - ret, "%s : %ld.%ld ms\n",
+							fault_keyword[i], time[i] / (1000 * 1000), time[i] % (1000 * 1000));
 	    }
 	}
 

@@ -132,7 +132,7 @@ int kbase_context_common_init(struct kbase_context *kctx)
 	kctx->as_nr = KBASEP_AS_NR_INVALID;
 
 	atomic_set(&kctx->refcount, 0);
-
+	atomic_set(&kctx->jd_submit_num, 0);
 	spin_lock_init(&kctx->mm_update_lock);
 	kctx->process_mm = NULL;
 	atomic_set(&kctx->nonmapped_pages, 0);

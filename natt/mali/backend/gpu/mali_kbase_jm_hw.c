@@ -205,6 +205,8 @@ void kbase_job_hw_submit(struct kbase_device *kbdev,
 	KBASE_DEBUG_ASSERT(katom);
 
 	kctx = katom->kctx;
+	katom->run_status |= KRun_JobHWSubmit;
+	katom->job_process_timestamp.hw_job_start_time = ktime_get();
 
 	/* Command register must be available */
 	KBASE_DEBUG_ASSERT(kbasep_jm_is_js_free(kbdev, js, kctx));

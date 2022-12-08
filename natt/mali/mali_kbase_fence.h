@@ -130,6 +130,18 @@ static inline bool kbase_fence_out_is_ours(struct kbase_jd_atom *katom)
 				katom->dma_fence.fence->ops == &kbase_fence_ops;
 }
 
+static inline bool is_mali_fence(struct dma_fence *fence)
+{
+	return fence && fence->ops == &kbase_fence_ops;
+}
+
+static inline struct mali_fence *to_mali_fence(struct dma_fence *fence)
+{
+	if (is_mali_fence(fence))
+		return container_of(fence, struct mali_fence, base);
+	return NULL;
+}
+
 /**
  * kbase_fence_out_signal() - Signal output fence of atom
  * @katom: Atom to signal output fence for

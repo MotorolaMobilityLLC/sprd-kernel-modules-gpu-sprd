@@ -143,6 +143,8 @@ kbase_sync_fence_out_trigger(struct kbase_jd_atom *katom, int result)
 {
 	int res;
 
+	katom->run_status |= kRun_FenceOutTrigger;
+	katom->job_process_timestamp.fence_trigger_signal_time = ktime_get();
 	if (!kbase_fence_out_is_ours(katom)) {
 		/* Not our fence */
 		return BASE_JD_EVENT_JOB_CANCELLED;
@@ -194,8 +196,7 @@ static void kbase_fence_wait_callback(struct dma_fence *fence,
 		 * kctx->jctx.lock and the callbacks are run synchronously from
 		 * sync_timeline_signal. So we simply defer the work.
 		 */
-		katom->run_status |= kRunOn_SyncFenceInWaitAndQueueWork;
-		katom->sync_wait_fence_work.execute_num++;
+		katom->run_status |= KRun_SyncFenceInWaitAndQueueWork;
 		katom->sync_wait_fence_work.queue_work_time = ktime_get();
 		INIT_WORK(&katom->work, kbase_sync_fence_wait_worker);
 		queue_work(kctx->jctx.job_done_wq, &katom->work);
@@ -228,7 +229,7 @@ int kbase_sync_fence_in_wait(struct kbase_jd_atom *katom)
 			kbase_fence_dep_count_set(katom, -1);
 			return 0; /* Already signaled, good to go right now */
 		}
-
+		katom->run_status |= KRun_FenceInAddCallbackSuccess;
 		/* Callback installed, so we just need to wait for it... */
 	} else {
 		/* Failure */
@@ -240,8 +241,7 @@ int kbase_sync_fence_in_wait(struct kbase_jd_atom *katom)
 		/* We should cause the dependent jobs in the bag to be failed,
 		 * to do this we schedule the work queue to complete this job
 		 */
-		katom->run_status |= kRunOn_SyncFenceInWaitAndQueueWork;
-		katom->sync_wait_fence_work.execute_num++;
+		katom->run_status |= KRun_FenceInAddCallbackFail;
 		katom->sync_wait_fence_work.queue_work_time = ktime_get();
 		INIT_WORK(&katom->work, kbase_sync_fence_wait_worker);
 		queue_work(katom->kctx->jctx.job_done_wq, &katom->work);

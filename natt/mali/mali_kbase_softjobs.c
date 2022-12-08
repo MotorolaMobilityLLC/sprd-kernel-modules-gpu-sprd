@@ -31,6 +31,7 @@
 #include <mali_kbase_hwaccess_time.h>
 #include <mali_kbase_kinstr_jm.h>
 #include <mali_kbase_mem_linux.h>
+#include <mali_kbase_fence.h>
 #include <tl/mali_kbase_tracepoints.h>
 #include <mali_linux_trace.h>
 #include <linux/version.h>
@@ -42,7 +43,7 @@
 
 #ifdef SPRD_SUPPORT_FAULT_KEYWORD
 #include <linux/sunrpc/cache.h>
-extern time_t time[FAULT_KEYWORD_NUM];
+extern ktime_t time[FAULT_KEYWORD_NUM];
 #endif
 
 #if !MALI_USE_CSF
@@ -55,7 +56,7 @@ static void kbasep_add_waiting_soft_job(struct kbase_jd_atom *katom)
 {
 	struct kbase_context *kctx = katom->kctx;
 	unsigned long lflags;
-
+	katom->run_status |= KRun_AddSoftJobWaitQueue;
 	spin_lock_irqsave(&kctx->waiting_soft_jobs_lock, lflags);
 	list_add_tail(&katom->queue, &kctx->waiting_soft_jobs);
 	spin_unlock_irqrestore(&kctx->waiting_soft_jobs_lock, lflags);
@@ -67,6 +68,7 @@ void kbasep_remove_waiting_soft_job(struct kbase_jd_atom *katom)
 	unsigned long lflags;
 
 	spin_lock_irqsave(&kctx->waiting_soft_jobs_lock, lflags);
+	katom->run_status &= ~KRun_AddSoftJobWaitQueue;
 	list_del(&katom->queue);
 	spin_unlock_irqrestore(&kctx->waiting_soft_jobs_lock, lflags);
 }
@@ -216,7 +218,7 @@ void kbase_soft_event_wait_callback(struct kbase_jd_atom *katom)
 	struct kbase_context *kctx = katom->kctx;
 
 	mutex_lock(&kctx->jctx.lock);
-	katom->run_status |= kRunOn_SoftEventWaitCallback;
+	katom->run_status |= KRun_SoftEventWaitCallback;
 	kbasep_remove_waiting_soft_job(katom);
 	kbase_finish_soft_job(katom);
 	if (jd_done_nolock(katom, NULL))
@@ -233,11 +235,8 @@ static void kbasep_soft_event_complete_job(struct work_struct *work)
 	int resched;
 
 	mutex_lock(&kctx->jctx.lock);
-	katom->run_status |= kRunOn_SoftEventCompleteJob;
-	katom->soft_event_complete_work.execute_num--;
+	katom->run_status |= KRun_SoftEventCompleteJob;
 	katom->soft_event_complete_work.done_work_time = ktime_get();
-	katom->soft_event_complete_work.work_time_spent = katom->soft_event_complete_work.done_work_time -
-											katom->soft_event_complete_work.queue_work_time;
 	resched = jd_done_nolock(katom, NULL);
 	mutex_unlock(&kctx->jctx.lock);
 
@@ -263,8 +262,7 @@ void kbasep_complete_triggered_soft_events(struct kbase_context *kctx, u64 evt)
 
 				katom->event_code = BASE_JD_EVENT_DONE;
 
-				katom->run_status |= kRunOn_SoftJobTimeoutOrEventAndQueueWork;
-				katom->soft_event_complete_work.execute_num++;
+				katom->run_status |= KRun_SoftJobTimeoutOrEventAndQueueWork;
 				katom->soft_event_complete_work.queue_work_time = ktime_get();
 				INIT_WORK(&katom->work,
 					  kbasep_soft_event_complete_job);
@@ -345,7 +343,7 @@ static void kbase_fence_debug_wait_timeout(struct kbase_jd_atom *katom)
 #else
         struct dma_fence *fence = NULL;
 #endif
-
+	katom->run_status |= KRun_FenceWaitTimeOut;
 	spin_lock_irqsave(&kctx->waiting_soft_jobs_lock, lflags);
 
 	if (kbase_sync_fence_in_info_get(katom, &info)) {
@@ -364,12 +362,9 @@ static void kbase_fence_debug_wait_timeout(struct kbase_jd_atom *katom)
 		if (fence->ops && fence->ops->get_driver_name && fence->ops->get_timeline_name)
 		{
 			dev_warn(dev, "ctx %d_%d: Atom %d waiting for Guilty fence[name:%s, seq:%d, driver name:%s, TL name%s] after %dms\n",
-			 	kctx->tgid, kctx->id, kbase_jd_atom_id(kctx, katom),
+				kctx->tgid, kctx->id, kbase_jd_atom_id(kctx, katom),
 			 	info.name, fence->seqno, fence->ops->get_driver_name(fence),
 			 	fence->ops->get_timeline_name(fence), timeout_ms);
-#ifdef SPRD_SUPPORT_FAULT_KEYWORD
-			time[FENCE_TIMEOUT] = seconds_right_now();
-#endif
 		}
 #endif
 	}
@@ -386,7 +381,14 @@ static void kbase_fence_debug_wait_timeout(struct kbase_jd_atom *katom)
 	kbase_fence_debug_check_atom(katom, checkNum);
 
 	spin_unlock_irqrestore(&kctx->waiting_soft_jobs_lock, lflags);
-
+	if(info.fence) {
+#ifdef SPRD_SUPPORT_FAULT_KEYWORD
+		time[FENCE_CANCELLED] = seconds_right_now();
+#endif
+		printk(KERN_ERR "SPRDEBUG cancel waiting the guilty fence: katom{0x%px atom_number{%d} flush_id{0x%x}}{pid:%d tgid:%d kctx:%px}",
+			katom, katom->atom_number, katom->flush_id, kctx->pid, kctx->tgid, kctx);
+		kbase_sync_fence_in_cancel_wait(katom);
+	}
 	kbase_sync_fence_in_dump(katom);
 }
 
@@ -450,17 +452,15 @@ void kbasep_soft_job_timeout_worker(struct timer_list *timer)
 			continue;
 		}
 
+		katom->run_status |= KRun_SoftJobTimeoutOrEventAndQueueWork;
 		switch (katom->core_req & BASE_JD_REQ_SOFT_JOB_TYPE) {
 		case BASE_JD_REQ_SOFT_EVENT_WAIT:
 			/* Take it out of the list to ensure that it
 			 * will be cancelled in all cases
 			 */
 			list_del(&katom->queue);
-
-			katom->event_code = BASE_JD_EVENT_JOB_CANCELLED;
-			katom->soft_event_complete_work.execute_num++;
 			katom->soft_event_complete_work.queue_work_time = ktime_get();
-			katom->run_status |= kRunOn_SoftJobTimeoutOrEventAndQueueWork;
+			katom->event_code = BASE_JD_EVENT_JOB_CANCELLED;
 			INIT_WORK(&katom->work, kbasep_soft_event_complete_job);
 			queue_work(kctx->jctx.job_done_wq, &katom->work);
 			break;
@@ -1592,7 +1592,7 @@ int kbase_process_soft_job(struct kbase_jd_atom *katom)
 	trace_sysgraph(SGR_SUBMIT, kctx->id,
 			kbase_jd_atom_id(kctx, katom));
 
-	katom->run_status |= kRunOn_ProcessSoftJob;
+	katom->run_status |= KRun_ProcessSoftJob;
 	switch (katom->core_req & BASE_JD_REQ_SOFT_JOB_TYPE) {
 	case BASE_JD_REQ_SOFT_DUMP_CPU_GPU_TIME:
 		ret = kbase_dump_cpu_gpu_time(katom);
@@ -1674,7 +1674,7 @@ void kbase_cancel_soft_job(struct kbase_jd_atom *katom)
 
 int kbase_prepare_soft_job(struct kbase_jd_atom *katom)
 {
-	katom->run_status |= kRunOn_PrepareSoftJob;
+	katom->run_status |= KRun_PrepareSoftJob;
 	switch (katom->core_req & BASE_JD_REQ_SOFT_JOB_TYPE) {
 	case BASE_JD_REQ_SOFT_DUMP_CPU_GPU_TIME:
 		{
@@ -1703,11 +1703,11 @@ int kbase_prepare_soft_job(struct kbase_jd_atom *katom)
 					 &fence, sizeof(fence)) != 0) {
 				kbase_sync_fence_out_remove(katom);
 				/* fd should have been closed here, but there's
-                                * no good way of doing that. Since
-                                * copy_to_user() very rarely fails, and the fd
-                                * will get closed on process termination this
-                                * won't be a problem.
-                                */
+				* no good way of doing that. Since
+				* copy_to_user() very rarely fails, and the fd
+				* will get closed on process termination this
+				* won't be a problem.
+				*/
 
 				fence.basep.fd = -EINVAL;
 				return -EINVAL;
@@ -1771,7 +1771,7 @@ void kbase_finish_soft_job(struct kbase_jd_atom *katom)
 	trace_sysgraph(SGR_COMPLETE, katom->kctx->id,
 			kbase_jd_atom_id(katom->kctx, katom));
 
-	katom->run_status |= kRunOn_FinishSoftJob;
+	katom->run_status |= KRun_FinishSoftJob;
 	switch (katom->core_req & BASE_JD_REQ_SOFT_JOB_TYPE) {
 	case BASE_JD_REQ_SOFT_DUMP_CPU_GPU_TIME:
 		/* Nothing to do */
