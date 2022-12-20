@@ -721,6 +721,36 @@ out_cleanup:
 	return ret;
 }
 
+#if KERNEL_VERSION(5, 6, 0) <= LINUX_VERSION_CODE
+static void *dma_buf_kmap_page(struct kbase_mem_phy_alloc *gpu_alloc,
+	unsigned long page_num, struct page **page)
+{
+	struct sg_table *sgt = gpu_alloc->imported.umm.sgt;
+	struct sg_page_iter sg_iter;
+	unsigned long page_index = 0;
+
+	if (WARN_ON(gpu_alloc->type != KBASE_MEM_TYPE_IMPORTED_UMM))
+		return NULL;
+
+	if (!sgt)
+		return NULL;
+
+	if (WARN_ON(page_num >= gpu_alloc->nents))
+		return NULL;
+
+	for_each_sg_page(sgt->sgl, &sg_iter, sgt->nents, 0) {
+		if (page_index == page_num) {
+			*page = sg_page_iter_page(&sg_iter);
+
+			return kmap(*page);
+		}
+		page_index++;
+	}
+
+	return NULL;
+}
+#endif
+
 void kbase_mem_copy_from_extres_page(struct kbase_context *kctx,
 		void *extres_page, struct page **pages, unsigned int nr_pages,
 		unsigned int *target_page_nr, size_t offset, size_t *to_copy)
@@ -827,7 +857,12 @@ int kbase_mem_copy_from_extres(struct kbase_context *kctx,
 
 		for (i = 0; i < dma_to_copy/PAGE_SIZE; i++) {
 
+#if KERNEL_VERSION(5, 6, 0) <= LINUX_VERSION_CODE
+			struct page *pg;
+			void *extres_page = dma_buf_kmap_page(gpu_alloc, i, &pg);
+#else
 			void *extres_page = dma_buf_kmap(dma_buf, i);
+#endif
 
 			if (extres_page)
 				kbase_mem_copy_from_extres_page(kctx,
@@ -836,7 +871,11 @@ int kbase_mem_copy_from_extres(struct kbase_context *kctx,
 						&target_page_nr,
 						offset, &to_copy);
 
+#if KERNEL_VERSION(5, 6, 0) <= LINUX_VERSION_CODE
+                        kunmap(pg);
+#else
 			dma_buf_kunmap(dma_buf, i, extres_page);
+#endif
 			if (target_page_nr >= buf_data->nr_pages)
 				break;
 		}
@@ -1563,7 +1602,13 @@ int kbase_prepare_soft_job(struct kbase_jd_atom *katom)
 			fence.basep.fd = fd;
 			if (0 != copy_to_user((__user void *)(uintptr_t) katom->jc, &fence, sizeof(fence))) {
 				kbase_sync_fence_out_remove(katom);
-				kbase_sync_fence_close_fd(fd);
+				/* fd should have been closed here, but there's
+				 * no good way of doing that. Since
+				 * copy_to_user() very rarely fails, and the fd
+				 * will get closed on process termination this
+				 * won't be a problem.
+				 * kbase_sync_fence_close_fd(fd);
+				 */
 				fence.basep.fd = -EINVAL;
 				return -EINVAL;
 			}
