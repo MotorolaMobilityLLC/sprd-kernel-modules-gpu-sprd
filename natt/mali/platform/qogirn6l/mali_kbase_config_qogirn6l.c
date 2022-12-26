@@ -641,7 +641,8 @@ void mali_poweroff_second_part(void)
 		{
 			ret = regulator_disable(gpu_dvfs_ctx.gpu_reg_ptr);
 			if (ret) {
-				printk(KERN_ERR "%s failed to disable vddgpu, error =%d\n", __func__, ret);
+				printk(KERN_ERR "%s failed to disable vddgpu, error =%d. Invoke regulator_force_disable() for matching rdev->use_count.\n", __func__, ret);
+				ret = regulator_force_disable(gpu_dvfs_ctx.gpu_reg_ptr);
 			}
 			udelay(10);
 		}
