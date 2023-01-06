@@ -408,7 +408,8 @@ PVRSRVBridgeRIWriteProcListEntry(IMG_UINT32 ui32DispatchTableEntry,
 	}
 
 	psRIWriteProcListEntryOUT->eError =
-	    RIWriteProcListEntryKM(psRIWriteProcListEntryIN->ui32TextBSize,
+	    RIWriteProcListEntryKM(psConnection, OSGetDevNode(psConnection),
+				   psRIWriteProcListEntryIN->ui32TextBSize,
 				   uiTextBInt,
 				   psRIWriteProcListEntryIN->ui64Size,
 				   psRIWriteProcListEntryIN->ui64DevVAddr, &psRIHandleInt);
@@ -533,9 +534,9 @@ PVRSRVBridgeRIDeleteMEMDESCEntry(IMG_UINT32 ui32DispatchTableEntry,
 	LockHandle(psConnection->psHandleBase);
 
 	psRIDeleteMEMDESCEntryOUT->eError =
-	    PVRSRVReleaseHandleStagedUnlock(psConnection->psHandleBase,
-					    (IMG_HANDLE) psRIDeleteMEMDESCEntryIN->hRIHandle,
-					    PVRSRV_HANDLE_TYPE_RI_HANDLE);
+	    PVRSRVDestroyHandleStagedUnlocked(psConnection->psHandleBase,
+					      (IMG_HANDLE) psRIDeleteMEMDESCEntryIN->hRIHandle,
+					      PVRSRV_HANDLE_TYPE_RI_HANDLE);
 	if (unlikely((psRIDeleteMEMDESCEntryOUT->eError != PVRSRV_OK) &&
 		     (psRIDeleteMEMDESCEntryOUT->eError != PVRSRV_ERROR_KERNEL_CCB_FULL) &&
 		     (psRIDeleteMEMDESCEntryOUT->eError != PVRSRV_ERROR_RETRY)))
@@ -695,7 +696,7 @@ RIWritePMREntryWithOwner_exit:
  */
 
 PVRSRV_ERROR InitRIBridge(void);
-PVRSRV_ERROR DeinitRIBridge(void);
+void DeinitRIBridge(void);
 
 /*
  * Register all RI functions with services
@@ -736,7 +737,7 @@ PVRSRV_ERROR InitRIBridge(void)
 /*
  * Unregister all ri functions with services
  */
-PVRSRV_ERROR DeinitRIBridge(void)
+void DeinitRIBridge(void)
 {
 
 	UnsetDispatchTableEntry(PVRSRV_BRIDGE_RI, PVRSRV_BRIDGE_RI_RIWRITEPMRENTRY);
@@ -757,5 +758,4 @@ PVRSRV_ERROR DeinitRIBridge(void)
 
 	UnsetDispatchTableEntry(PVRSRV_BRIDGE_RI, PVRSRV_BRIDGE_RI_RIWRITEPMRENTRYWITHOWNER);
 
-	return PVRSRV_OK;
 }

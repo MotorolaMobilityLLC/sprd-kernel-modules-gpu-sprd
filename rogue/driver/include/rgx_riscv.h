@@ -76,14 +76,14 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define RGXRISCVFW_COREMEM_REGION               IMG_UINT32_C(0x8)
 #define RGXRISCVFW_COREMEM_MAX_SIZE             IMG_UINT32_C(0x10000000) /* 256 MB */
 #define RGXRISCVFW_COREMEM_BASE                 (RGXRISCVFW_GET_REGION_BASE(RGXRISCVFW_COREMEM_REGION))
-#define RGXRISCVFW_COREMEM_END                  (RGXRISCVFW_COREMEM_BASE + RGXRISCVFW_COREMEM_MAX_SIZE - 1)
+#define RGXRISCVFW_COREMEM_END                  (RGXRISCVFW_COREMEM_BASE + RGXRISCVFW_COREMEM_MAX_SIZE - 1U)
 
 
 /*
  * Host-FW shared data defines
  */
-#define RGXRISCVFW_SHARED_CACHED_DATA_REGION    (0x6U)
-#define RGXRISCVFW_SHARED_UNCACHED_DATA_REGION  (0xDU)
+#define RGXRISCVFW_SHARED_CACHED_DATA_REGION    (0x6UL)
+#define RGXRISCVFW_SHARED_UNCACHED_DATA_REGION  (0xDUL)
 #define RGXRISCVFW_SHARED_CACHED_DATA_BASE      (RGXRISCVFW_GET_REGION_BASE(RGXRISCVFW_SHARED_CACHED_DATA_REGION))
 #define RGXRISCVFW_SHARED_UNCACHED_DATA_BASE    (RGXRISCVFW_GET_REGION_BASE(RGXRISCVFW_SHARED_UNCACHED_DATA_REGION))
 #define RGXRISCVFW_SHARED_CACHED_DATA_REMAP     (RGXRISCVFW_GET_REMAP(RGXRISCVFW_SHARED_CACHED_DATA_REGION))
@@ -155,95 +155,93 @@ typedef struct
 #define RGXRISCVFW_MCAUSE_INTERRUPT  (1U << 31)
 
 #define RGXRISCVFW_MCAUSE_TABLE \
-	X(0x00000000, IMG_FALSE, "NMI pin assertion") /* Also reset value */ \
-	X(0x00000001, IMG_TRUE,  "Instruction access fault") \
-	X(0x00000002, IMG_TRUE,  "Illegal instruction") \
-	X(0x00000003, IMG_TRUE,  "Breakpoint") \
-	X(0x00000004, IMG_TRUE,  "Load address misaligned") \
-	X(0x00000005, IMG_TRUE,  "Load access fault") \
-	X(0x00000006, IMG_TRUE,  "Store/AMO address misaligned") \
-	X(0x00000007, IMG_TRUE,  "Store/AMO access fault") \
-	X(0x0000000B, IMG_TRUE,  "Environment call from M-mode (FW assert)") \
-	X(0x80000007, IMG_FALSE, "Machine timer interrupt") \
-	X(0x8000000B, IMG_FALSE, "Machine external interrupt") \
-	X(0x8000001E, IMG_FALSE, "Machine correctable error local interrupt") \
-	X(0xF0000000, IMG_TRUE,  "Machine D-bus store error NMI") \
-	X(0xF0000001, IMG_TRUE,  "Machine D-bus non-blocking load error NMI") \
-	X(0xF0000002, IMG_TRUE,  "dCache unrecoverable NMI")
+	X(0x00000000U, IMG_FALSE, "NMI pin assertion") /* Also reset value */ \
+	X(0x00000001U, IMG_TRUE,  "Instruction access fault") \
+	X(0x00000002U, IMG_TRUE,  "Illegal instruction") \
+	X(0x00000003U, IMG_TRUE,  "Breakpoint") \
+	X(0x00000004U, IMG_TRUE,  "Load address misaligned") \
+	X(0x00000005U, IMG_TRUE,  "Load access fault") \
+	X(0x00000006U, IMG_TRUE,  "Store/AMO address misaligned") \
+	X(0x00000007U, IMG_TRUE,  "Store/AMO access fault") \
+	X(0x0000000BU, IMG_TRUE,  "Environment call from M-mode (FW assert)") \
+	X(0x80000007U, IMG_FALSE, "Machine timer interrupt") \
+	X(0x8000000BU, IMG_FALSE, "Machine external interrupt") \
+	X(0x8000001EU, IMG_FALSE, "Machine correctable error local interrupt") \
+	X(0xF0000000U, IMG_TRUE,  "Machine D-bus store error NMI") \
+	X(0xF0000001U, IMG_TRUE,  "Machine D-bus non-blocking load error NMI") \
+	X(0xF0000002U, IMG_TRUE,  "dCache unrecoverable NMI")
 
 
 /* Debug module HW defines */
 #define RGXRISCVFW_DMI_COMMAND_ACCESS_REGISTER (0U)
 #define RGXRISCVFW_DMI_COMMAND_ACCESS_MEMORY   (2U)
-#define RGXRISCVFW_DMI_COMMAND_AAxSIZE_32BIT   (2U << 20)
-#define RGXRISCVFW_DMI_COMMAND_WRITE           (1U << 16)
-#define RGXRISCVFW_DMI_COMMAND_READ            (0U << 16)
+#define RGXRISCVFW_DMI_COMMAND_AAxSIZE_32BIT   (2UL << 20)
+#define RGXRISCVFW_DMI_COMMAND_WRITE           (1UL << 16)
+#define RGXRISCVFW_DMI_COMMAND_READ            (0UL << 16)
 #define RGXRISCVFW_DMI_SBCS_SBACCESS_32BIT     (2U)
 
 /* Abstract command error codes (descriptions from RISC-V debug spec v0.13) */
-typedef enum
-{
-	/* No error. */
-	RISCV_ABSTRACT_CMD_NO_ERROR = 0,
+typedef IMG_UINT32 RGXRISCVFW_ABSTRACT_CMD_ERR;
 
-	/*
-	 * An abstract command was executing while command, abstractcs, or abstractauto
-	 * was written, or when one of the data or progbuf registers was read or
-	 * written. This status is only written if cmderr contains 0.
-	 */
-	RISCV_ABSTRACT_CMD_BUSY = 1,
+/* No error. */
+#define RISCV_ABSTRACT_CMD_NO_ERROR 0U
 
-	/*
-	 * The requested command is not supported, regardless of whether
-	 * the hart is running or not.
-	 */
-	RISCV_ABSTRACT_CMD_NOT_SUPPORTED = 2,
+/*
+ * An abstract command was executing while command, abstractcs, or abstractauto
+ * was written, or when one of the data or progbuf registers was read or
+ * written. This status is only written if cmderr contains 0.
+ */
+#define RISCV_ABSTRACT_CMD_BUSY 1U
 
-	/*
-	 * An exception occurred while executing the command
-	 * (e.g. while executing the Program Buffer).
-	 */
-	RISCV_ABSTRACT_CMD_EXCEPTION = 3,
+/*
+ * The requested command is not supported, regardless of whether
+ * the hart is running or not.
+ */
+#define RISCV_ABSTRACT_CMD_NOT_SUPPORTED 2U
 
-	/*
-	 * The abstract command couldn't execute because the hart wasn't in the required
-	 * state (running/halted), or unavailable.
-	 */
-	RISCV_ABSTRACT_CMD_HALT_RESUME = 4,
+/*
+ * An exception occurred while executing the command
+ * (e.g. while executing the Program Buffer).
+ */
+#define RISCV_ABSTRACT_CMD_EXCEPTION 3U
 
-	/*
-	 * The abstract command failed due to a bus error
-	 * (e.g. alignment, access size, or timeout).
-	 */
-	RISCV_ABSTRACT_CMD_BUS_ERROR = 5,
+/*
+ * The abstract command couldn't execute because the hart wasn't in the required
+ * state (running/halted), or unavailable.
+ */
+#define RISCV_ABSTRACT_CMD_HALT_RESUME 4U
 
-	/* The command failed for another reason. */
-	RISCV_ABSTRACT_CMD_OTHER_ERROR = 7
+/*
+ * The abstract command failed due to a bus error
+ * (e.g. alignment, access size, or timeout).
+ */
+#define RISCV_ABSTRACT_CMD_BUS_ERROR 5U
 
-} RGXRISCVFW_ABSTRACT_CMD_ERR;
+/* The command failed for another reason. */
+#define RISCV_ABSTRACT_CMD_OTHER_ERROR 7U
+
 
 /* System Bus error codes (descriptions from RISC-V debug spec v0.13) */
-typedef enum
-{
-	/* There was no bus error. */
-	RISCV_SYSBUS_NO_ERROR = 0,
+typedef IMG_UINT32 RGXRISCVFW_SYSBUS_ERR;
 
-	/* There was a timeout. */
-	RISCV_SYSBUS_TIMEOUT = 1,
+/* There was no bus error. */
+#define RISCV_SYSBUS_NO_ERROR 0U
 
-	/* A bad address was accessed. */
-	RISCV_SYSBUS_BAD_ADDRESS = 2,
+/* There was a timeout. */
+#define RISCV_SYSBUS_TIMEOUT 1U
 
-	/* There was an alignment error. */
-	RISCV_SYSBUS_BAD_ALIGNMENT = 3,
+/* A bad address was accessed. */
+#define RISCV_SYSBUS_BAD_ADDRESS 2U
 
-	/* An access of unsupported size was requested. */
-	RISCV_SYSBUS_UNSUPPORTED_SIZE = 4,
+/* There was an alignment error. */
+#define RISCV_SYSBUS_BAD_ALIGNMENT 3U
 
-	/* Other. */
-	RISCV_SYSBUS_OTHER_ERROR = 7
+/* An access of unsupported size was requested. */
+#define RISCV_SYSBUS_UNSUPPORTED_SIZE 4U
 
-} RGXRISCVFW_SYSBUS_ERR;
+/* Other. */
+#define RISCV_SYSBUS_OTHER_ERROR 7U
+
 
 #endif /* RGXRISCVFW_ASSEMBLY_CODE */
 

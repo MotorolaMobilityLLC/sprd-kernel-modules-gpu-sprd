@@ -1,26 +1,47 @@
+$(warning BSP_SYSTEM_VERSION: $(BSP_SYSTEM_VERSION))
 ifeq ($(BSP_SYSTEM_VERSION), sharkl5)
+$(warning Now building GPU ko for sharkl5 ... ...)
 # pvrsrvkm.o
-CURRENT_PATH := $(shell cd $(BSP_ROOT_DIR)/modules/kernel5.4/gpu/rogue/driver/build/linux/sharkl5_android; pwd)#$(MAKEFILE_PATH)/rogue/driver/build/linux/sharkl5_android
+CURRENT_PATH := $(shell cd $(BSP_ROOT_DIR)/modules/kernel5.15/gpu/rogue/driver/build/linux/sharkl5_android; pwd)#$(MAKEFILE_PATH)/rogue/driver/build/linux/sharkl5_android
 
 $(warning CURRENT_PATH: $(CURRENT_PATH))
 $(warning BSP_PRODUCT_NAME: $(BSP_PRODUCT_NAME))
 $(warning BSP_BOARD_ARCH: $(BSP_BOARD_ARCH))
+$(warning BSP_KERNEL_OUT: $(BSP_KERNEL_OUT))
+$(warning BSP_MODULES_OUT: $(BSP_MODULES_OUT))
 
 #include $(CLEAR_UNISOC_KO)
 KO_MODULE_PATH      := $(shell cd $(CURRENT_PATH); pwd)
-KO_MODULE_NAME      := pvrsrvkm
+#KO_MODULE_NAME      := pvrsrvkm
+
+####
+$(warning CURDIR:$(CURDIR))
+export KO_MODULE_NAME := pvrsrvkm
+KO_MODULE_OUT := $(BSP_MODULES_OUT)/$(KO_MODULE_NAME)
+KO_MODULE_KBUILD := $(CURDIR)/../kbuild/Makefile.template
+$(warning KO_MODULE_OUT: $(KO_MODULE_OUT))
+$(warning KO_MODULE_KBUILD: $(KO_MODULE_KBUILD))
+####
+
 export PLATFORM_VERSION := 12
-export PLATFORM_RELEASE := 12
-export KERNELDIR ?= $(BSP_KERNEL_OUT)
-export OUT := $(BSP_OUT_PLATFORM)/$(BSP_PRODUCT_NAME)/obj/modules/pvrsrvkm
+export PLATFORM_RELEASE := 13
+export KERNELDIR ?= $(BSP_MODULES_OUT)/../kernel5.15
+export OUT := $(KO_MODULE_OUT)
 ANDROID_ROOT := $(ANDROID_BUILD_TOP)
-export KERNEL_PATH := kernel5.4
+export KERNEL_PATH := kernel5.15
 TARGET_KERNEL_ARCH := $(BSP_BOARD_ARCH)
 PRODUCT_OUT := $(BSP_ROOT_DIR)
 MALI_PLATFORM_NAME := sharkl5
 export PVRSRV_APPHINT_HWRDEBUGDUMPLIMIT := 4
-export HOST_CC := $(BSP_ROOT_DIR)/toolchain/prebuilts/clang/host/linux-x86/clang-r383902/bin/clang
-export HOST_CXX := $(BSP_ROOT_DIR)/toolchain/prebuilts/clang/host/linux-x86/clang-r383902/bin/clang++
+export HOST_CC := clang
+export HOST_CXX := clang++
+
+ifeq ($(ARCH), arm64)
+BSP_KERNEL_CROSS_COMPILE ?= $(BSP_ARM64_COMPILE)
+else
+BSP_KERNEL_CROSS_COMPILE ?= $(BSP_ARM_COMPILE)
+endif
+export BSP_KERNEL_CROSS_COMPILE
 
 $(warning KO_MODULE_NAME: $(KO_MODULE_NAME))
 $(warning OUT: $(OUT))
@@ -35,6 +56,7 @@ $(warning BSP_KERNEL_CROSS_COMPILE: $(BSP_KERNEL_CROSS_COMPILE))
 $(warning CC: $(CC))
 
 BUILD_ := release
+#BUILD_ := debug
 RGX_NOHW_ := 0
 KO_MODULE_FLAGS     := BUILD=$(BUILD_)
 KO_MODULE_FLAGS     += PLATFORM_VERSION=$(PLATFORM_VERSION)
@@ -119,19 +141,31 @@ $(warning COMMON_MODULE_FLAGS: $(COMMON_MODULE_FLAGS))
 $(warning BSP_KERNEL_PATH: $(BSP_KERNEL_PATH))
 
 $(shell cd $(CURRENT_PATH))
-$(BSP_MODULES_DIST)/$(KO_MODULE_NAME).ko: $(TARGET_PREBUILT_KERNEL)
-	echo "current module name --- $(notdir $(basename $@)) ---"
-	$(BUILT_$(notdir $(basename $@)))
+#$(BSP_MODULES_DIST)/$(KO_MODULE_NAME).ko: $(TARGET_PREBUILT_KERNEL)
+#	echo "current module name --- $(notdir $(basename $@)) ---"
+#	$(BUILT_$(notdir $(basename $@)))
 
 .PHONY:modules
+#.PHONY: modules modules_install clean
 
 modules:
+#	$(warning --------modules--------)
+#	@mkdir -p $(KO_MODULE_OUT) && ln -snf $(KO_MODULE_KBUILD) $(KO_MODULE_OUT)/Kbuild
+#	@ln -snf $(CURDIR) $(KO_MODULE_OUT)/source
+#	$(MAKE) -C $(BSP_KERNEL_PATH) M=$(KO_MODULE_OUT) src=$(CURDIR)/../../../ $@
+#	$(MAKE) -C $(CURDIR)/mali ... ... M=$(KO_MODULE_OUT) src=$(CURDIR)/mali
 	$(MAKE) -f $(CURRENT_PATH)/Makefile.rogue $(KO_MODULE_FLAGS) $(COMMON_MODULE_FLAGS)
+#	$(MAKE) -C $(BSP_KERNEL_PATH) -f $(CURDIR)/Makefile.rogue $(KO_MODULE_FLAGS) $(COMMON_MODULE_FLAGS) M=$(KO_MODULE_OUT) src=$(CURDIR) $@
 
 modules_install:
+#	$(warning --------modules_install--------)
+#	$(MAKE) -C $(BSP_KERNEL_PATH) M=$(KO_MODULE_OUT) $@
+#	$(MAKE) -C $(BSP_KERNEL_PATH) M=$(KO_MODULE_OUT) $@
 	$(MAKE) -C $(BSP_KERNEL_PATH) M=$(OUT)/$(TARGET_PRIMARY_ARCH)/kbuild $@
 
+# Remove the out directory wholly
 clean:
+#	$(warning --------clean--------)
 	rm -rf $(OUT)
 else
 .PHONY:modules

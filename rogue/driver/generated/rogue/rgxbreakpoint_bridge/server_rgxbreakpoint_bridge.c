@@ -100,6 +100,7 @@ PVRSRVBridgeRGXSetBreakpoint(IMG_UINT32 ui32DispatchTableEntry,
 	    PVRSRVRGXSetBreakpointKM(psConnection, OSGetDevNode(psConnection),
 				     hPrivDataInt,
 				     psRGXSetBreakpointIN->eFWDataMaster,
+				     psRGXSetBreakpointIN->ui32TempSpillingAddr,
 				     psRGXSetBreakpointIN->ui32BreakpointAddr,
 				     psRGXSetBreakpointIN->ui32HandlerAddr,
 				     psRGXSetBreakpointIN->ui32DM);
@@ -305,7 +306,7 @@ PVRSRVBridgeRGXOverallocateBPRegisters(IMG_UINT32 ui32DispatchTableEntry,
 
 #if !defined(EXCLUDE_RGXBREAKPOINT_BRIDGE)
 PVRSRV_ERROR InitRGXBREAKPOINTBridge(void);
-PVRSRV_ERROR DeinitRGXBREAKPOINTBridge(void);
+void DeinitRGXBREAKPOINTBridge(void);
 
 /*
  * Register all RGXBREAKPOINT functions with services
@@ -339,7 +340,7 @@ PVRSRV_ERROR InitRGXBREAKPOINTBridge(void)
 /*
  * Unregister all rgxbreakpoint functions with services
  */
-PVRSRV_ERROR DeinitRGXBREAKPOINTBridge(void)
+void DeinitRGXBREAKPOINTBridge(void)
 {
 
 	UnsetDispatchTableEntry(PVRSRV_BRIDGE_RGXBREAKPOINT,
@@ -357,7 +358,6 @@ PVRSRV_ERROR DeinitRGXBREAKPOINTBridge(void)
 	UnsetDispatchTableEntry(PVRSRV_BRIDGE_RGXBREAKPOINT,
 				PVRSRV_BRIDGE_RGXBREAKPOINT_RGXOVERALLOCATEBPREGISTERS);
 
-	return PVRSRV_OK;
 }
 #else /* EXCLUDE_RGXBREAKPOINT_BRIDGE */
 /* This bridge is conditional on EXCLUDE_RGXBREAKPOINT_BRIDGE - when defined,
@@ -366,7 +366,6 @@ PVRSRV_ERROR DeinitRGXBREAKPOINTBridge(void)
 #define InitRGXBREAKPOINTBridge() \
 	PVRSRV_OK
 
-#define DeinitRGXBREAKPOINTBridge() \
-	PVRSRV_OK
+#define DeinitRGXBREAKPOINTBridge()
 
 #endif /* EXCLUDE_RGXBREAKPOINT_BRIDGE */

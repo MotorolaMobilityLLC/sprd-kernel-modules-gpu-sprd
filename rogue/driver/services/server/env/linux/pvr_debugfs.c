@@ -112,6 +112,12 @@ typedef struct DFS_FILE
 
 /* ----- native callbacks interface ----------------------------------------- */
 
+static void _WriteData(void *pvNativeHandle, const void *pvData,
+                       IMG_UINT32 uiSize)
+{
+	seq_write(pvNativeHandle, pvData, uiSize);
+}
+
 static void _VPrintf(void *pvNativeHandle, const IMG_CHAR *pszFmt,
                      va_list pArgs)
 {
@@ -141,6 +147,7 @@ static IMG_BOOL _HasOverflowed(void *pvNativeHandle)
 }
 
 static OSDI_IMPL_ENTRY_CB _g_sEntryCallbacks = {
+	.pfnWrite = _WriteData,
 	.pfnVPrintf = _VPrintf,
 	.pfnPuts = _Puts,
 	.pfnHasOverflowed = _HasOverflowed,
@@ -348,9 +355,9 @@ static loff_t _LSeek(struct file *psFile, loff_t iOffset, int iOrigin)
 		iRes = seq_lseek(psFile, iOffset, iOrigin);
 		if (iRes < 0)
 		{
-			PVR_DPF((PVR_DBG_ERROR, "%s: failed to set file position to offset "
-			        "%lld, pfnSeek() returned %lld", __func__,
-			        iOffset, iRes));
+			PVR_DPF((PVR_DBG_ERROR, "%s: failed to set file position in psFile<%p> to offset "
+			        "%lld, iOrigin %d, seq_lseek() returned %lld (dentry='%s')", __func__,
+			        psFile, iOffset, iOrigin, iRes, psFile->f_path.dentry->d_name.name));
 			goto return_;
 		}
 	}

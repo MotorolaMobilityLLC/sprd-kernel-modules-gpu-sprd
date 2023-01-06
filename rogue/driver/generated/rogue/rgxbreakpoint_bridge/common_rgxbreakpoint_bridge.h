@@ -73,6 +73,7 @@ typedef struct PVRSRV_BRIDGE_IN_RGXSETBREAKPOINT_TAG
 	IMG_UINT32 ui32BreakpointAddr;
 	IMG_UINT32 ui32DM;
 	IMG_UINT32 ui32HandlerAddr;
+	IMG_UINT32 ui32TempSpillingAddr;
 } __packed PVRSRV_BRIDGE_IN_RGXSETBREAKPOINT;
 
 /* Bridge out structure for RGXSetBreakpoint */

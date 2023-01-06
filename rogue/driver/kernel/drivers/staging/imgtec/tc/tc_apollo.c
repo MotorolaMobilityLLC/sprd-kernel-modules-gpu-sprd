@@ -70,6 +70,13 @@
 #include "tc_apollo_debugfs.h"
 #endif /* defined(SUPPORT_APOLLO_FPGA) */
 
+/*
+ * kernel_compatibility.h: This header is a special case and should always be
+ * the last file included, as it can affect definitions/declarations in files
+ * included after it.
+ */
+#include "kernel_compatibility.h"
+
 #define TC_INTERRUPT_FLAG_PDP      (1 << PDP1_INT_SHIFT)
 #define TC_INTERRUPT_FLAG_EXT      (1 << EXT_INT_SHIFT)
 
@@ -412,7 +419,7 @@ static void apollo_set_mem_latency(struct tc_device *tc,
 }
 
 static void apollo_fpga_update_dut_clk_freq(struct tc_device *tc,
-					    int *core_clock, int *mem_clock)
+					    int *core_clock, int *mem_clock, int *clock_multiplex)
 {
 	struct device *dev = &tc->pdev->dev;
 	u32 reg = 0;
@@ -467,12 +474,21 @@ static void apollo_fpga_update_dut_clk_freq(struct tc_device *tc,
 		dev_info(dev, "Using module param DUT mem clock value: %i\n",
 					*mem_clock);
 	}
+
+	if (*clock_multiplex == 0) {
+		*clock_multiplex = RGX_TC_CLOCK_MULTIPLEX;
+		dev_info(dev, "Using default DUT clock multiplex: %i\n",
+				 *clock_multiplex);
+	} else {
+		dev_info(dev, "Using module param DUT clock multiplex: %i\n",
+					*clock_multiplex);
+	}
 }
 
 #endif /* defined(SUPPORT_RGX) */
 
 static int apollo_hard_reset(struct tc_device *tc,
-			     int *core_clock, int *mem_clock, int sys_clock)
+			     int *core_clock, int *mem_clock, int sys_clock, int *clock_multiplex)
 {
 	u32 reg;
 	u32 reg_reset_n = 0;
@@ -514,7 +530,7 @@ static int apollo_hard_reset(struct tc_device *tc,
 
 #if defined(SUPPORT_RGX)
 	if (tc->version == APOLLO_VERSION_TCF_5) {
-		apollo_fpga_update_dut_clk_freq(tc, core_clock, mem_clock);
+		apollo_fpga_update_dut_clk_freq(tc, core_clock, mem_clock, clock_multiplex);
 	} else {
 		struct device *dev = &tc->pdev->dev;
 
@@ -534,6 +550,15 @@ static int apollo_hard_reset(struct tc_device *tc,
 		} else {
 			dev_info(dev, "Using module param DUT mem clock value: %i\n",
 						*mem_clock);
+		}
+
+		if (*clock_multiplex == 0) {
+			*clock_multiplex = RGX_TC_CLOCK_MULTIPLEX;
+			dev_info(dev, "Using default DUT clock multiplex: %i\n",
+					 *clock_multiplex);
+		} else {
+			dev_info(dev, "Using module param DUT clock multiplex: %i\n",
+						*clock_multiplex);
 		}
 	}
 
@@ -734,12 +759,12 @@ static u64 apollo_get_fpga_dma_mask(struct tc_device *tc)
 #endif /* defined(SUPPORT_RGX) || defined(SUPPORT_APOLLO_FPGA) */
 
 static int apollo_hw_init(struct tc_device *tc,
-			  int *core_clock, int *mem_clock, int sys_clock,
+			  int *core_clock, int *mem_clock, int sys_clock, int *clock_multiplex,
 			  int mem_latency, int mem_wresp_latency, int mem_mode)
 {
 	int err = 0;
 
-	err = apollo_hard_reset(tc, core_clock, mem_clock, sys_clock);
+	err = apollo_hard_reset(tc, core_clock, mem_clock, sys_clock, clock_multiplex);
 	if (err)
 		goto err_out;
 
@@ -829,7 +854,7 @@ apollo_detect_tc_version(struct tc_device *tc)
 		dev_err(&tc->pdev->dev,
 			"Unknown TCF core target build ID (0x%x) - assuming Hood ES2 - PLEASE REPORT TO ANDROID TEAM\n",
 			val);
-		/* Fall-through */
+		__fallthrough;
 	case 5:
 		dev_err(&tc->pdev->dev, "Looks like a Hood ES2 TC\n");
 		return APOLLO_VERSION_TCF_2;
@@ -1027,7 +1052,7 @@ static void apollo_dev_cleanup(struct tc_device *tc)
 }
 
 int apollo_init(struct tc_device *tc, struct pci_dev *pdev,
-		int *core_clock, int *mem_clock, int sys_clock,
+		int *core_clock, int *mem_clock, int sys_clock, int *clock_multiplex,
 		int pdp_mem_size, int secure_mem_size,
 		int mem_latency, int mem_wresp_latency, int mem_mode)
 {
@@ -1039,7 +1064,7 @@ int apollo_init(struct tc_device *tc, struct pci_dev *pdev,
 		goto err_out;
 	}
 
-	err = apollo_hw_init(tc, core_clock, mem_clock, sys_clock,
+	err = apollo_hw_init(tc, core_clock, mem_clock, sys_clock, clock_multiplex,
 			     mem_latency, mem_wresp_latency, mem_mode);
 	if (err) {
 		dev_err(&pdev->dev, "apollo_hw_init failed\n");

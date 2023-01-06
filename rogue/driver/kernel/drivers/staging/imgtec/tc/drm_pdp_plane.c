@@ -53,7 +53,11 @@
 #if defined(PDP_USE_ATOMIC)
 #include <drm/drm_atomic.h>
 #include <drm/drm_atomic_helper.h>
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 13, 0))
+#include <drm/drm_gem_atomic_helper.h>
+#else
 #include <drm/drm_gem_framebuffer_helper.h>
+#endif
 #endif
 
 #include <powervr/img_drm_fourcc.h>
@@ -67,10 +71,40 @@
 #include "kernel_compatibility.h"
 
 
+static const uint32_t apollo_plato_formats[] = {
+	DRM_FORMAT_XRGB8888,
+	DRM_FORMAT_ARGB8888,
+};
+static const uint32_t odin_formats[] = {
+	DRM_FORMAT_XRGB8888,
+	DRM_FORMAT_ARGB8888,
+	DRM_FORMAT_RGB565,
+};
+
+static const uint64_t default_modifiers[] = {
+	DRM_FORMAT_MOD_LINEAR,
+	DRM_FORMAT_MOD_INVALID
+};
+static const uint64_t odin_modifiers[] = {
+	DRM_FORMAT_MOD_LINEAR,
+	DRM_FORMAT_MOD_PVR_FBCDC_8x8_V12,
+	DRM_FORMAT_MOD_PVR_FBCDC_16x4_V12,
+	DRM_FORMAT_MOD_INVALID
+};
+
 #if defined(PDP_USE_ATOMIC)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 13, 0))
+static int pdp_plane_helper_atomic_check(struct drm_plane *plane,
+					 struct drm_atomic_state *atomic_state)
+#else
 static int pdp_plane_helper_atomic_check(struct drm_plane *plane,
 					 struct drm_plane_state *state)
+#endif
 {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 13, 0))
+	struct drm_plane_state *state = drm_atomic_get_new_plane_state(atomic_state,
+								       plane);
+#endif
 	struct drm_crtc_state *crtc_new_state;
 
 	if (!state->crtc)
@@ -85,8 +119,13 @@ static int pdp_plane_helper_atomic_check(struct drm_plane *plane,
 						   false, true);
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 13, 0))
+static void pdp_plane_helper_atomic_update(struct drm_plane *plane,
+					   struct drm_atomic_state *atomic_state)
+#else
 static void pdp_plane_helper_atomic_update(struct drm_plane *plane,
 					   struct drm_plane_state *old_state)
+#endif
 {
 	struct drm_plane_state *plane_state = plane->state;
 	struct drm_framebuffer *fb = plane_state->fb;
@@ -97,8 +136,54 @@ static void pdp_plane_helper_atomic_update(struct drm_plane *plane,
 	}
 }
 
+static bool pdp_plane_format_mod_supported(struct drm_plane *plane,
+					   uint32_t format,
+					   uint64_t modifier)
+{
+	struct pdp_drm_private *dev_priv = plane->dev->dev_private;
+	const uint32_t *supported_formats;
+	const uint64_t *supported_modifiers;
+	unsigned int num_supported_formats;
+	unsigned int num_supported_modifiers;
+	unsigned int i;
+
+	if (modifier == DRM_FORMAT_MOD_INVALID)
+		return false;
+
+	switch (dev_priv->version) {
+	case PDP_VERSION_ODIN:
+		supported_formats = odin_formats;
+		num_supported_formats = ARRAY_SIZE(odin_formats);
+		supported_modifiers = odin_modifiers;
+		num_supported_modifiers = ARRAY_SIZE(odin_modifiers);
+		break;
+	case PDP_VERSION_APOLLO:
+	case PDP_VERSION_PLATO:
+		supported_formats = apollo_plato_formats;
+		num_supported_formats = ARRAY_SIZE(apollo_plato_formats);
+		supported_modifiers = default_modifiers;
+		num_supported_modifiers = ARRAY_SIZE(default_modifiers);
+		break;
+	default:
+		DRM_ERROR("Unsupported PDP version\n");
+		return false;
+	}
+
+	for (i = 0; i < num_supported_formats; i++) {
+		if (supported_formats[i] == format) {
+			unsigned int j;
+
+			for (j = 0; j < num_supported_modifiers; j++)
+				if (supported_modifiers[j] == modifier)
+					return true;
+		}
+	}
+
+	return false;
+}
+
 static const struct drm_plane_helper_funcs pdp_plane_helper_funcs = {
-	.prepare_fb =  drm_gem_fb_prepare_fb,
+	.prepare_fb = drm_gem_plane_helper_prepare_fb,
 	.atomic_check = pdp_plane_helper_atomic_check,
 	.atomic_update = pdp_plane_helper_atomic_update,
 };
@@ -110,6 +195,7 @@ static const struct drm_plane_funcs pdp_plane_funcs = {
 	.reset = drm_atomic_helper_plane_reset,
 	.atomic_duplicate_state = drm_atomic_helper_plane_duplicate_state,
 	.atomic_destroy_state = drm_atomic_helper_plane_destroy_state,
+	.format_mod_supported = pdp_plane_format_mod_supported,
 };
 #else
 #define pdp_plane_funcs drm_primary_helper_funcs
@@ -121,27 +207,21 @@ struct drm_plane *pdp_plane_create(struct drm_device *dev,
 	struct pdp_drm_private *dev_priv = dev->dev_private;
 	struct drm_plane *plane;
 	const uint32_t *supported_formats;
+	const uint64_t *supported_modifiers;
 	uint32_t num_supported_formats;
-	const uint32_t apollo_plato_formats[] = {
-		DRM_FORMAT_XRGB8888,
-		DRM_FORMAT_ARGB8888,
-	};
-	const uint32_t odin_formats[] = {
-		DRM_FORMAT_XRGB8888,
-		DRM_FORMAT_ARGB8888,
-		DRM_FORMAT_RGB565,
-	};
 	int err;
 
 	switch (dev_priv->version) {
 	case PDP_VERSION_ODIN:
 		supported_formats = odin_formats;
 		num_supported_formats = ARRAY_SIZE(odin_formats);
+		supported_modifiers = odin_modifiers;
 		break;
 	case PDP_VERSION_APOLLO:
 	case PDP_VERSION_PLATO:
 		supported_formats = apollo_plato_formats;
 		num_supported_formats = ARRAY_SIZE(apollo_plato_formats);
+		supported_modifiers = default_modifiers;
 		break;
 	default:
 		DRM_ERROR("Unsupported PDP version\n");
@@ -158,7 +238,7 @@ struct drm_plane *pdp_plane_create(struct drm_device *dev,
 	err = drm_universal_plane_init(dev, plane, 0, &pdp_plane_funcs,
 				       supported_formats,
 				       num_supported_formats,
-				       NULL, type, NULL);
+				       supported_modifiers, type, NULL);
 	if (err)
 		goto err_plane_free;
 

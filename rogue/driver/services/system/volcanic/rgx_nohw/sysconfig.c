@@ -68,6 +68,12 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "validation_soc.h"
 #endif
 
+/* Change to test CPU_LOCAL sys layers*/
+#define UMA_HEAP_USAGE_FLAG PHYS_HEAP_USAGE_GPU_LOCAL
+//#define UMA_HEAP_USAGE_FLAG PHYS_HEAP_USAGE_CPU_LOCAL
+#define UMA_DEFAULT_HEAP PVRSRV_PHYS_HEAP_GPU_LOCAL
+//#define UMA_DEFAULT_HEAP PVRSRV_PHYS_HEAP_CPU_LOCAL
+
 /*
 	CPU to Device physical address translation
 */
@@ -145,7 +151,7 @@ static PVRSRV_ERROR PhysHeapsCreate(PHYS_HEAP_CONFIG **ppasPhysHeapsOut,
 	pasPhysHeaps[ui32NextHeapID].pszPDumpMemspaceName = "SYSMEM";
 	pasPhysHeaps[ui32NextHeapID].eType = PHYS_HEAP_TYPE_UMA;
 	pasPhysHeaps[ui32NextHeapID].psMemFuncs = &gsPhysHeapFuncs;
-	pasPhysHeaps[ui32NextHeapID].ui32UsageFlags = PHYS_HEAP_USAGE_GPU_LOCAL;
+	pasPhysHeaps[ui32NextHeapID].ui32UsageFlags = UMA_HEAP_USAGE_FLAG;
 	ui32NextHeapID++;
 
 #if defined(SUPPORT_TRUSTED_DEVICE)
@@ -155,6 +161,7 @@ static PVRSRV_ERROR PhysHeapsCreate(PHYS_HEAP_CONFIG **ppasPhysHeapsOut,
 	pasPhysHeaps[ui32NextHeapID].ui32UsageFlags =
 		PHYS_HEAP_USAGE_FW_CODE | PHYS_HEAP_USAGE_FW_PRIV_DATA;
 	ui32NextHeapID++;
+
 	pasPhysHeaps[ui32NextHeapID].pszPDumpMemspaceName = "TDSECBUFMEM";
 	pasPhysHeaps[ui32NextHeapID].eType = PHYS_HEAP_TYPE_UMA;
 	pasPhysHeaps[ui32NextHeapID].psMemFuncs = &gsPhysHeapFuncs;
@@ -243,6 +250,8 @@ PVRSRV_ERROR SysDevInit(void *pvOSDevice, PVRSRV_DEVICE_CONFIG **ppsDevConfig)
 	psDevConfig->pasPhysHeaps			= pasPhysHeaps;
 	psDevConfig->ui32PhysHeapCount		= uiPhysHeapCount;
 
+	psDevConfig->eDefaultHeap = UMA_DEFAULT_HEAP;
+
 	/* No power management on no HW system */
 	psDevConfig->pfnPrePowerState       = NULL;
 	psDevConfig->pfnPostPowerState      = NULL;
@@ -262,10 +271,22 @@ PVRSRV_ERROR SysDevInit(void *pvOSDevice, PVRSRV_DEVICE_CONFIG **ppsDevConfig)
 
 	/* Pdump validation system registers */
 #if defined(SUPPORT_VALIDATION) && defined(PDUMP)
-	PVRSRVConfigureSysCtrl(NULL, PDUMP_FLAGS_CONTINUOUS);
+	{
+		PVRSRV_DEVICE_NODE* psDeviceNode;
+
+		/* Pretend we are calling for device 0 for now
+		   (sDeviceNode.sDevId.ui32InternalID is 0 above)
+		   until this code can be moved elsewhere.
+		 */
+		psDeviceNode = OSAllocZMem(sizeof(*psDeviceNode));
+		PVR_LOG_RETURN_IF_NOMEM(psDeviceNode, "OSAllocZMem");
+
+		PVRSRVConfigureSysCtrl(psDeviceNode, NULL, PDUMP_FLAGS_CONTINUOUS);
 #if defined(SUPPORT_SECURITY_VALIDATION)
-	PVRSRVConfigureTrustedDevice(NULL, PDUMP_FLAGS_CONTINUOUS);
+		PVRSRVConfigureTrustedDevice(psDeviceNode, NULL, PDUMP_FLAGS_CONTINUOUS);
 #endif
+		OSFreeMem(psDeviceNode);
+	}
 #endif
 
 	psDevConfig->bHasFBCDCVersion31 = IMG_TRUE;

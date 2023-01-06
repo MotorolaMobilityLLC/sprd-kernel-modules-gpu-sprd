@@ -71,50 +71,52 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  Module parameters (volcanic-specific)
 ******************************************************************************/
 #define APPHINT_LIST_MODPARAM \
-/* name,                            type,           class,       default,                                         helper,         */ \
-X(FabricCoherencyOverride,          UINT32,         ALWAYS,      PVRSRV_APPHINT_FABRICCOHERENCYOVERRIDE,          NO_PARAM_TABLE   ) \
+/* name,                            type,           class,       default,                                         helper,          guest,         */ \
+X(FabricCoherencyOverride,          UINT32,         ALWAYS,      PVRSRV_APPHINT_FABRICCOHERENCYOVERRIDE,          NO_PARAM_TABLE,  ALWAYS          ) \
 \
-X(EnableGenericDMKillingRandMode,   BOOL,           VALIDATION,  PVRSRV_APPHINT_ENABLEDMKILLINGRANDMODE,          NO_PARAM_TABLE   ) \
-X(KillingCtl,                       UINT32,         VALIDATION,  PVRSRV_APPHINT_KILLINGCTL,                       NO_PARAM_TABLE   ) \
-X(CDMTDMKillingCtl,                 UINT32,         VALIDATION,  PVRSRV_APPHINT_CDMTDM_KILLINGCTL,                NO_PARAM_TABLE   ) \
-X(HWValEnableSPUPowerMaskChange,    BOOL,           VALIDATION,  PVRSRV_APPHINT_HWVALENABLESPUPOWERMASKCHANGE,    NO_PARAM_TABLE   ) \
-X(HWValAvailableSPUMask,            UINT32,         VALIDATION,  PVRSRV_APPHINT_HWVALAVAILABLESPUMASK,            NO_PARAM_TABLE   ) \
+X(EnableGenericDMKillingRandMode,   BOOL,           VALIDATION,  PVRSRV_APPHINT_ENABLEDMKILLINGRANDMODE,          NO_PARAM_TABLE,  ALWAYS          ) \
+X(KillingCtl,                       UINT32,         VALIDATION,  PVRSRV_APPHINT_KILLINGCTL,                       NO_PARAM_TABLE,  ALWAYS          ) \
+X(CDMTDMKillingCtl,                 UINT32,         VALIDATION,  PVRSRV_APPHINT_CDMTDM_KILLINGCTL,                NO_PARAM_TABLE,  ALWAYS          ) \
+X(HWValEnableSPUPowerMaskChange,    BOOL,           VALIDATION,  PVRSRV_APPHINT_HWVALENABLESPUPOWERMASKCHANGE,    NO_PARAM_TABLE,  ALWAYS          ) \
+X(HWValAvailableSPUMask,            UINT32,         VALIDATION,  PVRSRV_APPHINT_HWVALAVAILABLESPUMASK,            NO_PARAM_TABLE,  ALWAYS          ) \
+X(HWValAvailableRACMask,            UINT32,         VALIDATION,  PVRSRV_APPHINT_HWVALAVAILABLERACMASK,            NO_PARAM_TABLE,  ALWAYS          ) \
+X(EnableSPUClockGating,             BOOL,           ALWAYS,      PVRSRV_APPHINT_ENABLESPUCLOCKGATING,             NO_PARAM_TABLE,  ALWAYS          ) \
 \
-X(HWPerfDisableCounterFilter,       BOOL,           VALIDATION,  PVRSRV_APPHINT_HWPERFDISABLECOUNTERFILTER,       NO_PARAM_TABLE   ) \
+X(HWPerfDisableCounterFilter,       BOOL,           VALIDATION,  PVRSRV_APPHINT_HWPERFDISABLECOUNTERFILTER,       NO_PARAM_TABLE,  ALWAYS          ) \
 \
-X(ISPSchedulingLatencyMode,         UINT32,         ALWAYS,      PVRSRV_APPHINT_ISPSCHEDULINGLATENCYMODE,         NO_PARAM_TABLE   ) \
-X(ValidateSOCUSCTimer,              BOOL,           VALIDATION,  PVRSRV_APPHINT_VALIDATESOCUSCTIMERS,             NO_PARAM_TABLE   ) \
+X(ISPSchedulingLatencyMode,         UINT32,         ALWAYS,      PVRSRV_APPHINT_ISPSCHEDULINGLATENCYMODE,         NO_PARAM_TABLE,  ALWAYS          ) \
+X(ValidateSOCUSCTimer,              BOOL,           VALIDATION,  PVRSRV_APPHINT_VALIDATESOCUSCTIMERS,             NO_PARAM_TABLE,  ALWAYS          ) \
 \
-X(USRMNumRegionsVDM,                UINT32,         VALIDATION,  0,                                               NO_PARAM_TABLE   ) \
-X(USRMNumRegionsCDM,                UINT32,         VALIDATION,  0,                                               NO_PARAM_TABLE   ) \
-X(USRMNumRegionsDDM,                UINT32,         VALIDATION,  0,                                               NO_PARAM_TABLE   ) \
-X(USRMNumRegionsPDM,                UINT32,         VALIDATION,  0,                                               NO_PARAM_TABLE   ) \
-X(USRMNumRegionsTDM,                UINT32,         VALIDATION,  0,                                               NO_PARAM_TABLE   ) \
+X(USRMNumRegionsVDM,                UINT32,         VALIDATION,  0,                                               NO_PARAM_TABLE,  ALWAYS          ) \
+X(USRMNumRegionsCDM,                UINT32,         VALIDATION,  0,                                               NO_PARAM_TABLE,  ALWAYS          ) \
+X(USRMNumRegionsDDM,                UINT32,         VALIDATION,  0,                                               NO_PARAM_TABLE,  ALWAYS          ) \
+X(USRMNumRegionsPDM,                UINT32,         VALIDATION,  0,                                               NO_PARAM_TABLE,  ALWAYS          ) \
+X(USRMNumRegionsTDM,                UINT32,         VALIDATION,  0,                                               NO_PARAM_TABLE,  ALWAYS          ) \
 \
-X(UVBRMNumRegionsVDM,               UINT64,         VALIDATION,  0,                                               NO_PARAM_TABLE   ) \
-X(UVBRMNumRegionsDDM,               UINT32,         VALIDATION,  0,                                               NO_PARAM_TABLE   ) \
+X(UVBRMNumRegionsVDM,               UINT64,         VALIDATION,  0,                                               NO_PARAM_TABLE,  ALWAYS          ) \
+X(UVBRMNumRegionsDDM,               UINT32,         VALIDATION,  0,                                               NO_PARAM_TABLE,  ALWAYS          ) \
 \
-X(CDMArbitrationOverride,           UINT32,         ALWAYS,      PVRSRV_APPHINT_CDMARBITRATIONOVERRIDE,           NO_PARAM_TABLE   ) \
+X(CDMArbitrationOverride,           UINT32,         ALWAYS,      PVRSRV_APPHINT_CDMARBITRATIONOVERRIDE,           NO_PARAM_TABLE,  ALWAYS          ) \
 \
-X(DualLockstepFWProcessor,          BOOL,           VALIDATION,  1,                                               NO_PARAM_TABLE   ) \
-X(GPUStatePin,                      BOOL,           VALIDATION,  0,                                               NO_PARAM_TABLE   ) \
-X(PowerDomainKickInterval,          UINT32,         VALIDATION,  0,                                               NO_PARAM_TABLE   ) \
+X(DualLockstepFWProcessor,          BOOL,           VALIDATION,  1,                                               NO_PARAM_TABLE,  ALWAYS          ) \
+X(GPUStatePin,                      BOOL,           VALIDATION,  0,                                               NO_PARAM_TABLE,  ALWAYS          ) \
+X(PowerDomainKickInterval,          UINT32,         VALIDATION,  0,                                               NO_PARAM_TABLE,  ALWAYS          ) \
 \
-X(RCEDisableMask,                   UINT64,         VALIDATION,  PVRSRV_APPHINT_RCEDISABLEMASK,                   NO_PARAM_TABLE   ) \
-
+X(RCEDisableMask,                   UINT64,         VALIDATION,  PVRSRV_APPHINT_RCEDISABLEMASK,                   NO_PARAM_TABLE,  ALWAYS          ) \
+X(PCGPktDropThresh,                 UINT32,         VALIDATION,  PVRSRV_APPHINT_PCGPKTDROPTHRESH,                 NO_PARAM_TABLE,  ALWAYS          ) \
 /*
 *******************************************************************************
  Debugfs parameters (volcanic-specific) - driver configuration
 ******************************************************************************/
 #define APPHINT_LIST_DEBUGINFO \
-/* name,                            type,           class,       default,                                         helper,         */ \
+/* name,                            type,           class,       default,                                         helper,          guest,         */ \
 
 /*
 *******************************************************************************
  Debugfs parameters (volcanic-specific) - device configuration
 ******************************************************************************/
 #define APPHINT_LIST_DEBUGINFO_DEVICE \
-/* name,                            type,           class,       default,                                         helper,         */ \
+/* name,                            type,           class,       default,                                         helper,          guest,         */ \
 
 /*
 *******************************************************************************
@@ -133,7 +135,7 @@ X(RCEDisableMask,                   UINT64,         VALIDATION,  PVRSRV_APPHINT_
 ******************************************************************************/
 /* Unique ID for all AppHints */
 typedef enum {
-#define X(a, b, c, d, e) APPHINT_ID_ ## a,
+#define X(a, b, c, d, e, f) APPHINT_ID_ ## a,
 	APPHINT_LIST_ALL
 #undef X
 	APPHINT_ID_MAX
@@ -141,7 +143,7 @@ typedef enum {
 
 /* ID for build variable Apphints - used for build variable only structures */
 typedef enum {
-#define X(a, b, c, d, e) APPHINT_BUILDVAR_ID_ ## a,
+#define X(a, b, c, d, e, f) APPHINT_BUILDVAR_ID_ ## a,
 	APPHINT_LIST_BUILDVAR_COMMON
 	APPHINT_LIST_BUILDVAR
 #undef X
@@ -150,7 +152,7 @@ typedef enum {
 
 /* ID for Modparam Apphints - used for modparam only structures */
 typedef enum {
-#define X(a, b, c, d, e) APPHINT_MODPARAM_ID_ ## a,
+#define X(a, b, c, d, e, f) APPHINT_MODPARAM_ID_ ## a,
 	APPHINT_LIST_MODPARAM_COMMON
 	APPHINT_LIST_MODPARAM
 #undef X
@@ -159,7 +161,7 @@ typedef enum {
 
 /* ID for Debugfs Apphints - used for debugfs only structures */
 typedef enum {
-#define X(a, b, c, d, e) APPHINT_DEBUGINFO_ID_ ## a,
+#define X(a, b, c, d, e, f) APPHINT_DEBUGINFO_ID_ ## a,
 	APPHINT_LIST_DEBUGINFO_COMMON
 	APPHINT_LIST_DEBUGINFO
 #undef X
@@ -168,7 +170,7 @@ typedef enum {
 
 /* ID for Debugfs Device Apphints - used for debugfs device only structures */
 typedef enum {
-#define X(a, b, c, d, e) APPHINT_DEBUGINFO_DEVICE_ID_ ## a,
+#define X(a, b, c, d, e, f) APPHINT_DEBUGINFO_DEVICE_ID_ ## a,
 	APPHINT_LIST_DEBUGINFO_DEVICE_COMMON
 	APPHINT_LIST_DEBUGINFO_DEVICE
 #undef X

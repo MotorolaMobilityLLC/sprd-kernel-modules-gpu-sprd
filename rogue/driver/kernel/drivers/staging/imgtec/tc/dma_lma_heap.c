@@ -49,6 +49,7 @@
 #include <linux/dma-map-ops.h>
 #include <linux/highmem.h>
 #include <linux/kernel.h>
+#include <linux/version.h>
 
 #include "dma_lma_heap.h"
 
@@ -281,11 +282,16 @@ static int lma_heap_mmap(struct dma_buf *dmabuf, struct vm_area_struct *vma)
 	return err;
 }
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0))
 static void *lma_heap_vmap(struct dma_buf *dmabuf)
+#else
+static int lma_heap_vmap(struct dma_buf *dmabuf, struct dma_buf_map *map)
+#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0) */
 {
 	struct lma_heap_buffer *buffer =
 		(struct lma_heap_buffer *)dmabuf->priv;
 	struct dma_lma_heap *lma_heap;
+	__maybe_unused int ret = 0;
 	struct sg_table *table;
 	struct page *page;
 	phys_addr_t paddr;
@@ -316,6 +322,7 @@ static void *lma_heap_vmap(struct dma_buf *dmabuf)
 	vaddr = ioremap_wc(paddr, buffer->len);
 	if (IS_ERR(vaddr)) {
 		pr_err("%s: Failed to map buffer to kernel space\n", __func__);
+		ret = -ENOMEM;
 		goto unlock;
 	}
 
@@ -323,11 +330,22 @@ static void *lma_heap_vmap(struct dma_buf *dmabuf)
 	buffer->vmap_cnt++;
 
 unlock:
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0))
+	if (ret == 0)
+		dma_buf_map_set_vaddr_iomem(map, vaddr);
+	mutex_unlock(&buffer->lock);
+	return ret;
+#else
 	mutex_unlock(&buffer->lock);
 	return vaddr;
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0) */
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0))
+static void lma_heap_vunmap(struct dma_buf *dmabuf, struct dma_buf_map *map)
+#else
 static void lma_heap_vunmap(struct dma_buf *dmabuf, void *vaddr)
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0) */
 {
 	struct lma_heap_buffer *buffer =
 		(struct lma_heap_buffer *)dmabuf->priv;
@@ -340,6 +358,10 @@ static void lma_heap_vunmap(struct dma_buf *dmabuf, void *vaddr)
 		iounmap(buffer->vaddr);
 		buffer->vaddr = NULL;
 	}
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0))
+        dma_buf_map_clear(map);
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0) */
 
 	mutex_unlock(&buffer->lock);
 }

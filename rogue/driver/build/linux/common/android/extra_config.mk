@@ -144,6 +144,11 @@ $(eval $(call TunableKernelConfigC,ADF_FBDEV_NUM_PREFERRED_BUFFERS,))
 $(eval $(call TunableKernelConfigC,PVRSRV_ENABLE_PVR_ION_STATS,))
 $(eval $(call TunableKernelConfigMake,PVRSRV_ENABLE_PVR_ION_STATS,))
 
+$(eval $(call TunableKernelConfigC,PVR_ANDROID_HAS_DMA_HEAP_FIND,))
+
+$(eval $(call TunableKernelConfigC,PVRSRV_ANDROID_TRACE_GPU_WORK_PERIOD,))
+$(eval $(call TunableKernelConfigMake,PVRSRV_ANDROID_TRACE_GPU_WORK_PERIOD,))
+
 # Newer Android versions have moved the libdrm includes in an incompatible
 # way. We need to compile-time detect the new location, and if it's missing,
 # use the old structure.

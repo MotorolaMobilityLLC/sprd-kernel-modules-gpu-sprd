@@ -402,7 +402,7 @@ void RgxSuspend(struct rk_context *platform)
 PVRSRV_ERROR RkPrePowerState(IMG_HANDLE hSysData,
 							 PVRSRV_SYS_POWER_STATE eNewPowerState,
 							 PVRSRV_SYS_POWER_STATE eCurrentPowerState,
-							 IMG_BOOL bForced)
+							 PVRSRV_POWER_FLAGS ePwrFlags)
 {
 	struct rk_context *platform = (struct rk_context *)hSysData;
 
@@ -415,7 +415,7 @@ PVRSRV_ERROR RkPrePowerState(IMG_HANDLE hSysData,
 PVRSRV_ERROR RkPostPowerState(IMG_HANDLE hSysData,
 							  PVRSRV_SYS_POWER_STATE eNewPowerState,
 							  PVRSRV_SYS_POWER_STATE eCurrentPowerState,
-							  IMG_BOOL bForced)
+							  PVRSRV_POWER_FLAGS ePwrFlags)
 {
 	struct rk_context *platform = (struct rk_context *)hSysData;
 

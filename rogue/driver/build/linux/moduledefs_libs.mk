@@ -128,7 +128,7 @@ ifneq ($(SYSROOT),)
   PKG_CONFIG_LIBDIR := $(PKG_CONFIG_LIBDIR):${SYSROOT}/usr/lib64/pkgconfig
   PKG_CONFIG_LIBDIR := $(PKG_CONFIG_LIBDIR):${SYSROOT}/usr/lib/pkgconfig
   PKG_CONFIG_LIBDIR := $(PKG_CONFIG_LIBDIR):${SYSROOT}/usr/share/pkgconfig
-  PKG_CONFIF_LIBDIR := $(PKG_CONFIG_LIBDIR):${SYSROOT}/usr/lib64/driver/pkgconfig
+  PKG_CONFIG_LIBDIR := $(PKG_CONFIG_LIBDIR):${SYSROOT}/usr/lib64/driver/pkgconfig
   PKG_CONFIG_LIBDIR := $(PKG_CONFIG_LIBDIR):${SYSROOT}/usr/lib/driver/pkgconfig
 
   # SYSROOT doesn't always do the right thing. So explicitly add necessary

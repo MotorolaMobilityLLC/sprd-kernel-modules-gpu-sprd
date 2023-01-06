@@ -85,22 +85,6 @@
 #define SAI_STATUS_ERROR     2
 
 /* Odin/Orion shared masks */
-static const u32 REVISION_MAJOR_MASK[] = {
-	ODN_REVISION_MAJOR_MASK,
-	SRS_REVISION_MAJOR_MASK
-};
-static const u32 REVISION_MAJOR_SHIFT[] = {
-	ODN_REVISION_MAJOR_SHIFT,
-	SRS_REVISION_MAJOR_SHIFT
-};
-static const u32 REVISION_MINOR_MASK[] = {
-	ODN_REVISION_MINOR_MASK,
-	SRS_REVISION_MINOR_MASK
-};
-static const u32 REVISION_MINOR_SHIFT[] = {
-	ODN_REVISION_MINOR_SHIFT,
-	SRS_REVISION_MINOR_SHIFT
-};
 static const u32 CHANGE_SET_SET_MASK[] = {
 	ODN_CHANGE_SET_SET_MASK,
 	SRS_CHANGE_SET_SET_MASK
@@ -716,16 +700,18 @@ static int odin_fpga_set_dut_if_clk(struct tc_device *tc,
 }
 
 static void odin_fpga_update_dut_clk_freq(struct tc_device *tc,
-					  int *core_clock, int *mem_clock)
+					  int *core_clock, int *mem_clock, int *clock_multiplex)
 {
 	struct device *dev = &tc->pdev->dev;
 	int dut_clk_info = 0;
+	int dut_clk_multiplex = 0;
 
 #if defined(SUPPORT_FPGA_DUT_CLK_INFO)
 	dut_clk_info = ioread32(tc->tcf.registers + ODN_CORE_DUT_CLK_INFO);
 #endif
 
-	if ((dut_clk_info != 0) && (dut_clk_info != 0xbaadface) && (dut_clk_info != 0xffffffff)) {
+	if ((dut_clk_info != 0) && (dut_clk_info != 0xbaadface)
+				&& (dut_clk_info != 0xffffffff)) {
 		dev_info(dev, "ODN_DUT_CLK_INFO = %08x\n", dut_clk_info);
 
 		if (*core_clock == 0) {
@@ -747,35 +733,60 @@ static void odin_fpga_update_dut_clk_freq(struct tc_device *tc,
 			dev_info(dev, "Using module param DUT mem clock value: %i\n",
 						*mem_clock);
 		}
+	} else {
+		if (*core_clock == 0) {
+			*core_clock = RGX_TC_CORE_CLOCK_SPEED;
+			dev_info(dev, "Using default DUT core clock value: %i\n",
+					 *core_clock);
+		} else {
+			dev_info(dev, "Using module param DUT core clock value: %i\n",
+						*core_clock);
+		}
 
-		return;
+		if (*mem_clock == 0) {
+			*mem_clock = RGX_TC_MEM_CLOCK_SPEED;
+			dev_info(dev, "Using default DUT mem clock value: %i\n",
+					 *mem_clock);
+		} else {
+			dev_info(dev, "Using module param DUT mem clock value: %i\n",
+						*mem_clock);
+		}
 	}
 
-	if (*core_clock == 0) {
-		*core_clock = RGX_TC_CORE_CLOCK_SPEED;
-		dev_info(dev, "Using default DUT core clock value: %i\n",
-				 *core_clock);
-	} else {
-		dev_info(dev, "Using module param DUT core clock value: %i\n",
-					*core_clock);
-	}
+#if defined(SUPPORT_FPGA_DUT_MULTIPLEX_INFO)
+	dut_clk_multiplex = ioread32(tc->tcf.registers + ODN_CORE_DUT_MULTIPLX_INFO);
+#endif
 
-	if (*mem_clock == 0) {
-		*mem_clock = RGX_TC_MEM_CLOCK_SPEED;
-		dev_info(dev, "Using default DUT mem clock value: %i\n",
-				 *mem_clock);
+	if ((dut_clk_multiplex != 0) && (dut_clk_multiplex != 0xbaadface)
+					&& (dut_clk_multiplex != 0xffffffff)) {
+		dev_info(dev, "ODN_DUT_MULTIPLX_INFO = %08x\n", dut_clk_multiplex);
+		if (*clock_multiplex == 0) {
+			*clock_multiplex = ((dut_clk_multiplex & ODN_DUT_MULTIPLX_INFO_MEM_MASK)
+					   >> ODN_DUT_MULTIPLX_INFO_MEM_SHIFT);
+			dev_info(dev, "Using register DUT clock multiplex: %i\n",
+						*clock_multiplex);
+		} else {
+			dev_info(dev, "Using module param DUT clock multiplex: %i\n",
+						*clock_multiplex);
+		}
 	} else {
-		dev_info(dev, "Using module param DUT mem clock value: %i\n",
-					*mem_clock);
+		if (*clock_multiplex == 0) {
+			*clock_multiplex = RGX_TC_CLOCK_MULTIPLEX;
+			dev_info(dev, "Using default DUT clock multiplex: %i\n",
+					 *clock_multiplex);
+		} else {
+			dev_info(dev, "Using module param DUT clock multiplex: %i\n",
+						*clock_multiplex);
+		}
 	}
 }
 
 static int odin_hard_reset_fpga(struct tc_device *tc,
-				int *core_clock, int *mem_clock)
+				int *core_clock, int *mem_clock, int *clock_mulitplex)
 {
 	int err = 0;
 
-	odin_fpga_update_dut_clk_freq(tc, core_clock, mem_clock);
+	odin_fpga_update_dut_clk_freq(tc, core_clock, mem_clock, clock_mulitplex);
 
 	err = odin_fpga_set_dut_core_clk(tc, ODN_INPUT_CLOCK_SPEED, *core_clock);
 	if (err != 0)
@@ -1223,13 +1234,14 @@ err_out:
 #endif /* defined(SUPPORT_RGX) */
 
 /* Do a hard reset on the DUT */
-static int odin_hard_reset(struct tc_device *tc, int *core_clock, int *mem_clock)
+static int odin_hard_reset(struct tc_device *tc, int *core_clock, int *mem_clock,
+							int *clock_mulitplex)
 {
 #if defined(SUPPORT_RGX)
 	if (tc->version == ODIN_VERSION_TCF_BONNIE)
 		return odin_hard_reset_bonnie(tc);
 	if (tc->version == ODIN_VERSION_FPGA)
-		return odin_hard_reset_fpga(tc, core_clock, mem_clock);
+		return odin_hard_reset_fpga(tc, core_clock, mem_clock, clock_mulitplex);
 	if (tc->version == ODIN_VERSION_ORION)
 		return orion_hard_reset(tc, core_clock, mem_clock);
 
@@ -1314,13 +1326,13 @@ static void odin_set_fbc_bypass(struct tc_device *tc, bool fbc_bypass)
 }
 
 static int odin_hw_init(struct tc_device *tc, int *core_clock,
-			int *mem_clock, int mem_latency,
+			int *mem_clock, int *clock_mulitplex, int mem_latency,
 			int mem_wresp_latency, int mem_mode,
 			bool fbc_bypass)
 {
 	int err;
 
-	err = odin_hard_reset(tc, core_clock, mem_clock);
+	err = odin_hard_reset(tc, core_clock, mem_clock, clock_mulitplex);
 	if (err) {
 		dev_err(&tc->pdev->dev, "Failed to initialise Odin");
 		goto err_out;
@@ -1532,10 +1544,17 @@ static int odin_dev_init(struct tc_device *tc, struct pci_dev *pdev,
 	dev_info(&tc->pdev->dev, "Odin RTL has %u DMA(s)\n", tc->dma_nchan);
 	mutex_init(&tc->dma_mutex);
 
-	val = ioread32(tc->tcf.registers +
-		       common_reg_offset(tc, CORE_REVISION));
-	dev_info(&pdev->dev, "%s = 0x%08x\n",
-		 common_reg_name(tc, CORE_REVISION), val);
+	if (tc->odin) {
+		val = ioread32(tc->tcf.registers +
+		       ODN_CORE_REL);
+		dev_info(&pdev->dev, "%s = 0x%08x\n",
+			"ODN_CORE_REL", val);
+	} else {
+		val = ioread32(tc->tcf.registers +
+		       SRS_CORE_REVISION);
+		dev_info(&pdev->dev, "%s = 0x%08x\n",
+			"SRS_CORE_REVISION", val);
+	}
 
 	val = ioread32(tc->tcf.registers +
 		       common_reg_offset(tc, CORE_CHANGE_SET));
@@ -1602,7 +1621,7 @@ static u32 odin_interrupt_id_to_flag(int interrupt_id)
 }
 
 int odin_init(struct tc_device *tc, struct pci_dev *pdev,
-	      int *core_clock, int *mem_clock,
+	      int *core_clock, int *mem_clock, int *clock_mulitplex,
 	      int pdp_mem_size, int secure_mem_size,
 	      int mem_latency, int mem_wresp_latency, int mem_mode,
 	      bool fbc_bypass)
@@ -1615,7 +1634,7 @@ int odin_init(struct tc_device *tc, struct pci_dev *pdev,
 		goto err_out;
 	}
 
-	err = odin_hw_init(tc, core_clock, mem_clock,
+	err = odin_hw_init(tc, core_clock, mem_clock, clock_mulitplex,
 			   mem_latency, mem_wresp_latency, mem_mode,
 			   fbc_bypass);
 	if (err) {
@@ -2021,17 +2040,31 @@ int odin_sys_strings(struct tc_device *tc,
 	char temp_str[12];
 	u32 val;
 
-	/* Read the Odin major and minor revision ID register Rx-xx */
-	val = ioread32(tc->tcf.registers +
-		       common_reg_offset(tc, CORE_REVISION));
+	if (tc->odin) {
+		/* Read the Odin major and minor revision ID register Rx-xx */
+		val = ioread32(tc->tcf.registers +
+				   ODN_CORE_REL);
 
-	snprintf(str_tcf_core_rev,
-		 size_tcf_core_rev,
-		 "%d.%d",
-		 HEX2DEC((val & REVISION_MAJOR_MASK[tcver])
-			 >> REVISION_MAJOR_SHIFT[tcver]),
-		 HEX2DEC((val & REVISION_MINOR_MASK[tcver])
-			 >> REVISION_MINOR_SHIFT[tcver]));
+		snprintf(str_tcf_core_rev,
+			 size_tcf_core_rev,
+			 "%d.%d",
+			 HEX2DEC((val & ODN_REL_MAJOR_MASK)
+				 >> ODN_REL_MAJOR_SHIFT),
+			 HEX2DEC((val & ODN_REL_MINOR_MASK)
+				 >> ODN_REL_MINOR_SHIFT));
+	} else {
+		/* Read the Orion major and minor revision ID register Rx-xx */
+		val = ioread32(tc->tcf.registers +
+				   SRS_CORE_REVISION);
+
+		snprintf(str_tcf_core_rev,
+			 size_tcf_core_rev,
+			 "%d.%d",
+			 HEX2DEC((val & SRS_REVISION_MAJOR_MASK)
+				 >> SRS_REVISION_MAJOR_SHIFT),
+			 HEX2DEC((val & SRS_REVISION_MINOR_MASK)
+				 >> SRS_REVISION_MINOR_SHIFT));
+	}
 
 	dev_info(&tc->pdev->dev, "%s core revision %s\n",
 		 odin_tc_name(tc), str_tcf_core_rev);
@@ -2089,9 +2122,9 @@ bool odin_pfim_compatible(struct tc_device *tc)
 	u32 val;
 
 	val = ioread32(tc->tcf.registers +
-		       ODN_CORE_REVISION);
+		       ODN_CORE_REL);
 
-	return ((REG_FIELD_GET(val, ODN_REVISION_MAJOR)
+	return ((REG_FIELD_GET(val, ODN_REL_MAJOR)
 		 >= ODIN_PFIM_RELNUM));
 }
 
@@ -2136,6 +2169,7 @@ struct dma_chan *odin_cdma_chan(struct tc_device *tc, char *name)
 		chan = dma_request_chan(&tc->dma_dev->dev, name);
 #else
 		dma_cap_mask_t mask;
+
 		dma_cap_zero(mask);
 		dma_cap_set(DMA_SLAVE, mask);
 		chan = dma_request_channel(mask,

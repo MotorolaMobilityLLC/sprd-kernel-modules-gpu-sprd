@@ -58,5 +58,5 @@ $(PVRSRVKM_NAME)-y += \
 
 ifeq ($(SUPPORT_ION),1)
  $(PVRSRVKM_NAME)-y += \
-  services/system/rogue/common/env/linux/ion_support_generic.o
+  services/system/common/env/linux/ion_support_generic.o
 endif

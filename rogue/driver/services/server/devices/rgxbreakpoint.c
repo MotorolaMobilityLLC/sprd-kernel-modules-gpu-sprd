@@ -55,6 +55,7 @@ PVRSRV_ERROR PVRSRVRGXSetBreakpointKM(CONNECTION_DATA    * psConnection,
                                       PVRSRV_DEVICE_NODE * psDeviceNode,
                                       IMG_HANDLE           hMemCtxPrivData,
                                       RGXFWIF_DM           eFWDataMaster,
+                                      IMG_UINT32           ui32TempSpillingAddr,
                                       IMG_UINT32           ui32BPAddr,
                                       IMG_UINT32           ui32HandlerAddr,
                                       IMG_UINT32           ui32DataMaster)
@@ -66,6 +67,7 @@ PVRSRV_ERROR PVRSRVRGXSetBreakpointKM(CONNECTION_DATA    * psConnection,
 	IMG_UINT32			ui32kCCBCommandSlot;
 
 	PVR_UNREFERENCED_PARAMETER(psConnection);
+	PVR_UNREFERENCED_PARAMETER(ui32TempSpillingAddr);
 
 	OSLockAcquire(psDevInfo->hBPLock);
 
@@ -91,7 +93,6 @@ PVRSRV_ERROR PVRSRVRGXSetBreakpointKM(CONNECTION_DATA    * psConnection,
 	eError = RGXScheduleCommandAndGetKCCBSlot(psDevInfo,
 	                                          eFWDataMaster,
 	                                          &sBPCmd,
-	                                          0,
 	                                          PDUMP_FLAGS_CONTINUOUS,
 	                                          &ui32kCCBCommandSlot);
 	PVR_LOG_GOTO_IF_ERROR(eError, "RGXScheduleCommandAndGetKCCBSlot", unlock);
@@ -138,7 +139,6 @@ PVRSRV_ERROR PVRSRVRGXClearBreakpointKM(CONNECTION_DATA    * psConnection,
 	eError = RGXScheduleCommandAndGetKCCBSlot(psDevInfo,
 	                                          psDevInfo->eBPDM,
 	                                          &sBPCmd,
-	                                          0,
 	                                          PDUMP_FLAGS_CONTINUOUS,
 	                                          &ui32kCCBCommandSlot);
 	PVR_LOG_GOTO_IF_ERROR(eError, "RGXScheduleCommandAndGetKCCBSlot", unlock);
@@ -188,7 +188,6 @@ PVRSRV_ERROR PVRSRVRGXEnableBreakpointKM(CONNECTION_DATA    * psConnection,
 	eError = RGXScheduleCommandAndGetKCCBSlot(psDevInfo,
 	                                          psDevInfo->eBPDM,
 	                                          &sBPCmd,
-	                                          0,
 	                                          PDUMP_FLAGS_CONTINUOUS,
 	                                          &ui32kCCBCommandSlot);
 	PVR_LOG_GOTO_IF_ERROR(eError, "RGXScheduleCommandAndGetKCCBSlot", unlock);
@@ -236,7 +235,6 @@ PVRSRV_ERROR PVRSRVRGXDisableBreakpointKM(CONNECTION_DATA    * psConnection,
 	eError = RGXScheduleCommandAndGetKCCBSlot(psDevInfo,
 	                                          psDevInfo->eBPDM,
 	                                          &sBPCmd,
-	                                          0,
 	                                          PDUMP_FLAGS_CONTINUOUS,
 	                                          &ui32kCCBCommandSlot);
 	PVR_LOG_GOTO_IF_ERROR(eError, "RGXScheduleCommandAndGetKCCBSlot", unlock);
@@ -275,7 +273,6 @@ PVRSRV_ERROR PVRSRVRGXOverallocateBPRegistersKM(CONNECTION_DATA    * psConnectio
 	eError = RGXScheduleCommandAndGetKCCBSlot(psDeviceNode->pvDevice,
 	                                          RGXFWIF_DM_GP,
 	                                          &sBPCmd,
-	                                          0,
 	                                          PDUMP_FLAGS_CONTINUOUS,
 	                                          &ui32kCCBCommandSlot);
 	PVR_LOG_GOTO_IF_ERROR(eError, "RGXScheduleCommandAndGetKCCBSlot", unlock);

@@ -217,8 +217,8 @@ typedef struct {
 	IMG_UINT32				ui32RefCount;
 	IMG_BOOL				bOnDemand;
 
-	IMG_BOOL				ui32NumReqByApp;		/* Number of Backing Requests from Application */
-	IMG_BOOL				ui32NumReqByFW;			/* Number of Backing Requests from Firmware */
+	IMG_UINT32				ui32NumReqByApp;		/* Number of Backing Requests from Application */
+	IMG_UINT32				ui32NumReqByFW;			/* Number of Backing Requests from Firmware */
 
 	IMG_PID					owner;
 
@@ -238,15 +238,13 @@ IMG_BOOL RGXDumpFreeListPageList(RGX_FREELIST *psFreeList);
 PVRSRV_ERROR RGXCreateHWRTDataSet(CONNECTION_DATA          *psConnection,
                                   PVRSRV_DEVICE_NODE       *psDeviceNode,
 								  IMG_DEV_VIRTADDR          psVHeapTableDevVAddr,
-								  IMG_DEV_VIRTADDR          sPMDataDevVAddr0,
-								  IMG_DEV_VIRTADDR          sPMDataDevVAddr1,
-								  IMG_DEV_VIRTADDR          sPMSecureDataDevVAddr0,
-								  IMG_DEV_VIRTADDR          sPMSecureDataDevVAddr1,
-							      RGX_FREELIST	           *apsFreeLists[RGXFW_MAX_FREELISTS],
+								  IMG_DEV_VIRTADDR          sPMDataDevVAddr[RGXMKIF_NUM_RTDATAS],
+								  IMG_DEV_VIRTADDR          sPMSecureDataDevVAddr[RGXMKIF_NUM_RTDATAS],
+							      RGX_FREELIST	           *apsFreeLists[RGXMKIF_NUM_RTDATA_FREELISTS],
 							      IMG_UINT32                ui32ScreenPixelMax,
 							      IMG_UINT64                ui64PPPMultiSampleCtl,
 							      IMG_UINT32                ui32TEStride,
-							      IMG_DEV_VIRTADDR          sTailPtrsDevVAddr,
+							      IMG_DEV_VIRTADDR          asTailPtrsDevVAddr[RGXMKIF_NUM_GEOMDATAS],
 							      IMG_UINT32                ui32TPCSize,
 							      IMG_UINT32                ui32TEScreen,
 							      IMG_UINT32                ui32TEAA,
@@ -260,8 +258,7 @@ PVRSRV_ERROR RGXCreateHWRTDataSet(CONNECTION_DATA          *psConnection,
 							      IMG_UINT32                ui32ISPMergeScaleX,
 							      IMG_UINT32                ui32ISPMergeScaleY,
 							      IMG_UINT16                ui16MaxRTs,
-							      RGX_KM_HW_RT_DATASET    **ppsKmHwRTDataSet0,
-							      RGX_KM_HW_RT_DATASET    **ppsKmHwRTDataSet1);
+							      RGX_KM_HW_RT_DATASET     *pasKMHWRTDataSet[RGXMKIF_NUM_RTDATAS]);
 
 /* Destroy HWRTDataSet */
 PVRSRV_ERROR RGXDestroyHWRTDataSet(RGX_KM_HW_RT_DATASET *psKmHwRTDataSet);
@@ -362,7 +359,7 @@ void RGXProcessRequestGrow(PVRSRV_RGXDEV_INFO *psDevInfo,
 /* Reconstruct free list after Hardware Recovery */
 void RGXProcessRequestFreelistsReconstruction(PVRSRV_RGXDEV_INFO *psDevInfo,
 											  IMG_UINT32 ui32FreelistsCount,
-											  IMG_UINT32 *paui32Freelists);
+											  const IMG_UINT32 *paui32Freelists);
 
 /*!
 *******************************************************************************
@@ -373,7 +370,7 @@ void RGXProcessRequestFreelistsReconstruction(PVRSRV_RGXDEV_INFO *psDevInfo,
 	Server-side implementation of RGXCreateRenderContext
 
  @Input pvDeviceNode - device node
- @Input ui32Priority - context priority
+ @Input i32Priority - context priority
  @Input hMemCtxPrivData - memory context private data
  @Input ui32PackedCCBSizeU8888 :
 		ui8TACCBAllocSizeLog2 - TA CCB size
@@ -388,7 +385,7 @@ void RGXProcessRequestFreelistsReconstruction(PVRSRV_RGXDEV_INFO *psDevInfo,
 ******************************************************************************/
 PVRSRV_ERROR PVRSRVRGXCreateRenderContextKM(CONNECTION_DATA				*psConnection,
 											PVRSRV_DEVICE_NODE			*psDeviceNode,
-											IMG_UINT32					ui32Priority,
+											IMG_INT32					i32Priority,
 											IMG_UINT32					ui32FrameworkCommandSize,
 											IMG_PBYTE					pabyFrameworkCommand,
 											IMG_HANDLE					hMemCtxPrivData,
@@ -434,7 +431,6 @@ PVRSRV_ERROR PVRSRVRGXDestroyRenderContextKM(RGX_SERVER_RENDER_CONTEXT *psRender
 
 ******************************************************************************/
 PVRSRV_ERROR PVRSRVRGXKickTA3DKM(RGX_SERVER_RENDER_CONTEXT	*psRenderContext,
-								 IMG_UINT32					ui32ClientCacheOpSeqNum,
 								 IMG_UINT32					ui32ClientTAFenceCount,
 								 SYNC_PRIMITIVE_BLOCK		**apsClientTAFenceSyncPrimBlock,
 								 IMG_UINT32					*paui32ClientTAFenceSyncOffset,
@@ -486,7 +482,7 @@ PVRSRV_ERROR PVRSRVRGXKickTA3DKM(RGX_SERVER_RENDER_CONTEXT	*psRenderContext,
 PVRSRV_ERROR PVRSRVRGXSetRenderContextPriorityKM(CONNECTION_DATA *psConnection,
                                                  PVRSRV_DEVICE_NODE * psDevNode,
                                                  RGX_SERVER_RENDER_CONTEXT *psRenderContext,
-                                                 IMG_UINT32 ui32Priority);
+                                                 IMG_INT32 i32Priority);
 
 PVRSRV_ERROR PVRSRVRGXSetRenderContextPropertyKM(RGX_SERVER_RENDER_CONTEXT *psRenderContext,
 												 RGX_CONTEXT_PROPERTY eContextProperty,

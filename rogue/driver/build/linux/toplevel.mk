@@ -168,8 +168,16 @@ else
 HOST_ALL_ARCH := $(HOST_PRIMARY_ARCH) $(HOST_32BIT_ARCH)
 endif
 
-_ALL_ARCHS := \
- $(filter-out %target_neutral.mk,$(wildcard $(MAKE_TOP)/moduledefs/target_*.mk))
+_ALL_NEUTRINO_ARCHS := $(wildcard $(MAKE_TOP)/moduledefs/target_nto*.mk)
+
+ifeq ($(SUPPORT_NEUTRINO_PLATFORM),)
+ _ALL_ARCHS := \
+  $(filter-out %target_neutral.mk $(_ALL_NEUTRINO_ARCHS),\
+   $(wildcard $(MAKE_TOP)/moduledefs/target_*.mk))
+else
+ _ALL_ARCHS := $(_ALL_NEUTRINO_ARCHS)
+endif
+
 TARGET_PRIMARY_ARCH := \
  $(patsubst $(MAKE_TOP)/moduledefs/%.mk,%,$(word 1, $(_ALL_ARCHS)))
 

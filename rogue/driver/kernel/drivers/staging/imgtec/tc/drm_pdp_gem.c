@@ -55,25 +55,53 @@
 
 #include <drm/drm_mm.h>
 
+#if defined(SUPPORT_EXTERNAL_PHYSHEAP_INTERFACE)
+#include "physheap.h"
+#include "pvrsrv.h"
+#include "pvr_debug.h"
+#else
 #if defined(SUPPORT_PLATO_DISPLAY)
 #include "plato_drv.h"
 #else
 #include "tc_drv.h"
+#endif
 #endif
 
 #include "drm_pdp_gem.h"
 #include "pdp_drm.h"
 #include "kernel_compatibility.h"
 
+#if !defined(SUPPORT_EXTERNAL_PHYSHEAP_INTERFACE)
 #if defined(SUPPORT_PLATO_DISPLAY)
 #define pdp_gem_platform_data plato_pdp_platform_data
 #else
 #define pdp_gem_platform_data tc_pdp_platform_data
 #endif
+#endif
+
+const struct vm_operations_struct pdp_gem_vm_ops = {
+	.fault	= pdp_gem_object_vm_fault,
+	.open	= drm_gem_vm_open,
+	.close	= drm_gem_vm_close,
+};
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0))
+const struct drm_gem_object_funcs pdp_gem_funcs = {
+	.export = pdp_gem_prime_export,
+	.free = pdp_gem_object_free,
+	.vm_ops = &pdp_gem_vm_ops,
+};
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0) */
 
 struct pdp_gem_private {
 	struct mutex			vram_lock;
 	struct				drm_mm vram;
+	resource_size_t			memory_base;
+	bool				dma_map_export_host_addr;
+#if defined(SUPPORT_EXTERNAL_PHYSHEAP_INTERFACE)
+	PVRSRV_DEVICE_NODE		*pvr_dev_node;
+	PHYS_HEAP			*pvr_phys_heap;
+#endif
 };
 
 static struct pdp_gem_object *
@@ -95,6 +123,11 @@ pdp_gem_private_object_create(struct drm_device *dev,
 #else
 	pdp_obj->base.resv = resv;
 #endif
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0))
+	pdp_obj->base.funcs = &pdp_gem_funcs;
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0) */
+
 	drm_gem_private_object_init(dev, &pdp_obj->base, size);
 
 	return pdp_obj;
@@ -105,8 +138,6 @@ struct drm_gem_object *pdp_gem_object_create(struct drm_device *dev,
 					     size_t size,
 					     u32 flags)
 {
-	struct pdp_gem_platform_data *pdata =
-		to_platform_device(dev->dev)->dev.platform_data;
 	struct pdp_gem_object *pdp_obj;
 	struct drm_mm_node *node;
 	int err = 0;
@@ -131,13 +162,13 @@ struct drm_gem_object *pdp_gem_object_create(struct drm_device *dev,
 
 	pdp_obj->vram = node;
 	pdp_obj->dev_addr = pdp_obj->vram->start;
-	pdp_obj->cpu_addr = pdata->memory_base + pdp_obj->dev_addr;
+	pdp_obj->cpu_addr = gem_priv->memory_base + pdp_obj->dev_addr;
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 2, 0))
 	pdp_obj->resv = &pdp_obj->_resv;
 #else
 	pdp_obj->resv = pdp_obj->base.resv;
 #endif
-	pdp_obj->dma_map_export_host_addr = pdata->dma_map_export_host_addr;
+	pdp_obj->dma_map_export_host_addr = gem_priv->dma_map_export_host_addr;
 
 	return &pdp_obj->base;
 
@@ -222,13 +253,23 @@ static int pdp_gem_prime_attach(struct dma_buf *dma_buf,
 #endif
 				struct dma_buf_attachment *attach)
 {
+#if defined(SUPPORT_EXTERNAL_PHYSHEAP_INTERFACE)
+	(void) dma_buf;
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0))
+	(void) dev;
+#endif
+	/* Restrict access to PVR Services */
+	if (strcmp(attach->dev->driver->name,
+		   PVR_LDM_DRIVER_REGISTRATION_NAME))
+		return -EPERM;
+#else
 	struct drm_gem_object *obj = dma_buf->priv;
 
 	/* Restrict access to Rogue */
 	if (WARN_ON(!obj->dev->dev->parent) ||
 	    obj->dev->dev->parent != attach->dev->parent)
 		return -EPERM;
-
+#endif
 	return 0;
 }
 
@@ -440,18 +481,18 @@ struct drm_gem_object *
 pdp_gem_prime_import(struct drm_device *dev,
 		     struct dma_buf *dma_buf)
 {
-	struct drm_gem_object *obj = dma_buf->priv;
+	if (dma_buf->ops == &pdp_gem_prime_dmabuf_ops) {
+		struct drm_gem_object *obj = dma_buf->priv;
 
-	if (obj->dev == dev) {
-		BUG_ON(dma_buf->ops != &pdp_gem_prime_dmabuf_ops);
+		if (obj->dev == dev) {
+			/*
+			 * The dmabuf is one of ours, so return the associated
+			 * PDP GEM object, rather than create a new one.
+			 */
+			drm_gem_object_get(obj);
 
-		/*
-		 * The dmabuf is one of ours, so return the associated
-		 * PDP GEM object, rather than create a new one.
-		 */
-		drm_gem_object_get(obj);
-
-		return obj;
+			return obj;
+		}
 	}
 
 	return drm_gem_prime_import(dev, dma_buf);
@@ -462,8 +503,7 @@ pdp_gem_prime_import_sg_table(struct drm_device *dev,
 			      struct dma_buf_attachment *attach,
 			      struct sg_table *sgt)
 {
-	struct pdp_gem_platform_data *pdata =
-		to_platform_device(dev->dev)->dev.platform_data;
+	struct pdp_gem_private *gem_priv = pdp_gem_get_private(dev);
 	struct pdp_gem_object *pdp_obj;
 	int err;
 
@@ -484,7 +524,7 @@ pdp_gem_prime_import_sg_table(struct drm_device *dev,
 	}
 
 	pdp_obj->dev_addr = sg_dma_address(pdp_obj->sgt->sgl);
-	pdp_obj->cpu_addr = pdata->memory_base + pdp_obj->dev_addr;
+	pdp_obj->cpu_addr = gem_priv->memory_base + pdp_obj->dev_addr;
 	pdp_obj->resv = attach->dmabuf->resv;
 
 	return &pdp_obj->base;
@@ -553,42 +593,145 @@ exit_unlock:
 	return err;
 }
 
-struct pdp_gem_private *pdp_gem_init(struct drm_device *dev)
+#if defined(SUPPORT_EXTERNAL_PHYSHEAP_INTERFACE)
+static bool
+pdp_gem_init_platform(struct drm_device *dev,
+		      struct pdp_gem_private *gem_priv,
+		      unsigned int instance)
 {
-#if !defined(SUPPORT_ION) || defined(SUPPORT_GEM_ALLOC)
+	IMG_CPU_PHYADDR heap_cpu_paddr;
+	IMG_CPU_PHYADDR lma_cpu_paddr;
+	IMG_DEV_PHYADDR heap_dev_paddr;
+	IMG_UINT64 heap_size;
+	PVRSRV_ERROR pvr_err;
+
+	gem_priv->pvr_dev_node = PVRSRVGetDeviceInstance(instance);
+	if (!gem_priv->pvr_dev_node) {
+		DRM_ERROR("%s can't get PVR device node for instance %d\n",
+			  dev->driver->name, instance);
+		return false;
+	}
+
+	pvr_err = PhysHeapAcquireByUsage(PHYS_HEAP_USAGE_DISPLAY,
+					 gem_priv->pvr_dev_node,
+					 &gem_priv->pvr_phys_heap);
+	if (pvr_err != PVRSRV_OK) {
+		DRM_ERROR("%s couldn't acquire display heap: %s\n",
+			  dev->driver->name, PVRSRVGetErrorString(pvr_err));
+		return false;
+	}
+
+	if (PhysHeapGetType(gem_priv->pvr_phys_heap) != PHYS_HEAP_TYPE_LMA) {
+		DRM_ERROR("%s display heap is not LMA\n", dev->driver->name);
+		goto exit_release_heap;
+	}
+
+	pvr_err = PhysHeapGetCpuPAddr(gem_priv->pvr_phys_heap, &heap_cpu_paddr);
+	if (pvr_err != PVRSRV_OK) {
+		DRM_ERROR("%s couldn't get display heap base CPU physical address: %s\n",
+			  dev->driver->name, PVRSRVGetErrorString(pvr_err));
+		goto exit_release_heap;
+	}
+
+	PhysHeapCpuPAddrToDevPAddr(gem_priv->pvr_phys_heap, 1,
+				   &heap_dev_paddr, &heap_cpu_paddr);
+
+	pvr_err = PhysHeapGetSize(gem_priv->pvr_phys_heap, &heap_size);
+	if (pvr_err != PVRSRV_OK) {
+		DRM_ERROR("%s couldn't get display heap size: %s\n",
+			  dev->driver->name, PVRSRVGetErrorString(pvr_err));
+		goto exit_release_heap;
+	}
+
+	lma_cpu_paddr = heap_cpu_paddr;
+	lma_cpu_paddr.uiAddr -= heap_dev_paddr.uiAddr;
+
+	drm_mm_init(&gem_priv->vram, heap_dev_paddr.uiAddr, heap_size);
+
+	DRM_INFO("%s has 0x%llx bytes of allocatable memory at LMA offset 0x%llx (CPU PA 0x%llx)\n",
+		 dev->driver->name, (u64)heap_size,
+		 (u64)heap_dev_paddr.uiAddr, (u64)heap_cpu_paddr.uiAddr);
+
+	gem_priv->memory_base = lma_cpu_paddr.uiAddr;
+	gem_priv->dma_map_export_host_addr = false;
+
+	return true;
+
+exit_release_heap:
+	PhysHeapRelease(gem_priv->pvr_phys_heap);
+	return false;
+}
+
+static void
+pdp_gem_cleanup_platform(struct pdp_gem_private *gem_priv)
+{
+	drm_mm_takedown(&gem_priv->vram);
+	PhysHeapRelease(gem_priv->pvr_phys_heap);
+}
+#else
+static bool
+pdp_gem_init_platform(struct drm_device *dev,
+		      struct pdp_gem_private *gem_priv,
+		      unsigned int instance)
+{
 	struct pdp_gem_platform_data *pdata =
 		to_platform_device(dev->dev)->dev.platform_data;
-#endif
-	struct pdp_gem_private *gem_priv =
-					kmalloc(sizeof(*gem_priv), GFP_KERNEL);
 
-	if (!gem_priv)
-		return NULL;
-
-	mutex_init(&gem_priv->vram_lock);
-
-	memset(&gem_priv->vram, 0, sizeof(gem_priv->vram));
+	/* Instance is only used by SUPPORT_EXTERNAL_PHYSHEAP_INTERFACE */
+	WARN_ON(instance != 0);
 
 #if defined(SUPPORT_ION) && !defined(SUPPORT_GEM_ALLOC)
 	drm_mm_init(&gem_priv->vram, 0, 0);
 	DRM_INFO("%s has no directly allocatable memory; the memory is managed by ION\n",
-		dev->driver->name);
+		 dev->driver->name);
+
 #else
 	drm_mm_init(&gem_priv->vram,
-			pdata->pdp_heap_memory_base - pdata->memory_base,
-			pdata->pdp_heap_memory_size);
+		    pdata->pdp_heap_memory_base - pdata->memory_base,
+		    pdata->pdp_heap_memory_size);
 
 	DRM_INFO("%s has %pa bytes of allocatable memory at 0x%llx = (0x%llx - 0x%llx)\n",
-		dev->driver->name, &pdata->pdp_heap_memory_size,
-		(u64)(pdata->pdp_heap_memory_base - pdata->memory_base),
-		(u64)pdata->pdp_heap_memory_base, (u64)pdata->memory_base);
+		 dev->driver->name, &pdata->pdp_heap_memory_size,
+		 (u64)(pdata->pdp_heap_memory_base - pdata->memory_base),
+		 (u64)pdata->pdp_heap_memory_base, (u64)pdata->memory_base);
 #endif
+	gem_priv->memory_base = pdata->memory_base;
+	gem_priv->dma_map_export_host_addr = pdata->dma_map_export_host_addr;
+
+	return true;
+}
+
+static void
+pdp_gem_cleanup_platform(struct pdp_gem_private *gem_priv)
+{
+	drm_mm_takedown(&gem_priv->vram);
+}
+#endif
+
+struct pdp_gem_private *pdp_gem_init(struct drm_device *dev, unsigned int instance)
+{
+	struct pdp_gem_private *gem_priv = kmalloc(sizeof(*gem_priv), GFP_KERNEL);
+
+	if (!gem_priv)
+		return NULL;
+
+	memset(&gem_priv->vram, 0, sizeof(gem_priv->vram));
+
+	mutex_init(&gem_priv->vram_lock);
+
+	if (!pdp_gem_init_platform(dev, gem_priv, instance)) {
+		mutex_destroy(&gem_priv->vram_lock);
+		kfree(gem_priv);
+		return NULL;
+	}
+
 	return gem_priv;
 }
 
 void pdp_gem_cleanup(struct pdp_gem_private *gem_priv)
 {
-	drm_mm_takedown(&gem_priv->vram);
+	pdp_gem_cleanup_platform(gem_priv);
+
 	mutex_destroy(&gem_priv->vram_lock);
 
 	kfree(gem_priv);
@@ -690,17 +833,23 @@ int pdp_gem_object_cpu_prep_ioctl(struct drm_device *dev, void *data,
 	if (wait) {
 		long lerr;
 
-		lerr = dma_resv_wait_timeout_rcu(pdp_obj->resv,
-						 write,
-						 true,
-						 30 * HZ);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 14, 0))
+		lerr = dma_resv_wait_timeout(pdp_obj->resv, write,
+					     true, 30 * HZ);
+#else
+		lerr = dma_resv_wait_timeout_rcu(pdp_obj->resv, write,
+						 true, 30 * HZ);
+#endif
 		if (!lerr)
 			err = -EBUSY;
 		else if (lerr < 0)
 			err = lerr;
 	} else {
-		if (!dma_resv_test_signaled_rcu(pdp_obj->resv,
-						write))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 14, 0))
+		if (!dma_resv_test_signaled(pdp_obj->resv, write))
+#else
+		if (!dma_resv_test_signaled_rcu(pdp_obj->resv, write))
+#endif
 			err = -EBUSY;
 	}
 

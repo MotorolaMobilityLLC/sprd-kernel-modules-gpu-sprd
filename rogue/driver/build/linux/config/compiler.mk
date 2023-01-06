@@ -66,7 +66,11 @@ define calculate-compiler-preferred-target
     $(1)_compiler_preferred_target := i386-linux-gnu
    endif
    ifneq ($$(filter aarch64-poky-linux,$$($(1)_compiler_preferred_target)),)
+#    $(warning 1: $(1))
+#    $(warning 1_compiler_preferred_target: $(1)_compiler_preferred_target)
+#    $(warning $(1)_compiler_preferred_target: $($(1)_compiler_preferred_target))
     $(1)_compiler_preferred_target := aarch64-linux-gnu
+#    $(warning $(1)_compiler_preferred_target: $($(1)_compiler_preferred_target))
    endif
    ifneq ($$(filter armv7a-cros-linux-gnueabi armv7l-tizen-linux-gnueabi,$$($(1)_compiler_preferred_target)),)
     $(1)_compiler_preferred_target := arm-linux-gnueabi
@@ -74,12 +78,12 @@ define calculate-compiler-preferred-target
    ifneq ($$(filter arm-linux-android,$$($(1)_compiler_preferred_target)),)
     $(1)_compiler_preferred_target := arm-linux-androideabi
    endif
-   ifneq ($$(filter riscv64-buildroot-linux-gnu riscv64-poky-linux,$$($(1)_compiler_preferred_target)),)
+   ifneq ($$(filter riscv64-buildroot-linux-gnu riscv64-img-linux-musl riscv64-poky-linux,$$($(1)_compiler_preferred_target)),)
     $(1)_compiler_preferred_target := riscv64-linux-gnu
    endif
    ifneq ($$(filter clang%,$(2)),)
     ifeq ($(1),target)
-     $(1)_compiler_preferred_target := $$(CROSS_TRIPLE)
+	 $(1)_compiler_preferred_target := $$(CROSS_TRIPLE)
      ifeq (arm-linux-gnueabihf,$$(CROSS_TRIPLE))
       $(1)_compiler_preferred_target := arm-linux-gnueabihf
      endif
@@ -142,6 +146,7 @@ endif
 endif
 endif
 endif
+#$(warning host_compiler_preferred_target: $(host_compiler_preferred_target))
 
 # We set HOST_ALL_ARCH this way, as the host architectures may be overridden
 # on the command line.
@@ -198,6 +203,7 @@ ifneq ($(origin KERNEL_CROSS_COMPILE),undefined)
  _kernel_cross_compile := $(_kernel_cross_compile)gcc
  # Then check the compiler.
  $(eval $(call calculate-compiler-preferred-target,target,$(_kernel_cross_compile)))
+# $(warning target_compiler_preferred_target:$(target_compiler_preferred_target))
  $(eval $(call include-compiler-file,$(target_compiler_preferred_target)))
  _kernel_primary_arch := $(TARGET_PRIMARY_ARCH)
 else
@@ -209,9 +215,40 @@ else
  _kernel_primary_arch :=
 endif
 
+#$(warning CC:$(CC))
+#$(warning CROSS_COMPILE:$(CROSS_COMPILE))
+#$(warning _cc:$(_cc))
+#$(warning _cc_secondary:$(_cc_secondary))
+#$(warning CROSS_COMPILE_SECONDARY:$(CROSS_COMPILE_SECONDARY))
+#$(warning CC_SECONDARY:$(CC_SECONDARY))
+#$(warning target:$(target))
 $(eval $(call cross-compiler-name,_cc,$(CROSS_COMPILE),$(CC)))
+#$(warning CC:$(CC))
+#$(warning CROSS_COMPILE:$(CROSS_COMPILE))
+#$(warning _cc:$(_cc))
+#$(warning _cc_secondary:$(_cc_secondary))
+#$(warning CROSS_COMPILE_SECONDARY:$(CROSS_COMPILE_SECONDARY))
+#$(warning CC_SECONDARY:$(CC_SECONDARY))
+#$(warning target:$(target))
 $(eval $(call cross-compiler-name,_cc_secondary,$(if $(CROSS_COMPILE_SECONDARY),$(CROSS_COMPILE_SECONDARY),$(CROSS_COMPILE)),$(CC_SECONDARY)))
+#$(warning CC:$(CC))
+#$(warning CROSS_COMPILE:$(CROSS_COMPILE))
+#$(warning _cc:$(_cc))
+#$(warning _cc_secondary:$(_cc_secondary))
+#$(warning CROSS_COMPILE_SECONDARY:$(CROSS_COMPILE_SECONDARY))
+#$(warning CC_SECONDARY:$(CC_SECONDARY))
+#$(warning target:$(target))
 $(eval $(call calculate-compiler-preferred-target,target,$(_cc)))
+$(warning CC:$(CC))
+$(warning CROSS_COMPILE:$(CROSS_COMPILE))
+$(warning _cc:$(_cc))
+$(warning _cc_secondary:$(_cc_secondary))
+$(warning CROSS_COMPILE_SECONDARY:$(CROSS_COMPILE_SECONDARY))
+$(warning CC_SECONDARY:$(CC_SECONDARY))
+$(warning target:$(target))
+$(warning target_compiler_preferred_target:$(target_compiler_preferred_target))
+target_compiler_preferred_target := aarch64-linux-gnu
+$(warning target_compiler_preferred_target:$(target_compiler_preferred_target))
 $(eval $(call include-compiler-file,$(target_compiler_preferred_target)))
 
 ifneq ($(SUPPORT_ANDROID_PLATFORM),1)
@@ -270,14 +307,16 @@ $(eval $(call BothConfigMake,TARGET_SECONDARY_ARCH,$(TARGET_SECONDARY_ARCH)))
 $(eval $(call BothConfigMake,TARGET_ALL_ARCH,$(TARGET_ALL_ARCH)))
 $(eval $(call BothConfigMake,TARGET_FORCE_32BIT,$(TARGET_FORCE_32BIT)))
 
-$(info ******* Multiarch build: $(if $(MULTIARCH),yes,no))
-$(info ******* Primary arch:    $(if $(TARGET_PRIMARY_ARCH),$(TARGET_PRIMARY_ARCH),none))
-$(info ******* Secondary arch:  $(if $(TARGET_SECONDARY_ARCH),$(TARGET_SECONDARY_ARCH),none))
-$(info ******* PVR arch:        $(PVR_ARCH))
-$(info ******* HWDefs:          $(HWDEFS_DIR))
-$(info ******* HWDefs (all):    $(HWDEFS_ALL_PATHS))
-$(info ******* Host OS:         $(HOST_OS))
-$(info ******* Target OS:       $(TARGET_OS))
+$(info ******* Multiarch build:     $(if $(MULTIARCH),yes,no))
+$(info ******* Primary arch:        $(if $(TARGET_PRIMARY_ARCH),$(TARGET_PRIMARY_ARCH),none))
+$(info ******* Secondary arch:      $(if $(TARGET_SECONDARY_ARCH),$(TARGET_SECONDARY_ARCH),none))
+$(info ******* PVR top-level arch:  $(PVR_ARCH))
+$(info ******* PVR DEFS arch:       $(PVR_ARCH_DEFS))
+$(info ******* PVR USC arch:        $(PVR_USC_ARCH))
+$(info ******* PVR TPU arch:        $(PVR_TPU_ARCH))
+$(info ******* HWDefs Root:         $(HWDEFS_DIR))
+$(info ******* Host OS:             $(HOST_OS))
+$(info ******* Target OS:           $(TARGET_OS))
 
 ifeq ($(SUPPORT_NEUTRINO_PLATFORM),)
  # Find the paths to libgcc for the primary and secondary architectures.
@@ -296,6 +335,15 @@ ifeq ($(SUPPORT_NEUTRINO_PLATFORM),)
    else
     LIBGCC := $(LIBGCC_PREBUILT_PATH)/x86/x86_64-linux-android-4.9/lib/gcc/x86_64-linux-android/4.9.x/libgcc.a
     LIBGCC_SECONDARY := $(LIBGCC_PREBUILT_PATH)/x86/x86_64-linux-android-4.9/lib/gcc/x86_64-linux-android/4.9.x/32/libgcc.a
+   endif
+   # Reset LIBGCC and LIBGCC_SECONDARY if libgcc.a is not available so as to move to LLVM tools later
+   ifeq ($(wildcard $(LIBGCC))$(wildcard $(LIBGCC_SECONDARY)),)
+    ifeq ($(__clang_ge_13),1)
+     override LIBGCC :=
+     override LIBGCC_SECONDARY :=
+    else
+     $(error Must specify clang toolchain 13+ when libgcc.a is not available.)
+    endif
    endif
   endif
  endif

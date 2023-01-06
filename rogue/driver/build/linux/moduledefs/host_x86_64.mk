@@ -65,6 +65,11 @@ MODULE_LDFLAGS := \
 endif
 endif
 
+ifeq ($(SUPPORT_ANDROID_PLATFORM),1)
+ MODULE_LIBRARY_FLAGS_SUBST += \
+  clang_rt:$(__clang_bindir)../lib64/clang/$(__clang_version)/lib/linux/libclang_rt.builtins-x86_64-android.a
+endif
+
 MESON_CROSS_SYSTEM  := linux
 MESON_CROSS_CPU_FAMILY := x86_64
 MESON_CROSS_CPU := x86_64

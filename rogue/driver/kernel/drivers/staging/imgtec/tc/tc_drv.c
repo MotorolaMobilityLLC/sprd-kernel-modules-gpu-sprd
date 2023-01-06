@@ -82,6 +82,10 @@ static int tc_mem_clock;
 module_param(tc_mem_clock, int, 0444);
 MODULE_PARM_DESC(tc_mem_clock, "TC memory clock speed");
 
+static int tc_clock_multiplex;
+module_param(tc_clock_multiplex, int, 0444);
+MODULE_PARM_DESC(tc_clock_multiplex, "TC core clock multiplex");
+
 static int tc_sys_clock = RGX_TC_SYS_CLOCK_SPEED;
 module_param(tc_sys_clock, int, 0444);
 MODULE_PARM_DESC(tc_sys_clock, "TC system clock speed (TCF5 only)");
@@ -553,7 +557,7 @@ static int tc_init(struct pci_dev *pdev, const struct pci_device_id *id)
 		dev_info(&pdev->dev, "%s detected\n", odin_tc_name(tc));
 
 		err = odin_init(tc, pdev,
-				&tc_core_clock, &tc_mem_clock,
+				&tc_core_clock, &tc_mem_clock, &tc_clock_multiplex,
 				tc_pdp_mem_size, sec_mem_size,
 				tc_mem_latency, tc_wresp_latency,
 				tc_mem_mode, fbc_bypass);
@@ -565,7 +569,7 @@ static int tc_init(struct pci_dev *pdev, const struct pci_device_id *id)
 		tc->odin = false;
 
 		err = apollo_init(tc, pdev,
-				  &tc_core_clock, &tc_mem_clock, tc_sys_clock,
+				  &tc_core_clock, &tc_mem_clock, tc_sys_clock, &tc_clock_multiplex,
 				  tc_pdp_mem_size, sec_mem_size,
 				  tc_mem_latency, tc_wresp_latency,
 				  tc_mem_mode);
@@ -870,6 +874,12 @@ int tc_core_clock_speed(struct device *dev)
 	return tc_core_clock;
 }
 EXPORT_SYMBOL(tc_core_clock_speed);
+
+int tc_core_clock_multiplex(struct device *dev)
+{
+	return tc_clock_multiplex;
+}
+EXPORT_SYMBOL(tc_core_clock_multiplex);
 
 unsigned int tc_odin_subvers(struct device *dev)
 {

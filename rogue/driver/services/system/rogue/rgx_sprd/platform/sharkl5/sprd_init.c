@@ -81,13 +81,21 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define GPU_UP_THRESHOLD        80
 #define GPU_DOWN_DIFFERENTIAL   10
 #endif
+//#include "rgxdebug.h"
 
-struct gpu_qos_config {
-	u8 arqos;
-	u8 awqos;
-	u8 arqos_threshold;
-	u8 awqos_threshold;
-};
+//#define MOVE_BIT_LEFT(x,n) ((unsigned long)x << n)
+
+//#define SUBSYS_SW_DVFS_EN_CFG  0x0150
+//#define MASK_GPU_SYS_SW_DVFS_EN    0x0002
+//#define DCDC_MM_SW_DVFS_CTRL   0x0018
+//#define MASK_DCDC_MM_SW_TUNR_EN  0x00100000
+
+//struct gpu_qos_config {
+//	u8 arqos;
+//	u8 awqos;
+//	u8 arqos_threshold;
+//	u8 awqos_threshold;
+//};
 
 struct gpu_freq_info {
 	struct clk* clk_src;
@@ -139,11 +147,15 @@ struct gpu_dvfs_context {
 	struct gpu_reg_info top_force_reg;
 	struct gpu_reg_info rgx_dust_force_reg;
 	struct gpu_reg_info rgx_dust_auto_reg;
-	struct gpu_reg_info gpu_qos_sel;
-	struct gpu_reg_info gpu_qos;
+//	struct gpu_reg_info gpu_qos_sel;
+//	struct gpu_reg_info gpu_qos;
 	struct gpu_reg_info dvfs_index_cfg;
 	struct gpu_reg_info sw_dvfs_ctrl;
 	struct gpu_reg_info pdvfs_cfg;
+//	struct gpu_reg_info mm_sw_dvfs_ctrl;
+//	struct gpu_reg_info gpu_sys_sw_dvfs_en;
+//	struct gpu_reg_info gpu_top_state_reg;
+//	struct gpu_reg_info gpu_rgx_dust_state_reg;
 #endif
 };
 
@@ -156,13 +168,82 @@ static struct gpu_dvfs_context gpu_dvfs_ctx=
 	.sem=&gpu_dvfs_sem,
 };
 
-static struct gpu_qos_config gpu_qos_cfg=
+//static struct gpu_qos_config gpu_qos_cfg=
+//{
+//	.arqos=0,
+//	.awqos=0,
+//	.arqos_threshold=0,
+//	.awqos_threshold=0,
+//};
+
+/*
+u32 top_force = 0;
+u32 rgx_dust_force = 0;
+u32 top_pwr = 0;
+u32 rgx_dust_pwr = 0;
+
+const u32 top_force_mask = MOVE_BIT_LEFT(1,25);
+const u32 rgx_dust_force_mask = MOVE_BIT_LEFT(1,25);
+const u32 top_pwr_mask = MOVE_BIT_LEFT(0x7,8);
+const u32 rgx_dust_pwr_mask = MOVE_BIT_LEFT(0x7,24);
+
+
+const u32 top_force_pwr_on = MOVE_BIT_LEFT(0,25);
+const u32 rgx_dust_force_pwr_on = MOVE_BIT_LEFT(0,25);
+const u32 top_pwr_on = MOVE_BIT_LEFT(0,8);
+const u32 top_pwr_ing = MOVE_BIT_LEFT(6,8);
+const u32 rgx_dust_pwr_on = MOVE_BIT_LEFT(0,24);
+const u32 rgx_dust_pwr_ing =  MOVE_BIT_LEFT(6,24);
+const u32 clk_gpu_eb_on = MOVE_BIT_LEFT(0x1,11);
+
+void CheckGpuPowClkState(PVRSRV_DEVICE_NODE *psDeviceNode);
+void CheckGpuPowClkState(PVRSRV_DEVICE_NODE *psDeviceNode)
 {
-	.arqos=0,
-	.awqos=0,
-	.arqos_threshold=0,
-	.awqos_threshold=0,
-};
+
+	regmap_read(gpu_dvfs_ctx.top_force_reg.regmap_ptr, gpu_dvfs_ctx.top_force_reg.args[0], &top_force);
+	regmap_read(gpu_dvfs_ctx.rgx_dust_force_reg.regmap_ptr, gpu_dvfs_ctx.rgx_dust_force_reg.args[0], &rgx_dust_force);
+	regmap_read(gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_top_state_reg.args[0], &top_pwr);
+	regmap_read(gpu_dvfs_ctx.gpu_rgx_dust_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_rgx_dust_state_reg.args[0], &rgx_dust_pwr);
+
+	top_force = top_force & top_force_mask;
+	rgx_dust_force = rgx_dust_force & rgx_dust_force_mask;
+	top_pwr = top_pwr & top_pwr_mask;
+	rgx_dust_pwr = rgx_dust_pwr & rgx_dust_pwr_mask;
+
+	if ((gpu_dvfs_ctx.gpu_power_on == 1) && (gpu_dvfs_ctx.gpu_clock_on == 1))
+	{
+		if ( (top_force == top_force_pwr_on)  && (rgx_dust_force == rgx_dust_force_pwr_on))
+		{
+			if ((top_pwr == top_pwr_ing) && (rgx_dust_pwr == rgx_dust_pwr_ing))
+			{
+				PVR_DPF((PVR_DBG_ERROR, "top_force[0x%x], rgx_dust_force[0x%x], top_pwr[0x%x], rgx_dust_pwr[0x%x]", top_force,rgx_dust_force,top_pwr,rgx_dust_pwr));
+
+				PVRSRVDebugRequest(psDeviceNode, DEBUG_REQUEST_VERBOSITY_MAX, NULL, NULL);
+				if (psDeviceNode->pvDevice != NULL)
+				{
+					PVRSRV_RGXDEV_INFO *psDevInfo = psDeviceNode->pvDevice;
+
+					RGXDumpFirmwareTrace(NULL, NULL, psDevInfo);
+				}
+				WARN_ON(1);
+				BUG_ON(1);
+			}
+
+		}
+		else
+		{
+			PVR_DPF((PVR_DBG_ERROR, "gpu_top or gpu_rgx_dust pwr_on not enabled, top_force[0x%x], rgx_dust_force[0x%x], top_pwr[0x%x], rgx_dust_pwr[0x%x]", top_force,rgx_dust_force,top_pwr,rgx_dust_pwr));
+			WARN_ON(1);
+		}
+
+	}
+	else
+	{
+		PVR_DPF((PVR_DBG_ERROR, "GPU power is off now!!!"));
+		BUG_ON(1);
+	}
+}
+*/
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0))
 static int pmu_glb_set(unsigned long reg, u32 bit)
@@ -199,6 +280,10 @@ static PVRSRV_ERROR RgxDeviceInit(PVRSRV_DEVICE_CONFIG* psDevConfig, struct plat
 		result = PVRSRV_ERROR_INIT_FAILURE;
 		return (result);
 	}
+//	else
+//	{
+//		PVR_DPF((PVR_DBG_ERROR, "RgxDeviceInit has MEM resource, platform_get_resource OK???"));
+//	}
 
 	/* Device setup information */
 	psDevConfig->sRegsCpuPBase.uiAddr = reg_res->start;
@@ -211,6 +296,10 @@ static PVRSRV_ERROR RgxDeviceInit(PVRSRV_DEVICE_CONFIG* psDevConfig, struct plat
 		result = PVRSRV_ERROR_INIT_FAILURE;
 		return (result);
 	}
+//	else
+//	{
+//		PVR_DPF((PVR_DBG_ERROR, "RgxDeviceInit has IRQ resource, platform_get_resource OK???"));
+//	}
 	psDevConfig->ui32IRQ            = irq_res->start;
 	psDevConfig->eCacheSnoopingMode = PVRSRV_DEVICE_SNOOP_NONE;
 
@@ -238,7 +327,24 @@ static void RgxFreqInit(struct device *dev)
 {
 	int i = 0, clk_cnt = 0;
 
-	struct device_node *qos_node = NULL;
+//	struct device_node *qos_node = NULL;
+//	struct regmap* topdvfs_controller_base_ptr = NULL;
+
+//	topdvfs_controller_base_ptr = syscon_regmap_lookup_by_phandle(dev->of_node, "topdvfs-controller");
+//	PVR_ASSERT(topdvfs_controller_base_ptr);
+
+	//DCDC_MM_SW_DVFS_CTRL
+//	gpu_dvfs_ctx.mm_sw_dvfs_ctrl.regmap_ptr = topdvfs_controller_base_ptr;
+//	gpu_dvfs_ctx.mm_sw_dvfs_ctrl.args[0] = DCDC_MM_SW_DVFS_CTRL;
+//	gpu_dvfs_ctx.mm_sw_dvfs_ctrl.args[1] = MASK_DCDC_MM_SW_TUNR_EN;
+
+//	regmap_update_bits(gpu_dvfs_ctx.mm_sw_dvfs_ctrl.regmap_ptr, gpu_dvfs_ctx.mm_sw_dvfs_ctrl.args[0], gpu_dvfs_ctx.mm_sw_dvfs_ctrl.args[1], 0x0);
+	//gpu_sys_sw_dvfs_en
+//	gpu_dvfs_ctx.gpu_sys_sw_dvfs_en.regmap_ptr = topdvfs_controller_base_ptr;
+//	gpu_dvfs_ctx.gpu_sys_sw_dvfs_en.args[0] = SUBSYS_SW_DVFS_EN_CFG;
+//	gpu_dvfs_ctx.gpu_sys_sw_dvfs_en.args[1] = MASK_GPU_SYS_SW_DVFS_EN;
+
+//	regmap_update_bits(gpu_dvfs_ctx.gpu_sys_sw_dvfs_en.regmap_ptr, gpu_dvfs_ctx.gpu_sys_sw_dvfs_en.args[0], gpu_dvfs_ctx.gpu_sys_sw_dvfs_en.args[1], 0x0);
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0))
 	gpu_dvfs_ctx.pmu_apb_reg_base = syscon_regmap_lookup_by_phandle(dev->of_node,"sprd,syscon-pmu-apb");
@@ -256,14 +362,24 @@ static void RgxFreqInit(struct device *dev)
 	PVR_ASSERT(NULL != gpu_dvfs_ctx.rgx_dust_auto_reg.regmap_ptr);
 	syscon_get_args_by_name(dev->of_node,"rgx_dust_auto_shutdown", 2, (uint32_t *)gpu_dvfs_ctx.rgx_dust_auto_reg.args);
 
-	//qos
-	gpu_dvfs_ctx.gpu_qos_sel.regmap_ptr = syscon_regmap_lookup_by_name(dev->of_node,"gpu_qos_sel");
-	PVR_ASSERT(NULL != gpu_dvfs_ctx.gpu_qos_sel.regmap_ptr);
-	syscon_get_args_by_name(dev->of_node,"gpu_qos_sel", 2, (uint32_t *)gpu_dvfs_ctx.gpu_qos_sel.args);
+/*
+	gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr = syscon_regmap_lookup_by_name(dev->of_node,"gpu_top_state");
+	PVR_ASSERT(NULL != gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr);
+	syscon_get_args_by_name(dev->of_node,"gpu_top_state", 2, (uint32_t *)gpu_dvfs_ctx.gpu_top_state_reg.args);
 
-	gpu_dvfs_ctx.gpu_qos.regmap_ptr = syscon_regmap_lookup_by_name(dev->of_node,"gpu_qos");
-	PVR_ASSERT(NULL != gpu_dvfs_ctx.gpu_qos.regmap_ptr);
-	syscon_get_args_by_name(dev->of_node,"gpu_qos", 2, (uint32_t *)gpu_dvfs_ctx.gpu_qos.args);
+	gpu_dvfs_ctx.gpu_rgx_dust_state_reg.regmap_ptr = syscon_regmap_lookup_by_name(dev->of_node,"gpu_rgx_dust_state");
+	PVR_ASSERT(NULL != gpu_dvfs_ctx.gpu_rgx_dust_state_reg.regmap_ptr);
+	syscon_get_args_by_name(dev->of_node,"gpu_rgx_dust_state", 2, (uint32_t *)gpu_dvfs_ctx.gpu_rgx_dust_state_reg.args);
+*/
+
+	//qos
+//	gpu_dvfs_ctx.gpu_qos_sel.regmap_ptr = syscon_regmap_lookup_by_name(dev->of_node,"gpu_qos_sel");
+//	PVR_ASSERT(NULL != gpu_dvfs_ctx.gpu_qos_sel.regmap_ptr);
+//	syscon_get_args_by_name(dev->of_node,"gpu_qos_sel", 2, (uint32_t *)gpu_dvfs_ctx.gpu_qos_sel.args);
+
+//	gpu_dvfs_ctx.gpu_qos.regmap_ptr = syscon_regmap_lookup_by_name(dev->of_node,"gpu_qos");
+//	PVR_ASSERT(NULL != gpu_dvfs_ctx.gpu_qos.regmap_ptr);
+//	syscon_get_args_by_name(dev->of_node,"gpu_qos", 2, (uint32_t *)gpu_dvfs_ctx.gpu_qos.args);
 
 	//gpu index cfg
 	gpu_dvfs_ctx.dvfs_index_cfg.regmap_ptr = syscon_regmap_lookup_by_name(dev->of_node,"dvfs_index_cfg");
@@ -292,14 +408,24 @@ static void RgxFreqInit(struct device *dev)
 	PVR_ASSERT(NULL != gpu_dvfs_ctx.rgx_dust_auto_reg.regmap_ptr);
 	syscon_regmap_lookup_by_phandle_args(dev->of_node,"rgx_dust_auto_shutdown", 2, (uint32_t *)gpu_dvfs_ctx.rgx_dust_auto_reg.args);
 
-	//qos
-	gpu_dvfs_ctx.gpu_qos_sel.regmap_ptr = syscon_regmap_lookup_by_phandle(dev->of_node,"gpu_qos_sel");
-	PVR_ASSERT(NULL != gpu_dvfs_ctx.gpu_qos_sel.regmap_ptr);
-	syscon_regmap_lookup_by_phandle_args(dev->of_node,"gpu_qos_sel", 2, (uint32_t *)gpu_dvfs_ctx.gpu_qos_sel.args);
+/*
+	gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr = syscon_regmap_lookup_by_phandle(dev->of_node,"gpu_top_state");
+	PVR_ASSERT(NULL != gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr);
+	syscon_regmap_lookup_by_phandle_args(dev->of_node,"gpu_top_state", 2, (uint32_t *)gpu_dvfs_ctx.gpu_top_state_reg.args);
 
-	gpu_dvfs_ctx.gpu_qos.regmap_ptr = syscon_regmap_lookup_by_phandle(dev->of_node,"gpu_qos");
-	PVR_ASSERT(NULL != gpu_dvfs_ctx.gpu_qos.regmap_ptr);
-	syscon_regmap_lookup_by_phandle_args(dev->of_node,"gpu_qos", 2, (uint32_t *)gpu_dvfs_ctx.gpu_qos.args);
+	gpu_dvfs_ctx.gpu_rgx_dust_state_reg.regmap_ptr = syscon_regmap_lookup_by_phandle(dev->of_node,"gpu_rgx_dust_state");
+	PVR_ASSERT(NULL != gpu_dvfs_ctx.gpu_rgx_dust_state_reg.regmap_ptr);
+	syscon_regmap_lookup_by_phandle_args(dev->of_node,"gpu_rgx_dust_state", 2, (uint32_t *)gpu_dvfs_ctx.gpu_rgx_dust_state_reg.args);
+*/
+
+	//qos
+//	gpu_dvfs_ctx.gpu_qos_sel.regmap_ptr = syscon_regmap_lookup_by_phandle(dev->of_node,"gpu_qos_sel");
+//	PVR_ASSERT(NULL != gpu_dvfs_ctx.gpu_qos_sel.regmap_ptr);
+//	syscon_regmap_lookup_by_phandle_args(dev->of_node,"gpu_qos_sel", 2, (uint32_t *)gpu_dvfs_ctx.gpu_qos_sel.args);
+
+//	gpu_dvfs_ctx.gpu_qos.regmap_ptr = syscon_regmap_lookup_by_phandle(dev->of_node,"gpu_qos");
+//	PVR_ASSERT(NULL != gpu_dvfs_ctx.gpu_qos.regmap_ptr);
+//	syscon_regmap_lookup_by_phandle_args(dev->of_node,"gpu_qos", 2, (uint32_t *)gpu_dvfs_ctx.gpu_qos.args);
 
 	//gpu index cfg
 	gpu_dvfs_ctx.dvfs_index_cfg.regmap_ptr = syscon_regmap_lookup_by_phandle(dev->of_node,"dvfs_index_cfg");
@@ -318,6 +444,7 @@ static void RgxFreqInit(struct device *dev)
 #endif
 
 	/* qos dts parse */
+/*
 	qos_node = of_parse_phandle(dev->of_node, "sprd,qos", 0);
 	if (qos_node)
 	{
@@ -336,6 +463,7 @@ static void RgxFreqInit(struct device *dev)
 	} else {
 		pr_warn("can't find gpu qos config node\n");
 	}
+*/
 
 
 	gpu_dvfs_ctx.clk_gpu_i = of_clk_get(dev->of_node, 0);
@@ -582,6 +710,7 @@ static int RgxSetFreqVolt(IMG_UINT32 ui32Freq, IMG_UINT32 ui32Volt)
 
 					//set gpu mem clk
 					clk_set_parent(gpu_dvfs_ctx.clk_gpu_mem, gpu_dvfs_ctx.freq_list[index].clk_src);
+					udelay(150);
 				}
 #endif
 			}
@@ -621,13 +750,39 @@ static void RgxDVFSInit(PVRSRV_DEVICE_CONFIG* psDevConfig)
 static void RgxPowerOn(void)
 {
 	//GPU power
+//	int counter = 0;
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0))
 	pmu_glb_clr(REG_PMU_APB_PD_GPU_TOP_CFG, BIT_PMU_APB_PD_GPU_TOP_FORCE_SHUTDOWN);
 	pmu_glb_clr(REG_PMU_APB_PD_GPU_CORE_CFG, BIT_PMU_APB_PD_GPU_CORE_FORCE_SHUTDOWN);
 	pmu_glb_set(REG_PMU_APB_PD_GPU_CORE_CFG, BIT_PMU_APB_PD_GPU_CORE_AUTO_SHUTDOWN_EN);
 #else
 	regmap_update_bits(gpu_dvfs_ctx.top_force_reg.regmap_ptr, gpu_dvfs_ctx.top_force_reg.args[0], gpu_dvfs_ctx.top_force_reg.args[1], ~gpu_dvfs_ctx.top_force_reg.args[1]);
+
+/*
+	regmap_read(gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_top_state_reg.args[0], &top_pwr);
+	top_pwr = top_pwr & top_pwr_mask;
+
+	while( top_pwr == top_pwr_ing )
+	{
+
+		udelay(50);
+		regmap_read(gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_top_state_reg.args[0], &top_pwr);
+		top_pwr = top_pwr & top_pwr_mask;
+		PVR_DPF((PVR_DBG_ERROR, "SPRDDEBUG gpu_top_pwr = 0x%x, counter = %d ", top_pwr, counter));
+		if(counter++ > 200 )
+		{
+			PVR_DPF((PVR_DBG_ERROR, "gpu top power on is timeout ! "));
+			WARN_ON(1);
+			counter = 0;
+			break;
+		}
+
+
+	}
+*/
+
 	regmap_update_bits(gpu_dvfs_ctx.rgx_dust_force_reg.regmap_ptr, gpu_dvfs_ctx.rgx_dust_force_reg.args[0], gpu_dvfs_ctx.rgx_dust_force_reg.args[1], ~gpu_dvfs_ctx.rgx_dust_force_reg.args[1]);
+	udelay(150);
 	regmap_update_bits(gpu_dvfs_ctx.rgx_dust_auto_reg.regmap_ptr, gpu_dvfs_ctx.rgx_dust_auto_reg.args[0], gpu_dvfs_ctx.rgx_dust_auto_reg.args[1], gpu_dvfs_ctx.rgx_dust_auto_reg.args[1]);
 #endif
 	udelay(100);
@@ -645,16 +800,19 @@ static void RgxPowerOff(void)
 	pmu_glb_set(REG_PMU_APB_PD_GPU_CORE_CFG, BIT_PMU_APB_PD_GPU_CORE_FORCE_SHUTDOWN);
 	pmu_glb_clr(REG_PMU_APB_PD_GPU_CORE_CFG, BIT_PMU_APB_PD_GPU_CORE_AUTO_SHUTDOWN_EN);
 #else
-	regmap_update_bits(gpu_dvfs_ctx.top_force_reg.regmap_ptr, gpu_dvfs_ctx.top_force_reg.args[0], gpu_dvfs_ctx.top_force_reg.args[1], gpu_dvfs_ctx.top_force_reg.args[1]);
-	regmap_update_bits(gpu_dvfs_ctx.rgx_dust_force_reg.regmap_ptr, gpu_dvfs_ctx.rgx_dust_force_reg.args[0], gpu_dvfs_ctx.rgx_dust_force_reg.args[1], gpu_dvfs_ctx.rgx_dust_force_reg.args[1]);
+
 	regmap_update_bits(gpu_dvfs_ctx.rgx_dust_auto_reg.regmap_ptr, gpu_dvfs_ctx.rgx_dust_auto_reg.args[0], gpu_dvfs_ctx.rgx_dust_auto_reg.args[1], ~gpu_dvfs_ctx.rgx_dust_auto_reg.args[1]);
+	regmap_update_bits(gpu_dvfs_ctx.rgx_dust_force_reg.regmap_ptr, gpu_dvfs_ctx.rgx_dust_force_reg.args[0], gpu_dvfs_ctx.rgx_dust_force_reg.args[1], gpu_dvfs_ctx.rgx_dust_force_reg.args[1]);
+	regmap_update_bits(gpu_dvfs_ctx.top_force_reg.regmap_ptr, gpu_dvfs_ctx.top_force_reg.args[0], gpu_dvfs_ctx.top_force_reg.args[1], gpu_dvfs_ctx.top_force_reg.args[1]);
 #endif
 }
+/*
 static void RgxQosConfig(void)
 {
 	regmap_update_bits(gpu_dvfs_ctx.gpu_qos_sel.regmap_ptr, gpu_dvfs_ctx.gpu_qos_sel.args[0], gpu_dvfs_ctx.gpu_qos_sel.args[1], gpu_dvfs_ctx.gpu_qos_sel.args[1]);
 	regmap_update_bits(gpu_dvfs_ctx.gpu_qos.regmap_ptr, gpu_dvfs_ctx.gpu_qos.args[0], gpu_dvfs_ctx.gpu_qos.args[1], ((gpu_qos_cfg.awqos_threshold << 12) | (gpu_qos_cfg.arqos_threshold << 8) | (gpu_qos_cfg.awqos << 4) | gpu_qos_cfg.arqos));
 }
+*/
 
 static void RgxClockOn(void)
 {
@@ -693,9 +851,9 @@ static void RgxClockOn(void)
 	clk_set_parent(gpu_dvfs_ctx.clk_gpu_mem, gpu_dvfs_ctx.freq_cur->clk_src);
 #endif //SUPPORT_PDVFS
 #endif //PVR_HW_DVFS
-
+	udelay(100);
 	//qos
-	RgxQosConfig();
+//	RgxQosConfig();
 
 	gpu_dvfs_ctx.gpu_clock_on = 1;
 }
@@ -721,7 +879,7 @@ static void RgxClockOff(void)
 	}
 }
 
-static PVRSRV_ERROR SprdPrePowerState(IMG_HANDLE hSysData, PVRSRV_SYS_POWER_STATE eNewPowerState, PVRSRV_SYS_POWER_STATE eCurrentPowerState, IMG_BOOL bForced)
+static PVRSRV_ERROR SprdPrePowerState(IMG_HANDLE hSysData, PVRSRV_SYS_POWER_STATE eNewPowerState, PVRSRV_SYS_POWER_STATE eCurrentPowerState, IMG_UINT32 bForced)
 {
 	PVRSRV_ERROR result = PVRSRV_OK;
 
@@ -747,7 +905,7 @@ static PVRSRV_ERROR SprdPrePowerState(IMG_HANDLE hSysData, PVRSRV_SYS_POWER_STAT
 	return (result);
 }
 
-static PVRSRV_ERROR SprdPostPowerState(IMG_HANDLE hSysData, PVRSRV_SYS_POWER_STATE eNewPowerState, PVRSRV_SYS_POWER_STATE eCurrentPowerState, IMG_BOOL bForced)
+static PVRSRV_ERROR SprdPostPowerState(IMG_HANDLE hSysData, PVRSRV_SYS_POWER_STATE eNewPowerState, PVRSRV_SYS_POWER_STATE eCurrentPowerState, IMG_UINT32 bForced)
 {
 	PVRSRV_ERROR result = PVRSRV_OK;
 

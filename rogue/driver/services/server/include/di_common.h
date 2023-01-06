@@ -49,8 +49,14 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define DI_START_TOKEN ((void *) 1)
 
 /* This is a public handle to an entry. */
+#ifndef DI_GROUP_DEFINED
+#define DI_GROUP_DEFINED
 typedef struct DI_GROUP DI_GROUP;
+#endif
+#ifndef DI_ENTRY_DEFINED
+#define DI_ENTRY_DEFINED
 typedef struct DI_ENTRY DI_ENTRY;
+#endif
 typedef struct OSDI_IMPL_ENTRY OSDI_IMPL_ENTRY;
 
 /*! Debug Info entries types. */

@@ -52,6 +52,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvrsrv_error.h"
 
 #include "pvrsrv_memallocflags.h"
+#include "pvrsrv_memalloc_physheap.h"
 #include "devicemem_typedefs.h"
 
 #define PVRSRV_BRIDGE_MM_CMD_FIRST			0
@@ -66,10 +67,10 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define PVRSRV_BRIDGE_MM_PMRUNREFUNLOCKPMR			PVRSRV_BRIDGE_MM_CMD_FIRST+8
 #define PVRSRV_BRIDGE_MM_PHYSMEMNEWRAMBACKEDPMR			PVRSRV_BRIDGE_MM_CMD_FIRST+9
 #define PVRSRV_BRIDGE_MM_PHYSMEMNEWRAMBACKEDLOCKEDPMR			PVRSRV_BRIDGE_MM_CMD_FIRST+10
-#define PVRSRV_BRIDGE_MM_DEVMEMINTPIN			PVRSRV_BRIDGE_MM_CMD_FIRST+11
-#define PVRSRV_BRIDGE_MM_DEVMEMINTUNPIN			PVRSRV_BRIDGE_MM_CMD_FIRST+12
-#define PVRSRV_BRIDGE_MM_DEVMEMINTPINVALIDATE			PVRSRV_BRIDGE_MM_CMD_FIRST+13
-#define PVRSRV_BRIDGE_MM_DEVMEMINTUNPININVALIDATE			PVRSRV_BRIDGE_MM_CMD_FIRST+14
+#define PVRSRV_BRIDGE_MM_DEVMEMCOMPATRESERVE1			PVRSRV_BRIDGE_MM_CMD_FIRST+11
+#define PVRSRV_BRIDGE_MM_DEVMEMCOMPATRESERVE2			PVRSRV_BRIDGE_MM_CMD_FIRST+12
+#define PVRSRV_BRIDGE_MM_DEVMEMCOMPATRESERVE3			PVRSRV_BRIDGE_MM_CMD_FIRST+13
+#define PVRSRV_BRIDGE_MM_DEVMEMCOMPATRESERVE4			PVRSRV_BRIDGE_MM_CMD_FIRST+14
 #define PVRSRV_BRIDGE_MM_DEVMEMINTCTXCREATE			PVRSRV_BRIDGE_MM_CMD_FIRST+15
 #define PVRSRV_BRIDGE_MM_DEVMEMINTCTXDESTROY			PVRSRV_BRIDGE_MM_CMD_FIRST+16
 #define PVRSRV_BRIDGE_MM_DEVMEMINTHEAPCREATE			PVRSRV_BRIDGE_MM_CMD_FIRST+17
@@ -89,10 +90,13 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define PVRSRV_BRIDGE_MM_HEAPCFGHEAPCONFIGNAME			PVRSRV_BRIDGE_MM_CMD_FIRST+31
 #define PVRSRV_BRIDGE_MM_HEAPCFGHEAPDETAILS			PVRSRV_BRIDGE_MM_CMD_FIRST+32
 #define PVRSRV_BRIDGE_MM_DEVMEMINTREGISTERPFNOTIFYKM			PVRSRV_BRIDGE_MM_CMD_FIRST+33
-#define PVRSRV_BRIDGE_MM_GETMAXDEVMEMSIZE			PVRSRV_BRIDGE_MM_CMD_FIRST+34
-#define PVRSRV_BRIDGE_MM_DEVMEMGETFAULTADDRESS			PVRSRV_BRIDGE_MM_CMD_FIRST+35
-#define PVRSRV_BRIDGE_MM_PVRSRVUPDATEOOMSTATS			PVRSRV_BRIDGE_MM_CMD_FIRST+36
-#define PVRSRV_BRIDGE_MM_CMD_LAST			(PVRSRV_BRIDGE_MM_CMD_FIRST+36)
+#define PVRSRV_BRIDGE_MM_GETMAXPHYSHEAPCOUNT			PVRSRV_BRIDGE_MM_CMD_FIRST+34
+#define PVRSRV_BRIDGE_MM_PHYSHEAPGETMEMINFO			PVRSRV_BRIDGE_MM_CMD_FIRST+35
+#define PVRSRV_BRIDGE_MM_GETDEFAULTPHYSICALHEAP			PVRSRV_BRIDGE_MM_CMD_FIRST+36
+#define PVRSRV_BRIDGE_MM_GETHEAPPHYSMEMUSAGE			PVRSRV_BRIDGE_MM_CMD_FIRST+37
+#define PVRSRV_BRIDGE_MM_DEVMEMGETFAULTADDRESS			PVRSRV_BRIDGE_MM_CMD_FIRST+38
+#define PVRSRV_BRIDGE_MM_PVRSRVUPDATEOOMSTATS			PVRSRV_BRIDGE_MM_CMD_FIRST+39
+#define PVRSRV_BRIDGE_MM_CMD_LAST			(PVRSRV_BRIDGE_MM_CMD_FIRST+39)
 
 /*******************************************
             PMRExportPMR
@@ -258,7 +262,6 @@ typedef struct PVRSRV_BRIDGE_OUT_PMRUNREFUNLOCKPMR_TAG
 /* Bridge in structure for PhysmemNewRamBackedPMR */
 typedef struct PVRSRV_BRIDGE_IN_PHYSMEMNEWRAMBACKEDPMR_TAG
 {
-	IMG_DEVMEM_SIZE_T uiChunkSize;
 	IMG_DEVMEM_SIZE_T uiSize;
 	IMG_UINT32 *pui32MappingTable;
 	const IMG_CHAR *puiAnnotation;
@@ -276,6 +279,7 @@ typedef struct PVRSRV_BRIDGE_OUT_PHYSMEMNEWRAMBACKEDPMR_TAG
 {
 	IMG_HANDLE hPMRPtr;
 	PVRSRV_ERROR eError;
+	PVRSRV_MEMALLOCFLAGS_T uiOutFlags;
 } __packed PVRSRV_BRIDGE_OUT_PHYSMEMNEWRAMBACKEDPMR;
 
 /*******************************************
@@ -285,7 +289,6 @@ typedef struct PVRSRV_BRIDGE_OUT_PHYSMEMNEWRAMBACKEDPMR_TAG
 /* Bridge in structure for PhysmemNewRamBackedLockedPMR */
 typedef struct PVRSRV_BRIDGE_IN_PHYSMEMNEWRAMBACKEDLOCKEDPMR_TAG
 {
-	IMG_DEVMEM_SIZE_T uiChunkSize;
 	IMG_DEVMEM_SIZE_T uiSize;
 	IMG_UINT32 *pui32MappingTable;
 	const IMG_CHAR *puiAnnotation;
@@ -303,73 +306,74 @@ typedef struct PVRSRV_BRIDGE_OUT_PHYSMEMNEWRAMBACKEDLOCKEDPMR_TAG
 {
 	IMG_HANDLE hPMRPtr;
 	PVRSRV_ERROR eError;
+	PVRSRV_MEMALLOCFLAGS_T uiOutFlags;
 } __packed PVRSRV_BRIDGE_OUT_PHYSMEMNEWRAMBACKEDLOCKEDPMR;
 
 /*******************************************
-            DevmemIntPin
+            DevmemCompatReserve1
  *******************************************/
 
-/* Bridge in structure for DevmemIntPin */
-typedef struct PVRSRV_BRIDGE_IN_DEVMEMINTPIN_TAG
+/* Bridge in structure for DevmemCompatReserve1 */
+typedef struct PVRSRV_BRIDGE_IN_DEVMEMCOMPATRESERVE1_TAG
 {
 	IMG_HANDLE hPMR;
-} __packed PVRSRV_BRIDGE_IN_DEVMEMINTPIN;
+} __packed PVRSRV_BRIDGE_IN_DEVMEMCOMPATRESERVE1;
 
-/* Bridge out structure for DevmemIntPin */
-typedef struct PVRSRV_BRIDGE_OUT_DEVMEMINTPIN_TAG
+/* Bridge out structure for DevmemCompatReserve1 */
+typedef struct PVRSRV_BRIDGE_OUT_DEVMEMCOMPATRESERVE1_TAG
 {
 	PVRSRV_ERROR eError;
-} __packed PVRSRV_BRIDGE_OUT_DEVMEMINTPIN;
+} __packed PVRSRV_BRIDGE_OUT_DEVMEMCOMPATRESERVE1;
 
 /*******************************************
-            DevmemIntUnpin
+            DevmemCompatReserve2
  *******************************************/
 
-/* Bridge in structure for DevmemIntUnpin */
-typedef struct PVRSRV_BRIDGE_IN_DEVMEMINTUNPIN_TAG
+/* Bridge in structure for DevmemCompatReserve2 */
+typedef struct PVRSRV_BRIDGE_IN_DEVMEMCOMPATRESERVE2_TAG
 {
 	IMG_HANDLE hPMR;
-} __packed PVRSRV_BRIDGE_IN_DEVMEMINTUNPIN;
+} __packed PVRSRV_BRIDGE_IN_DEVMEMCOMPATRESERVE2;
 
-/* Bridge out structure for DevmemIntUnpin */
-typedef struct PVRSRV_BRIDGE_OUT_DEVMEMINTUNPIN_TAG
+/* Bridge out structure for DevmemCompatReserve2 */
+typedef struct PVRSRV_BRIDGE_OUT_DEVMEMCOMPATRESERVE2_TAG
 {
 	PVRSRV_ERROR eError;
-} __packed PVRSRV_BRIDGE_OUT_DEVMEMINTUNPIN;
+} __packed PVRSRV_BRIDGE_OUT_DEVMEMCOMPATRESERVE2;
 
 /*******************************************
-            DevmemIntPinValidate
+            DevmemCompatReserve3
  *******************************************/
 
-/* Bridge in structure for DevmemIntPinValidate */
-typedef struct PVRSRV_BRIDGE_IN_DEVMEMINTPINVALIDATE_TAG
+/* Bridge in structure for DevmemCompatReserve3 */
+typedef struct PVRSRV_BRIDGE_IN_DEVMEMCOMPATRESERVE3_TAG
 {
 	IMG_HANDLE hMapping;
 	IMG_HANDLE hPMR;
-} __packed PVRSRV_BRIDGE_IN_DEVMEMINTPINVALIDATE;
+} __packed PVRSRV_BRIDGE_IN_DEVMEMCOMPATRESERVE3;
 
-/* Bridge out structure for DevmemIntPinValidate */
-typedef struct PVRSRV_BRIDGE_OUT_DEVMEMINTPINVALIDATE_TAG
+/* Bridge out structure for DevmemCompatReserve3 */
+typedef struct PVRSRV_BRIDGE_OUT_DEVMEMCOMPATRESERVE3_TAG
 {
 	PVRSRV_ERROR eError;
-} __packed PVRSRV_BRIDGE_OUT_DEVMEMINTPINVALIDATE;
+} __packed PVRSRV_BRIDGE_OUT_DEVMEMCOMPATRESERVE3;
 
 /*******************************************
-            DevmemIntUnpinInvalidate
+            DevmemCompatReserve4
  *******************************************/
 
-/* Bridge in structure for DevmemIntUnpinInvalidate */
-typedef struct PVRSRV_BRIDGE_IN_DEVMEMINTUNPININVALIDATE_TAG
+/* Bridge in structure for DevmemCompatReserve4 */
+typedef struct PVRSRV_BRIDGE_IN_DEVMEMCOMPATRESERVE4_TAG
 {
 	IMG_HANDLE hMapping;
 	IMG_HANDLE hPMR;
-} __packed PVRSRV_BRIDGE_IN_DEVMEMINTUNPININVALIDATE;
+} __packed PVRSRV_BRIDGE_IN_DEVMEMCOMPATRESERVE4;
 
-/* Bridge out structure for DevmemIntUnpinInvalidate */
-typedef struct PVRSRV_BRIDGE_OUT_DEVMEMINTUNPININVALIDATE_TAG
+/* Bridge out structure for DevmemCompatReserve4 */
+typedef struct PVRSRV_BRIDGE_OUT_DEVMEMCOMPATRESERVE4_TAG
 {
 	PVRSRV_ERROR eError;
-} __packed PVRSRV_BRIDGE_OUT_DEVMEMINTUNPININVALIDATE;
+} __packed PVRSRV_BRIDGE_OUT_DEVMEMCOMPATRESERVE4;
 
 /*******************************************
             DevmemIntCtxCreate
@@ -416,6 +420,8 @@ typedef struct PVRSRV_BRIDGE_IN_DEVMEMINTHEAPCREATE_TAG
 	IMG_DEV_VIRTADDR sHeapBaseAddr;
 	IMG_DEVMEM_SIZE_T uiHeapLength;
 	IMG_HANDLE hDevmemCtx;
+	IMG_UINT32 ui32HeapConfigIndex;
+	IMG_UINT32 ui32HeapIndex;
 	IMG_UINT32 ui32Log2DataPageSize;
 } __packed PVRSRV_BRIDGE_IN_DEVMEMINTHEAPCREATE;
 
@@ -715,9 +721,9 @@ typedef struct PVRSRV_BRIDGE_OUT_HEAPCFGHEAPDETAILS_TAG
 /* Bridge in structure for DevmemIntRegisterPFNotifyKM */
 typedef struct PVRSRV_BRIDGE_IN_DEVMEMINTREGISTERPFNOTIFYKM_TAG
 {
-	IMG_HANDLE hDevmemCtx;
-	IMG_BOOL bRegister;
+	IMG_HANDLE hDevm;
 	IMG_UINT32 ui32PID;
+	IMG_BOOL bRegister;
 } __packed PVRSRV_BRIDGE_IN_DEVMEMINTREGISTERPFNOTIFYKM;
 
 /* Bridge out structure for DevmemIntRegisterPFNotifyKM */
@@ -727,22 +733,75 @@ typedef struct PVRSRV_BRIDGE_OUT_DEVMEMINTREGISTERPFNOTIFYKM_TAG
 } __packed PVRSRV_BRIDGE_OUT_DEVMEMINTREGISTERPFNOTIFYKM;
 
 /*******************************************
-            GetMaxDevMemSize
+            GetMaxPhysHeapCount
  *******************************************/
 
-/* Bridge in structure for GetMaxDevMemSize */
-typedef struct PVRSRV_BRIDGE_IN_GETMAXDEVMEMSIZE_TAG
+/* Bridge in structure for GetMaxPhysHeapCount */
+typedef struct PVRSRV_BRIDGE_IN_GETMAXPHYSHEAPCOUNT_TAG
 {
 	IMG_UINT32 ui32EmptyStructPlaceholder;
-} __packed PVRSRV_BRIDGE_IN_GETMAXDEVMEMSIZE;
+} __packed PVRSRV_BRIDGE_IN_GETMAXPHYSHEAPCOUNT;
 
-/* Bridge out structure for GetMaxDevMemSize */
-typedef struct PVRSRV_BRIDGE_OUT_GETMAXDEVMEMSIZE_TAG
+/* Bridge out structure for GetMaxPhysHeapCount */
+typedef struct PVRSRV_BRIDGE_OUT_GETMAXPHYSHEAPCOUNT_TAG
 {
-	IMG_DEVMEM_SIZE_T uiLMASize;
-	IMG_DEVMEM_SIZE_T uiUMASize;
 	PVRSRV_ERROR eError;
-} __packed PVRSRV_BRIDGE_OUT_GETMAXDEVMEMSIZE;
+	IMG_UINT32 ui32PhysHeapCount;
+} __packed PVRSRV_BRIDGE_OUT_GETMAXPHYSHEAPCOUNT;
+
+/*******************************************
+            PhysHeapGetMemInfo
+ *******************************************/
+
+/* Bridge in structure for PhysHeapGetMemInfo */
+typedef struct PVRSRV_BRIDGE_IN_PHYSHEAPGETMEMINFO_TAG
+{
+	PHYS_HEAP_MEM_STATS *pasapPhysHeapMemStats;
+	PVRSRV_PHYS_HEAP *peaPhysHeapID;
+	IMG_UINT32 ui32PhysHeapCount;
+} __packed PVRSRV_BRIDGE_IN_PHYSHEAPGETMEMINFO;
+
+/* Bridge out structure for PhysHeapGetMemInfo */
+typedef struct PVRSRV_BRIDGE_OUT_PHYSHEAPGETMEMINFO_TAG
+{
+	PHYS_HEAP_MEM_STATS *pasapPhysHeapMemStats;
+	PVRSRV_ERROR eError;
+} __packed PVRSRV_BRIDGE_OUT_PHYSHEAPGETMEMINFO;
+
+/*******************************************
+            GetDefaultPhysicalHeap
+ *******************************************/
+
+/* Bridge in structure for GetDefaultPhysicalHeap */
+typedef struct PVRSRV_BRIDGE_IN_GETDEFAULTPHYSICALHEAP_TAG
+{
+	IMG_UINT32 ui32EmptyStructPlaceholder;
+} __packed PVRSRV_BRIDGE_IN_GETDEFAULTPHYSICALHEAP;
+
+/* Bridge out structure for GetDefaultPhysicalHeap */
+typedef struct PVRSRV_BRIDGE_OUT_GETDEFAULTPHYSICALHEAP_TAG
+{
+	PVRSRV_ERROR eError;
+	PVRSRV_PHYS_HEAP eHeap;
+} __packed PVRSRV_BRIDGE_OUT_GETDEFAULTPHYSICALHEAP;
+
+/*******************************************
+            GetHeapPhysMemUsage
+ *******************************************/
+
+/* Bridge in structure for GetHeapPhysMemUsage */
+typedef struct PVRSRV_BRIDGE_IN_GETHEAPPHYSMEMUSAGE_TAG
+{
+	PHYS_HEAP_MEM_STATS *pasapPhysHeapMemStats;
+	IMG_UINT32 ui32PhysHeapCount;
+} __packed PVRSRV_BRIDGE_IN_GETHEAPPHYSMEMUSAGE;
+
+/* Bridge out structure for GetHeapPhysMemUsage */
+typedef struct PVRSRV_BRIDGE_OUT_GETHEAPPHYSMEMUSAGE_TAG
+{
+	PHYS_HEAP_MEM_STATS *pasapPhysHeapMemStats;
+	PVRSRV_ERROR eError;
+} __packed PVRSRV_BRIDGE_OUT_GETHEAPPHYSMEMUSAGE;
 
 /*******************************************
             DevmemGetFaultAddress

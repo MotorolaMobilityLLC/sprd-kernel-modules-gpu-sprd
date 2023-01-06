@@ -96,14 +96,10 @@ PVRSRV_ERROR RGXSetAPMState(const PVRSRV_DEVICE_NODE *psDeviceNode,
 
 	if (psDevInfo->pvAPMISRData)
 	{
-		eError = OSUninstallMISR(psDevInfo->pvAPMISRData);
-		if (PVRSRV_OK == eError)
-		{
-			psDevInfo->eActivePMConf = RGX_ACTIVEPM_FORCE_OFF;
-			psDevInfo->pvAPMISRData = NULL;
-			eError = PVRSRVSetDeviceDefaultPowerState((PPVRSRV_DEVICE_NODE)psDeviceNode,
-													  PVRSRV_DEV_POWER_STATE_ON);
-		}
+		psDevInfo->eActivePMConf = RGX_ACTIVEPM_FORCE_OFF;
+		psDevInfo->pvAPMISRData = NULL;
+		eError = PVRSRVSetDeviceDefaultPowerState((PPVRSRV_DEVICE_NODE)psDeviceNode,
+		                                          PVRSRV_DEV_POWER_STATE_ON);
 	}
 #endif
 

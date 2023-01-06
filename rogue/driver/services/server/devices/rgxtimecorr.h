@@ -116,7 +116,7 @@ static inline IMG_UINT64 RGXTimeCorrGetConversionFactor(IMG_UINT32 ui32ClockSpee
 	return OSDivide64r64(CRTIME_TO_CYCLES_WITH_US_SCALE << RGXFWIF_CRDELTA_TO_OSDELTA_ACCURACY_SHIFT,
 	                     RGXFWIF_CONVERT_TO_KHZ(ui32ClockSpeed), &ui32Remainder);
 }
-
+extern void CheckGpuPowClkState(PVRSRV_DEVICE_NODE *psDeviceNode);
 /*!
 ******************************************************************************
 
@@ -175,10 +175,11 @@ void RGXTimeCorrRestartPeriodic(IMG_HANDLE hDevHandle);
 
  @Description Returns value of currently selected clock (in ns).
 
+ @Input       psDeviceNode : RGX Device Node
  @Return      clock value from currently selected clock source
 
 ******************************************************************************/
-IMG_UINT64 RGXTimeCorrGetClockns64(void);
+IMG_UINT64 RGXTimeCorrGetClockns64(const PVRSRV_DEVICE_NODE *psDeviceNode);
 
 /*!
 ******************************************************************************
@@ -187,10 +188,11 @@ IMG_UINT64 RGXTimeCorrGetClockns64(void);
 
  @Description Returns value of currently selected clock (in us).
 
+ @Input       psDeviceNode : RGX Device Node
  @Return      clock value from currently selected clock source
 
 ******************************************************************************/
-IMG_UINT64 RGXTimeCorrGetClockus64(void);
+IMG_UINT64 RGXTimeCorrGetClockus64(const PVRSRV_DEVICE_NODE *psDeviceNode);
 
 /*!
 ******************************************************************************
@@ -199,10 +201,11 @@ IMG_UINT64 RGXTimeCorrGetClockus64(void);
 
  @Description Returns currently selected clock source
 
+ @Input       psDeviceNode : RGX Device Node
  @Return      clock source type
 
 ******************************************************************************/
-RGXTIMECORR_CLOCK_TYPE RGXTimeCorrGetClockSource(void);
+RGXTIMECORR_CLOCK_TYPE RGXTimeCorrGetClockSource(const PVRSRV_DEVICE_NODE *psDeviceNode);
 
 /*!
 ******************************************************************************

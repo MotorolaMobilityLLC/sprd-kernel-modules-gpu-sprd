@@ -49,5 +49,5 @@ $(PVRSRVKM_NAME)-y += services/system/volcanic/$(PVR_SYSTEM)/sysconfig.o \
  services/system/volcanic/common/vmm_type_$(VMM_TYPE).o
 
 ifeq ($(SUPPORT_ION),1)
-$(PVRSRVKM_NAME)-y += services/system/volcanic/common/env/linux/ion_support_generic.o
+$(PVRSRVKM_NAME)-y += services/system/common/env/linux/ion_support_generic.o
 endif

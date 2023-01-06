@@ -128,10 +128,9 @@ static inline IMG_BOOL rgxfw_hwperf_pow_st_direct(RGX_HWPERF_CNTBLK_ID eBlkType,
 		case RGX_CNTBLK_ID_SLCBANK0:
 		case RGX_CNTBLK_ID_FBCDC:
 		case RGX_CNTBLK_ID_FW_CUSTOM:
-		case RGX_CNTBLK_ID_PIPELINE_STATS:
 			return IMG_TRUE;
-			break;
 
+#if !defined(RGX_FEATURE_CATURIX_TOP_INFRASTRUCTURE)
 		case RGX_CNTBLK_ID_SLCBANK1:
 			if (RGX_FEATURE_NUM_MEMBUS > 1U)
 			{
@@ -141,7 +140,6 @@ static inline IMG_BOOL rgxfw_hwperf_pow_st_direct(RGX_HWPERF_CNTBLK_ID eBlkType,
 			{
 				return IMG_FALSE;
 			}
-			break;
 
 		case RGX_CNTBLK_ID_SLCBANK2:
 		case RGX_CNTBLK_ID_SLCBANK3:
@@ -153,11 +151,10 @@ static inline IMG_BOOL rgxfw_hwperf_pow_st_direct(RGX_HWPERF_CNTBLK_ID eBlkType,
 			{
 				return IMG_FALSE;
 			}
-			break;
+#endif /* !defined(RGX_FEATURE_CATURIX_TOP_INFRASTRUCTURE) */
 
 		default:
 			return IMG_FALSE;
-			break;
 	}
 }
 
@@ -231,6 +228,7 @@ static inline IMG_BOOL rgx_hwperf_blk_present(const RGXFW_HWPERF_CNTBLK_TYPE_MOD
 	PVRSRV_DEVICE_NODE *psNode;
 	IMG_UINT32	ui32MaxTPUPerSPU;
 	IMG_UINT32	ui32NumMemBus;
+	IMG_UINT32	ui32RTArchVal;
 
 	DBG_ASSERT(psDevInfo != NULL);
 	DBG_ASSERT(psBlkTypeDesc != NULL);
@@ -252,8 +250,18 @@ static inline IMG_BOOL rgx_hwperf_blk_present(const RGXFW_HWPERF_CNTBLK_TYPE_MOD
 	ui32MaxTPUPerSPU =
 		PVRSRV_GET_DEVICE_FEATURE_VALUE(psNode, MAX_TPU_PER_SPU);
 
-	ui32NumMemBus =
-		PVRSRV_GET_DEVICE_FEATURE_VALUE(psNode, NUM_MEMBUS);
+	if (PVRSRV_IS_FEATURE_SUPPORTED(psNode, CATURIX_TOP_INFRASTRUCTURE))
+	{
+		ui32NumMemBus = 1U;
+	}
+	else
+	{
+		ui32NumMemBus =
+			PVRSRV_GET_DEVICE_FEATURE_VALUE(psNode, NUM_MEMBUS);
+	}
+
+	ui32RTArchVal =
+		PVRSRV_GET_DEVICE_FEATURE_VALUE(psNode, RAY_TRACING_ARCH);
 
 	switch (psBlkTypeDesc->uiCntBlkIdBase)
 	{
@@ -262,10 +270,10 @@ static inline IMG_BOOL rgx_hwperf_blk_present(const RGXFW_HWPERF_CNTBLK_TYPE_MOD
 		case RGX_CNTBLK_ID_SLCBANK0:
 		case RGX_CNTBLK_ID_FBCDC:
 		case RGX_CNTBLK_ID_FW_CUSTOM:
-		case RGX_CNTBLK_ID_PIPELINE_STATS:
 			psRtInfo->uiNumUnits = 1;
 			break;
 
+#if !defined(RGX_FEATURE_CATURIX_TOP_INFRASTRUCTURE)
 		case RGX_CNTBLK_ID_SLCBANK1:
 			if (ui32NumMemBus >= 2U)
 			{
@@ -288,6 +296,7 @@ static inline IMG_BOOL rgx_hwperf_blk_present(const RGXFW_HWPERF_CNTBLK_TYPE_MOD
 				psRtInfo->uiNumUnits = 0;
 			}
 			break;
+#endif /* !defined(RGX_FEATURE_CATURIX_TOP_INFRASTRUCTURE) */
 
 		case RGX_CNTBLK_ID_TPU0:
 		case RGX_CNTBLK_ID_SWIFT0:
@@ -301,6 +310,18 @@ static inline IMG_BOOL rgx_hwperf_blk_present(const RGXFW_HWPERF_CNTBLK_TYPE_MOD
 
 			psRtInfo->uiNumUnits =
 				PVRSRV_GET_DEVICE_FEATURE_VALUE(psNode, NUM_SPU);
+			break;
+
+		case RGX_CNTBLK_ID_RAC0:
+			if (ui32RTArchVal > 2U)
+			{
+				psRtInfo->uiNumUnits =
+					PVRSRV_GET_DEVICE_FEATURE_VALUE(psNode, NUM_SPU);
+			}
+			else
+			{
+				psRtInfo->uiNumUnits = 0;
+			}
 			break;
 
 		case RGX_CNTBLK_ID_USC0:
@@ -340,6 +361,7 @@ static inline IMG_BOOL rgx_hwperf_blk_present(const RGXFW_HWPERF_CNTBLK_TYPE_MOD
 		return IMG_FALSE;
 	}
 #else	/* FW context -- Compile-time only */
+	IMG_UINT32	ui32NumMemBus;
 	PVR_UNREFERENCED_PARAMETER(pvDev_km);
 	DBG_ASSERT(psBlkTypeDesc != NULL);
 
@@ -348,13 +370,19 @@ static inline IMG_BOOL rgx_hwperf_blk_present(const RGXFW_HWPERF_CNTBLK_TYPE_MOD
 		return IMG_FALSE;
 	}
 
+#if !defined(RGX_FEATURE_CATURIX_TOP_INFRASTRUCTURE)
+	ui32NumMemBus = RGX_FEATURE_NUM_MEMBUS;
+#else
+	ui32NumMemBus = 1U;
+#endif /* !defined(RGX_FEATURE_CATURIX_TOP_INFRASTRUCTURE) */
+
 	switch (psBlkTypeDesc->uiCntBlkIdBase)
 	{
 		/* Handle the dynamic-sized SLC blocks which are only present if
 		 * RGX_FEATURE_NUM_MEMBUS is appropriately set.
 		 */
 		case RGX_CNTBLK_ID_SLCBANK1:
-			if (RGX_FEATURE_NUM_MEMBUS >= 2U)
+			if (ui32NumMemBus >= 2U)
 			{
 				psRtInfo->uiNumUnits = 1;
 			}
@@ -366,7 +394,7 @@ static inline IMG_BOOL rgx_hwperf_blk_present(const RGXFW_HWPERF_CNTBLK_TYPE_MOD
 
 		case RGX_CNTBLK_ID_SLCBANK2:
 		case RGX_CNTBLK_ID_SLCBANK3:
-			if (RGX_FEATURE_NUM_MEMBUS > 2U)
+			if (ui32NumMemBus > 2U)
 			{
 				psRtInfo->uiNumUnits = 1;
 			}
@@ -450,10 +478,13 @@ X(RGX_CNTBLK_ID_FW_CUSTOM, 0, 1, "PERF_BLK_FW_CUSTOM", rgxfw_hwperf_pow_st_direc
 X(RGX_CNTBLK_ID_SLCBANK0,   0, 1, "PERF_BLK_SLC0",   rgxfw_hwperf_pow_st_direct, rgx_hwperf_blk_present, g_auiSLC0), \
 X(RGX_CNTBLK_ID_SLCBANK1,   0, 1, "PERF_BLK_SLC1",   rgxfw_hwperf_pow_st_direct, rgx_hwperf_blk_present, g_auiSLC1), \
 X(RGX_CNTBLK_ID_SLCBANK2,   0, 1, "PERF_BLK_SLC2",   rgxfw_hwperf_pow_st_direct, rgx_hwperf_blk_present, g_auiSLC2), \
-X(RGX_CNTBLK_ID_SLCBANK3,   0, 1, "PERF_BLK_SLC3",   rgxfw_hwperf_pow_st_direct, rgx_hwperf_blk_present, g_auiSLC3), \
-X(RGX_CNTBLK_ID_PIPELINE_STATS, 0, 1, "PERF_BLK_PIPELINE_STATS", rgxfw_hwperf_pow_st_direct, rgx_hwperf_blk_present, g_auiPIPELINE)
+X(RGX_CNTBLK_ID_SLCBANK3,   0, 1, "PERF_BLK_SLC3",   rgxfw_hwperf_pow_st_direct, rgx_hwperf_blk_present, g_auiSLC3)
 
 /* Furian 8XT Indirect Performance counter blocks */
+
+#if !defined(RGX_CR_RAC_INDIRECT)
+#define RGX_CR_RAC_INDIRECT (0x8398U)
+#endif
 
 #define RGX_CNT_BLK_TYPE_MODEL_INDIRECT_LIST \
 	/* uiCntBlkIdBase,  uiIndirectReg,  uiNumUnits**, pszBlockNameComment, pfnIsBlkPowered, pfnIsBlkPresent */ \
@@ -464,7 +495,8 @@ X(RGX_CNTBLK_ID_PBE_SHARED0, RGX_CR_PBE_SHARED_INDIRECT, RGX_HWPERF_NUM_PBE_SHAR
 X(RGX_CNTBLK_ID_USC0, RGX_CR_USC_INDIRECT, RGX_HWPERF_NUM_USC, "PERF_BLK_USC", rgxfw_hwperf_pow_st_indirect, rgx_hwperf_blk_present, g_auiUSC), \
 X(RGX_CNTBLK_ID_TPU0, RGX_CR_TPU_INDIRECT, RGX_HWPERF_NUM_TPU, "PERF_BLK_TPU", rgxfw_hwperf_pow_st_indirect, rgx_hwperf_blk_present, g_auiTPU), \
 X(RGX_CNTBLK_ID_SWIFT0, RGX_CR_SWIFT_INDIRECT, RGX_HWPERF_NUM_SWIFT, "PERF_BLK_SWIFT", rgxfw_hwperf_pow_st_indirect, rgx_hwperf_blk_present, g_auiSWIFT), \
-X(RGX_CNTBLK_ID_TEXAS0, RGX_CR_TEXAS_INDIRECT, RGX_HWPERF_NUM_TEXAS, "PERF_BLK_TEXAS", rgxfw_hwperf_pow_st_indirect, rgx_hwperf_blk_present, g_auiTEXAS)
+X(RGX_CNTBLK_ID_TEXAS0, RGX_CR_TEXAS_INDIRECT, RGX_HWPERF_NUM_TEXAS, "PERF_BLK_TEXAS", rgxfw_hwperf_pow_st_indirect, rgx_hwperf_blk_present, g_auiTEXAS), \
+X(RGX_CNTBLK_ID_RAC0, RGX_CR_RAC_INDIRECT, RGX_HWPERF_NUM_RAC, "PERF_BLK_RAC", rgxfw_hwperf_pow_st_indirect, rgx_hwperf_blk_present, g_auiRAC)
 
 #else /* !defined(RGX_FIRMWARE) && !defined(__KERNEL__) */
 

@@ -62,6 +62,10 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define CREATE_TRACE_POINTS
 #include "rogue_trace_events.h"
 
+#if defined(PVRSRV_ANDROID_TRACE_GPU_WORK_PERIOD)
+#include "pvr_gpuwork.h"
+#endif /* defined(PVRSRV_ANDROID_TRACE_GPU_WORK_PERIOD) */
+
 /******************************************************************************
  Module internal implementation
 ******************************************************************************/
@@ -89,13 +93,6 @@ typedef struct RGX_HWPERF_FTRACE_DATA {
 /* This lock ensures state change of GPU_TRACING on/off is done atomically */
 static POS_LOCK ghGPUTraceStateLock;
 static IMG_BOOL gbFTraceGPUEventsEnabled = PVRSRV_APPHINT_ENABLEFTRACEGPU;
-
-/* Saved value of the clock source before the trace was enabled. We're keeping
- * it here so that we know which clock should be selected after we disable the
- * gpu ftrace. */
-#if defined(SUPPORT_RGX)
-static RGXTIMECORR_CLOCK_TYPE geLastTimeCorrClock = PVRSRV_APPHINT_TIMECORRCLOCK;
-#endif
 
 /* This lock ensures that the reference counting operation on the FTrace UFO
  * events and enable/disable operation on firmware event are performed as
@@ -140,11 +137,19 @@ PVRSRV_ERROR PVRGpuTraceSupportInit(void)
 	eError = OSLockCreate(&ghGPUTraceStateLock);
 	PVR_LOG_RETURN_IF_ERROR (eError, "OSLockCreate");
 
+#if defined(PVRSRV_ANDROID_TRACE_GPU_WORK_PERIOD)
+	eError = GpuTraceWorkPeriodInitialize();
+	PVR_LOG_RETURN_IF_ERROR (eError, "GpuTraceWorkPeriodInitialize");
+#endif /* defined(PVRSRV_ANDROID_TRACE_GPU_WORK_PERIOD) */
+
 	return PVRSRV_OK;
 }
 
 void PVRGpuTraceSupportDeInit(void)
 {
+#if defined(PVRSRV_ANDROID_TRACE_GPU_WORK_PERIOD)
+	GpuTraceSupportDeInitialize();
+#endif /* defined(PVRSRV_ANDROID_TRACE_GPU_WORK_PERIOD) */
 	if (ghGPUTraceStateLock)
 	{
 		OSLockDestroy(ghGPUTraceStateLock);
@@ -233,17 +238,6 @@ void PVRGpuTraceInitIfEnabled(PVRSRV_DEVICE_NODE *psDeviceNode)
 		 * with the event name, e.g.:
 		 * trace_set_clr_event("rogue", "rogue_ufo_update", 1) */
 #if defined(CONFIG_EVENT_TRACING) /* this is a kernel config option */
-#if defined(ANDROID) || defined(CHROMIUMOS_KERNEL)
-		if (trace_set_clr_event("gpu", NULL, 1))
-		{
-			PVR_DPF((PVR_DBG_ERROR, "Failed to enable \"gpu\" event"
-					" group"));
-		}
-		else
-		{
-			PVR_LOG(("FTrace events from \"gpu\" group enabled"));
-		}
-#endif /* defined(ANDROID) || defined(CHROMIUMOS_KERNEL) */
 		if (trace_set_clr_event("rogue", NULL, 1))
 		{
 			PVR_DPF((PVR_DBG_ERROR, "Failed to enable \"rogue\" event"
@@ -327,10 +321,10 @@ static PVRSRV_ERROR _GpuTraceEnable(PVRSRV_RGXDEV_INFO *psRgxDevInfo)
 	PVR_LOG_GOTO_IF_ERROR(eError, "TLClientOpenStream", err_out);
 
 #if defined(SUPPORT_RGX)
-	if (RGXTimeCorrGetClockSource() != RGXTIMECORR_CLOCK_SCHED)
+	if (RGXTimeCorrGetClockSource(psRgxDevNode) != RGXTIMECORR_CLOCK_SCHED)
 	{
 		/* Set clock source for timer correlation data to sched_clock */
-		geLastTimeCorrClock = RGXTimeCorrGetClockSource();
+		psRgxDevInfo->ui32LastClockSource = RGXTimeCorrGetClockSource(psRgxDevNode);
 		RGXTimeCorrSetClockSource(psRgxDevNode, RGXTIMECORR_CLOCK_SCHED);
 	}
 #endif
@@ -381,10 +375,11 @@ static PVRSRV_ERROR _GpuTraceDisable(PVRSRV_RGXDEV_INFO *psRgxDevInfo, IMG_BOOL 
 	if (!psRgxDevInfo->bFirmwareInitialised)
 	{
 		psRgxDevInfo->ui64HWPerfFilter = RGX_HWPERF_EVENT_MASK_NONE;
+#if !defined(NO_HARDWARE)
 		PVR_DPF((PVR_DBG_WARNING,
-				 "HWPerfFW mask has been SET to (%" IMG_UINT64_FMTSPECx ")",
-				 psRgxDevInfo->ui64HWPerfFilter));
-
+		         "HWPerfFW mask has been SET to (%" IMG_UINT64_FMTSPECx ")",
+		         psRgxDevInfo->ui64HWPerfFilter));
+#endif
 		return PVRSRV_OK;
 	}
 
@@ -441,9 +436,9 @@ static PVRSRV_ERROR _GpuTraceDisable(PVRSRV_RGXDEV_INFO *psRgxDevInfo, IMG_BOOL 
 	}
 
 #if defined(SUPPORT_RGX)
-	if (geLastTimeCorrClock != RGXTIMECORR_CLOCK_SCHED)
+	if (psRgxDevInfo->ui32LastClockSource != RGXTIMECORR_CLOCK_SCHED)
 	{
-		RGXTimeCorrSetClockSource(psRgxDevNode, geLastTimeCorrClock);
+		RGXTimeCorrSetClockSource(psRgxDevNode, psRgxDevInfo->ui32LastClockSource);
 	}
 #endif
 
@@ -482,7 +477,9 @@ static PVRSRV_ERROR _GpuTraceSetEnabledForAllDevices(IMG_BOOL bNewValue)
 	PVRSRV_DATA *psPVRSRVData = PVRSRVGetPVRSRVData();
 	PVRSRV_DEVICE_NODE *psDeviceNode;
 
+	OSWRLockAcquireRead(psPVRSRVData->hDeviceNodeListLock);
 	psDeviceNode = psPVRSRVData->psDeviceNodeList;
+
 	/* enable/disable GPU trace on all devices */
 	while (psDeviceNode)
 	{
@@ -493,6 +490,8 @@ static PVRSRV_ERROR _GpuTraceSetEnabledForAllDevices(IMG_BOOL bNewValue)
 		}
 		psDeviceNode = psDeviceNode->psNext;
 	}
+
+	OSWRLockReleaseRead(psPVRSRVData->hDeviceNodeListLock);
 
 	PVR_DPF_RETURN_RC(eError);
 }
@@ -507,16 +506,26 @@ PVRSRV_ERROR PVRGpuTraceSetEnabled(PVRSRV_DEVICE_NODE *psDeviceNode,
 
 static const IMG_CHAR *_HWPerfKickTypeToStr(RGX_HWPERF_KICK_TYPE eKickType)
 {
-	static const IMG_CHAR *aszKickType[RGX_HWPERF_KICK_TYPE_LAST+1] = {
-#if defined(HWPERF_PACKET_V2C_SIG)
-		"TA3D", "CDM", "RS", "SHG", "TQTDM", "SYNC", "LAST"
+	static const IMG_CHAR *aszKickType[RGX_HWPERF_KICK_TYPE2_LAST+1] = {
+		"TA3D", /* Deprecated */
+#if defined(RGX_FEATURE_HWPERF_VOLCANIC)
+		/* Volcanic deprecated kick types */
+		"CDM", "RS", "SHG", "TQTDM", "SYNC", "TA", "3D", "LAST",
+
+		"<UNKNOWN>", "<UNKNOWN>", "<UNKNOWN>", "<UNKNOWN>", "<UNKNOWN>",
+		"<UNKNOWN>", "<UNKNOWN>", "<UNKNOWN>",
 #else
-		"TA3D", "TQ2D", "TQ3D", "CDM", "RS", "VRDM", "TQTDM", "SYNC", "LAST"
+		/* Rogue deprecated kick types */
+		"TQ2D", "TQ3D", "CDM", "RS", "VRDM", "TQTDM", "SYNC", "TA", "3D", "LAST",
+
+		"<UNKNOWN>", "<UNKNOWN>", "<UNKNOWN>", "<UNKNOWN>", "<UNKNOWN>",
+		"<UNKNOWN>",
 #endif
+		"TQ2D", "TQ3D", "TQTDM", "CDM", "GEOM", "3D", "SYNC", "RS", "LAST"
 	};
 
 	/* cast in case of negative value */
-	if (((IMG_UINT32) eKickType) >= RGX_HWPERF_KICK_TYPE_LAST)
+	if (((IMG_UINT32) eKickType) >= RGX_HWPERF_KICK_TYPE2_LAST)
 	{
 		return "<UNKNOWN>";
 	}
@@ -538,13 +547,14 @@ void PVRGpuTraceEnqueueEvent(
 
 	if (PVRGpuTraceIsEnabled())
 	{
-		trace_rogue_job_enqueue(ui32FirmwareCtx, ui32IntJobRef, ui32ExtJobRef,
-					pszKickType);
+		trace_rogue_job_enqueue(psDevNode->sDevId.ui32InternalID, ui32FirmwareCtx,
+		                        ui32IntJobRef, ui32ExtJobRef, pszKickType);
 	}
 }
 
 static void _GpuTraceWorkSwitch(
 		IMG_UINT64 ui64HWTimestampInOSTime,
+		IMG_UINT32 ui32GpuId,
 		IMG_UINT32 ui32CtxId,
 		IMG_UINT32 ui32CtxPriority,
 		IMG_UINT32 ui32ExtJobRef,
@@ -554,12 +564,14 @@ static void _GpuTraceWorkSwitch(
 {
 	PVR_ASSERT(pszWorkType);
 	trace_rogue_sched_switch(pszWorkType, eSwType, ui64HWTimestampInOSTime,
-			ui32CtxId, 2-ui32CtxPriority, ui32IntJobRef, ui32ExtJobRef);
+	                         ui32GpuId, ui32CtxId, 2-ui32CtxPriority, ui32IntJobRef,
+	                         ui32ExtJobRef);
 }
 
 static void _GpuTraceUfo(
 		IMG_UINT64 ui64OSTimestamp,
 		const RGX_HWPERF_UFO_EV eEvType,
+		const IMG_UINT32 ui32GpuId,
 		const IMG_UINT32 ui32CtxId,
 		const IMG_UINT32 ui32ExtJobRef,
 		const IMG_UINT32 ui32IntJobRef,
@@ -568,26 +580,26 @@ static void _GpuTraceUfo(
 {
 	switch (eEvType) {
 		case RGX_HWPERF_UFO_EV_UPDATE:
-			trace_rogue_ufo_updates(ui64OSTimestamp, ui32CtxId,
+			trace_rogue_ufo_updates(ui64OSTimestamp, ui32GpuId, ui32CtxId,
 					ui32ExtJobRef, ui32IntJobRef, ui32UFOCount, puData);
 			break;
 		case RGX_HWPERF_UFO_EV_CHECK_SUCCESS:
-			trace_rogue_ufo_checks_success(ui64OSTimestamp, ui32CtxId,
+			trace_rogue_ufo_checks_success(ui64OSTimestamp, ui32GpuId, ui32CtxId,
 					ui32ExtJobRef, ui32IntJobRef, IMG_FALSE, ui32UFOCount,
 					puData);
 			break;
 		case RGX_HWPERF_UFO_EV_PRCHECK_SUCCESS:
-			trace_rogue_ufo_checks_success(ui64OSTimestamp, ui32CtxId,
+			trace_rogue_ufo_checks_success(ui64OSTimestamp, ui32GpuId, ui32CtxId,
 					ui32ExtJobRef, ui32IntJobRef, IMG_TRUE, ui32UFOCount,
 					puData);
 			break;
 		case RGX_HWPERF_UFO_EV_CHECK_FAIL:
-			trace_rogue_ufo_checks_fail(ui64OSTimestamp, ui32CtxId,
+			trace_rogue_ufo_checks_fail(ui64OSTimestamp, ui32GpuId, ui32CtxId,
 					ui32ExtJobRef, ui32IntJobRef, IMG_FALSE, ui32UFOCount,
 					puData);
 			break;
 		case RGX_HWPERF_UFO_EV_PRCHECK_FAIL:
-			trace_rogue_ufo_checks_fail(ui64OSTimestamp, ui32CtxId,
+			trace_rogue_ufo_checks_fail(ui64OSTimestamp, ui32GpuId, ui32CtxId,
 					ui32ExtJobRef, ui32IntJobRef, IMG_TRUE, ui32UFOCount,
 					puData);
 			break;
@@ -598,18 +610,20 @@ static void _GpuTraceUfo(
 
 static void _GpuTraceFirmware(
 		IMG_UINT64 ui64HWTimestampInOSTime,
+		IMG_UINT32 ui32GpuId,
 		const IMG_CHAR* pszWorkType,
 		PVR_GPUTRACE_SWITCH_TYPE eSwType)
 {
-	trace_rogue_firmware_activity(ui64HWTimestampInOSTime, pszWorkType, eSwType);
+	trace_rogue_firmware_activity(ui64HWTimestampInOSTime, ui32GpuId, pszWorkType, eSwType);
 }
 
 static void _GpuTraceEventsLost(
 		const RGX_HWPERF_STREAM_ID eStreamId,
+		IMG_UINT32 ui32GpuId,
 		const IMG_UINT32 ui32LastOrdinal,
 		const IMG_UINT32 ui32CurrOrdinal)
 {
-	trace_rogue_events_lost(eStreamId, ui32LastOrdinal, ui32CurrOrdinal);
+	trace_rogue_events_lost(eStreamId, ui32GpuId, ui32LastOrdinal, ui32CurrOrdinal);
 }
 
 /* Calculate the OS timestamp given an RGX timestamp in the HWPerf event. */
@@ -676,12 +690,22 @@ static void _GpuTraceSwitchEvent(PVRSRV_RGXDEV_INFO *psDevInfo,
 			pszWorkName, psHWPerfPktData->ui32DMContext, psHWPerfPktData->ui32IntJobRef, eSwType));
 
 	_GpuTraceWorkSwitch(ui64Timestamp,
+	                    psDevInfo->psDeviceNode->sDevId.ui32InternalID,
 	                    psHWPerfPktData->ui32DMContext,
 	                    psHWPerfPktData->ui32CtxPriority,
 	                    psHWPerfPktData->ui32ExtJobRef,
 	                    psHWPerfPktData->ui32IntJobRef,
 	                    pszWorkName,
 	                    eSwType);
+
+#if defined(PVRSRV_ANDROID_TRACE_GPU_WORK_PERIOD)
+	 GpuTraceWorkPeriod(psHWPerfPktData->ui32PID,
+	                    psDevInfo->psDeviceNode->sDevId.ui32InternalID,
+	                    ui64Timestamp,
+	                    psHWPerfPktData->ui32IntJobRef,
+	                    (eSwType == PVR_GPUTRACE_SWITCH_TYPE_BEGIN) ?
+						PVR_GPU_WORK_EVENT_START : PVR_GPU_WORK_EVENT_END);
+#endif /* defined(PVRSRV_ANDROID_TRACE_GPU_WORK_PERIOD) */
 
 	PVR_DPF_RETURN;
 }
@@ -707,6 +731,7 @@ static void _GpuTraceUfoEvent(PVRSRV_RGXDEV_INFO *psDevInfo,
 	        psHWPerfPktData->ui32IntJobRef));
 
 	_GpuTraceUfo(ui64Timestamp, psHWPerfPktData->eEvType,
+	             psDevInfo->psDeviceNode->sDevId.ui32InternalID,
 	             psHWPerfPktData->ui32DMContext, psHWPerfPktData->ui32ExtJobRef,
 	             psHWPerfPktData->ui32IntJobRef, ui32UFOCount, puData);
 }
@@ -722,7 +747,8 @@ static void _GpuTraceFirmwareEvent(PVRSRV_RGXDEV_INFO *psDevInfo,
 	ui64Timestamp = CalculateEventTimestamp(psDevInfo, psHWPerfPktData->ui32TimeCorrIndex,
 											psHWPerfPkt->ui64Timestamp);
 
-	_GpuTraceFirmware(ui64Timestamp, pszWorkName, eSwType);
+	_GpuTraceFirmware(ui64Timestamp, psDevInfo->psDeviceNode->sDevId.ui32InternalID, pszWorkName,
+	                  eSwType);
 }
 
 static IMG_BOOL ValidAndEmitFTraceEvent(PVRSRV_RGXDEV_INFO *psDevInfo,
@@ -775,7 +801,7 @@ static IMG_BOOL ValidAndEmitFTraceEvent(PVRSRV_RGXDEV_INFO *psDevInfo,
 	if (psFtraceData->ui32FTraceLastOrdinal != psHWPerfPkt->ui32Ordinal - 1)
 	{
 		RGX_HWPERF_STREAM_ID eStreamId = RGX_HWPERF_GET_STREAM_ID(psHWPerfPkt);
-		_GpuTraceEventsLost(eStreamId,
+		_GpuTraceEventsLost(eStreamId, psDevInfo->psDeviceNode->sDevId.ui32InternalID,
 		                    psFtraceData->ui32FTraceLastOrdinal,
 		                    psHWPerfPkt->ui32Ordinal);
 		PVR_DPF((PVR_DBG_ERROR, "FTrace events lost (stream_id = %u, ordinal: last = %u, current = %u)",
@@ -994,6 +1020,22 @@ out:
 	PVR_DPF_RETURN;
 }
 
+#if defined(PVRSRV_ANDROID_TRACE_GPU_WORK_PERIOD)
+PVRSRV_ERROR
+PVRSRVGpuTraceWorkPeriodEventStatsRegister(IMG_HANDLE
+		*phGpuWorkPeriodEventStats)
+{
+	return GpuTraceWorkPeriodEventStatsRegister(phGpuWorkPeriodEventStats);
+}
+
+void
+PVRSRVGpuTraceWorkPeriodEventStatsUnregister(
+		IMG_HANDLE hGpuWorkPeriodEventStats)
+{
+	GpuTraceWorkPeriodEventStatsUnregister(hGpuWorkPeriodEventStats);
+}
+#endif /* defined(PVRSRV_ANDROID_TRACE_GPU_WORK_PERIOD) */
+
 /* ----- AppHint interface -------------------------------------------------- */
 
 static PVRSRV_ERROR _GpuTraceIsEnabledCallback(
@@ -1021,22 +1063,26 @@ static PVRSRV_ERROR _GpuTraceSetEnabledCallback(
 
 	if (value != gbFTraceGPUEventsEnabled)
 	{
-		PVRSRV_ERROR eError;
-		if ((eError = _GpuTraceSetEnabledForAllDevices(value)) == PVRSRV_OK)
-		{
-			PVR_TRACE(("%s GPU FTrace", value ? "ENABLED" : "DISABLED"));
-			gbFTraceGPUEventsEnabled = value;
-		}
-		else
-		{
-			PVR_TRACE(("FAILED to %s GPU FTrace", value ? "enable" : "disable"));
-			/* On failure, partial enable/disable might have resulted.
-			 * Try best to restore to previous state. Ignore error */
-			_GpuTraceSetEnabledForAllDevices(gbFTraceGPUEventsEnabled);
+#if defined(PVRSRV_NEED_PVR_TRACE)
+		const IMG_CHAR *pszOperation = value ? "enable" : "disable";
+#endif
 
-			OSLockRelease(ghGPUTraceStateLock);
-			return eError;
+		if (_GpuTraceSetEnabledForAllDevices(value) != PVRSRV_OK)
+		{
+			PVR_TRACE(("FAILED to %s GPU FTrace for all devices", pszOperation));
+			goto err_restore_state;
 		}
+
+#if defined(CONFIG_EVENT_TRACING) /* this is a kernel config option */
+		if (trace_set_clr_event("rogue", NULL, (int) value) != 0)
+		{
+			PVR_TRACE(("FAILED to %s GPU FTrace event group", pszOperation));
+			goto err_restore_state;
+		}
+#endif /* defined(CONFIG_EVENT_TRACING) */
+
+		PVR_TRACE(("%s GPU FTrace", value ? "ENABLED" : "DISABLED"));
+		gbFTraceGPUEventsEnabled = value;
 	}
 	else
 	{
@@ -1046,10 +1092,24 @@ static PVRSRV_ERROR _GpuTraceSetEnabledCallback(
 	OSLockRelease(ghGPUTraceStateLock);
 
 	return PVRSRV_OK;
+
+err_restore_state:
+	/* On failure, partial enable/disable might have resulted. Try best to
+	 * restore to previous state. Ignore error */
+	_GpuTraceSetEnabledForAllDevices(gbFTraceGPUEventsEnabled);
+
+	OSLockRelease(ghGPUTraceStateLock);
+
+	return PVRSRV_ERROR_UNABLE_TO_ENABLE_EVENT;
 }
 
 void PVRGpuTraceInitAppHintCallbacks(const PVRSRV_DEVICE_NODE *psDeviceNode)
 {
+	/* Do not register callback handlers if we are in GUEST mode */
+	if (PVRSRV_VZ_MODE_IS(GUEST))
+	{
+		return;
+	}
 	PVRSRVAppHintRegisterHandlersBOOL(APPHINT_ID_EnableFTraceGPU,
 	                                  _GpuTraceIsEnabledCallback,
 	                                  _GpuTraceSetEnabledCallback,
@@ -1060,7 +1120,8 @@ void PVRGpuTraceInitAppHintCallbacks(const PVRSRV_DEVICE_NODE *psDeviceNode)
 
 void PVRGpuTraceEnableUfoCallback(void)
 {
-	PVRSRV_DEVICE_NODE *psDeviceNode = PVRSRVGetPVRSRVData()->psDeviceNodeList;
+	PVRSRV_DATA *psPVRSRVData = PVRSRVGetPVRSRVData();
+	PVRSRV_DEVICE_NODE *psDeviceNode;
 #if defined(SUPPORT_RGX)
 	PVRSRV_RGXDEV_INFO *psRgxDevInfo;
 	PVRSRV_ERROR eError;
@@ -1070,6 +1131,9 @@ void PVRGpuTraceEnableUfoCallback(void)
 	OSLockAcquire(ghLockFTraceEventLock);
 	if (guiUfoEventRef++ == 0)
 	{
+		OSWRLockAcquireRead(psPVRSRVData->hDeviceNodeListLock);
+		psDeviceNode = psPVRSRVData->psDeviceNodeList;
+
 		/* make sure UFO events are enabled on all rogue devices */
 		while (psDeviceNode)
 		{
@@ -1097,6 +1161,8 @@ void PVRGpuTraceEnableUfoCallback(void)
 #endif
 			psDeviceNode = psDeviceNode->psNext;
 		}
+
+		OSWRLockReleaseRead(psPVRSRVData->hDeviceNodeListLock);
 	}
 	OSLockRelease(ghLockFTraceEventLock);
 }
@@ -1106,6 +1172,7 @@ void PVRGpuTraceDisableUfoCallback(void)
 #if defined(SUPPORT_RGX)
 	PVRSRV_ERROR eError;
 #endif
+	PVRSRV_DATA *psPVRSRVData = PVRSRVGetPVRSRVData();
 	PVRSRV_DEVICE_NODE *psDeviceNode;
 
 	/* We have to check if lock is valid because on driver unload
@@ -1117,12 +1184,13 @@ void PVRGpuTraceDisableUfoCallback(void)
 	if (ghLockFTraceEventLock == NULL)
 		return;
 
-	psDeviceNode = PVRSRVGetPVRSRVData()->psDeviceNodeList;
-
 	/* Lock down events state, for consistent value of guiUfoEventRef */
 	OSLockAcquire(ghLockFTraceEventLock);
 	if (--guiUfoEventRef == 0)
 	{
+		OSWRLockAcquireRead(psPVRSRVData->hDeviceNodeListLock);
+		psDeviceNode = psPVRSRVData->psDeviceNodeList;
+
 		/* make sure UFO events are disabled on all rogue devices */
 		while (psDeviceNode)
 		{
@@ -1149,16 +1217,20 @@ void PVRGpuTraceDisableUfoCallback(void)
 				        psDeviceNode->sDevId.i32OsDeviceID));
 			}
 #endif
+
 			psDeviceNode = psDeviceNode->psNext;
 		}
+
+		OSWRLockReleaseRead(psPVRSRVData->hDeviceNodeListLock);
 	}
 	OSLockRelease(ghLockFTraceEventLock);
 }
 
 void PVRGpuTraceEnableFirmwareActivityCallback(void)
 {
-	PVRSRV_DEVICE_NODE *psDeviceNode = PVRSRVGetPVRSRVData()->psDeviceNodeList;
 #if defined(SUPPORT_RGX)
+	PVRSRV_DATA *psPVRSRVData = PVRSRVGetPVRSRVData();
+	PVRSRV_DEVICE_NODE *psDeviceNode;
 	PVRSRV_RGXDEV_INFO *psRgxDevInfo;
 	uint64_t ui64Filter, ui64FWEventsFilter = 0;
 	int i;
@@ -1168,12 +1240,14 @@ void PVRGpuTraceEnableFirmwareActivityCallback(void)
 	{
 		ui64FWEventsFilter |= RGX_HWPERF_EVENT_MASK_VALUE(i);
 	}
-#endif
+
 	OSLockAcquire(ghLockFTraceEventLock);
+
+	OSWRLockAcquireRead(psPVRSRVData->hDeviceNodeListLock);
+	psDeviceNode = psPVRSRVData->psDeviceNodeList;
 	/* Enable all FW events on all the devices */
 	while (psDeviceNode)
 	{
-#if defined(SUPPORT_RGX)
 		PVRSRV_ERROR eError;
 		psRgxDevInfo = psDeviceNode->pvDevice;
 		ui64Filter = psRgxDevInfo->ui64HWPerfFilter | ui64FWEventsFilter;
@@ -1185,19 +1259,23 @@ void PVRGpuTraceEnableFirmwareActivityCallback(void)
 			PVR_DPF((PVR_DBG_ERROR, "Could not enable HWPerf event for firmware"
 			        " task timings (%s).", PVRSRVGetErrorString(eError)));
 		}
-#endif
+
 		psDeviceNode = psDeviceNode->psNext;
 	}
+
+	OSWRLockReleaseRead(psPVRSRVData->hDeviceNodeListLock);
+
 	OSLockRelease(ghLockFTraceEventLock);
+#endif /* defined(SUPPORT_RGX) */
 }
 
 void PVRGpuTraceDisableFirmwareActivityCallback(void)
 {
-	PVRSRV_DEVICE_NODE *psDeviceNode;
 #if defined(SUPPORT_RGX)
+	PVRSRV_DATA *psPVRSRVData = PVRSRVGetPVRSRVData();
+	PVRSRV_DEVICE_NODE *psDeviceNode;
 	IMG_UINT64 ui64FWEventsFilter = ~0;
 	int i;
-#endif
 
 	/* We have to check if lock is valid because on driver unload
 	 * PVRGpuTraceSupportDeInit is called before kernel disables the ftrace
@@ -1208,22 +1286,20 @@ void PVRGpuTraceDisableFirmwareActivityCallback(void)
 	if (ghLockFTraceEventLock == NULL)
 		return;
 
-	psDeviceNode = PVRSRVGetPVRSRVData()->psDeviceNodeList;
+	OSLockAcquire(ghLockFTraceEventLock);
 
-#if defined(SUPPORT_RGX)
+	OSWRLockAcquireRead(psPVRSRVData->hDeviceNodeListLock);
+	psDeviceNode = psPVRSRVData->psDeviceNodeList;
+
 	for (i = RGX_HWPERF_FW_EVENT_RANGE_FIRST_TYPE;
 		 i <= RGX_HWPERF_FW_EVENT_RANGE_LAST_TYPE; i++)
 	{
 		ui64FWEventsFilter &= ~RGX_HWPERF_EVENT_MASK_VALUE(i);
 	}
-#endif
-
-	OSLockAcquire(ghLockFTraceEventLock);
 
 	/* Disable all FW events on all the devices */
 	while (psDeviceNode)
 	{
-#if defined(SUPPORT_RGX)
 		PVRSRV_RGXDEV_INFO *psRgxDevInfo = psDeviceNode->pvDevice;
 		IMG_UINT64 ui64Filter = psRgxDevInfo->ui64HWPerfFilter & ui64FWEventsFilter;
 
@@ -1232,11 +1308,13 @@ void PVRGpuTraceDisableFirmwareActivityCallback(void)
 		{
 			PVR_DPF((PVR_DBG_ERROR, "Could not disable HWPerf event for firmware task timings."));
 		}
-#endif
 		psDeviceNode = psDeviceNode->psNext;
 	}
 
+	OSWRLockReleaseRead(psPVRSRVData->hDeviceNodeListLock);
+
 	OSLockRelease(ghLockFTraceEventLock);
+#endif /* defined(SUPPORT_RGX) */
 }
 
 /******************************************************************************

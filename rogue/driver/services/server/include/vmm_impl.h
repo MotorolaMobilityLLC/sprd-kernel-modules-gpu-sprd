@@ -121,17 +121,14 @@ typedef struct _VMM_PVZ_CONNECTION_
 		   for allocating the physical heap that backs its firmware
 		   allocations, this is the default configuration. The physical
 		   heap is allocated within the guest VM IPA space and this
-		   IPA Addr/Size must be re-expressed as PA space Addr/Size
+		   IPA Addr/Size must be translated into the host's IPA space
 		   by the VM manager before forwarding request to host.
 		   If not implemented, return PVRSRV_ERROR_NOT_IMPLEMENTED.
 		 */
-		PVRSRV_ERROR (*pfnMapDevPhysHeap)(IMG_UINT32 ui32FuncID,
-										  IMG_UINT32 ui32DevID,
-										  IMG_UINT64 ui64Size,
+		PVRSRV_ERROR (*pfnMapDevPhysHeap)(IMG_UINT64 ui64Size,
 										  IMG_UINT64 ui64PAddr);
 
-		PVRSRV_ERROR (*pfnUnmapDevPhysHeap)(IMG_UINT32 ui32FuncID,
-											IMG_UINT32 ui32DevID);
+		PVRSRV_ERROR (*pfnUnmapDevPhysHeap)(void);
 	} sClientFuncTab;
 
 	struct {
@@ -146,13 +143,11 @@ typedef struct _VMM_PVZ_CONNECTION_
 					 - Host pvz function validates incoming OSID values
 		 */
 		PVRSRV_ERROR (*pfnMapDevPhysHeap)(IMG_UINT32 ui32OSID,
-										  IMG_UINT32 ui32FuncID,
 										  IMG_UINT32 ui32DevID,
 										  IMG_UINT64 ui64Size,
 										  IMG_UINT64 ui64PAddr);
 
 		PVRSRV_ERROR (*pfnUnmapDevPhysHeap)(IMG_UINT32 ui32OSID,
-											IMG_UINT32 ui32FuncID,
 											IMG_UINT32 ui32DevID);
 	} sServerFuncTab;
 
@@ -162,11 +157,15 @@ typedef struct _VMM_PVZ_CONNECTION_
 		   information to the host; these events may in turn be forwarded to
 		   the firmware
 		 */
-		PVRSRV_ERROR (*pfnOnVmOnline)(IMG_UINT32 ui32OSID);
+		PVRSRV_ERROR (*pfnOnVmOnline)(IMG_UINT32 ui32OSID,
+									  IMG_UINT32 ui32DevID);
 
-		PVRSRV_ERROR (*pfnOnVmOffline)(IMG_UINT32 ui32OSID);
+		PVRSRV_ERROR (*pfnOnVmOffline)(IMG_UINT32 ui32OSID,
+									   IMG_UINT32 ui32DevID);
 
-		PVRSRV_ERROR (*pfnVMMConfigure)(VMM_CONF_PARAM eVMMParamType, IMG_UINT32 ui32ParamValue);
+		PVRSRV_ERROR (*pfnVMMConfigure)(VMM_CONF_PARAM eVMMParamType,
+										IMG_UINT32 ui32ParamValue,
+										IMG_UINT32 ui32DevID);
 
 	} sVmmFuncTab;
 } VMM_PVZ_CONNECTION;

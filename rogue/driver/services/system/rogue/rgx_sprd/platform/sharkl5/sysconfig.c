@@ -155,7 +155,7 @@ PVRSRV_ERROR SysDevInit(void *pvOSDevice, PVRSRV_DEVICE_CONFIG **ppsDevConfig)
 	/* Device's physical heaps */
 	gsDevices[0].pasPhysHeaps = gsPhysHeapConfig;
 	gsDevices[0].ui32PhysHeapCount = ARRAY_SIZE(gsPhysHeapConfig);
-
+	gsDevices[0].eDefaultHeap = PVRSRV_PHYS_HEAP_GPU_LOCAL;
 	/* No clock frequency either */
 	gsDevices[0].pfnClockFreqGet        = NULL;
 

@@ -321,9 +321,9 @@ typedef struct PVRSRV_BRIDGE_OUT_EVENTOBJECTWAITTIMEOUT_TAG
 typedef struct PVRSRV_BRIDGE_IN_FINDPROCESSMEMSTATS_TAG
 {
 	IMG_UINT32 *pui32MemStatsArray;
-	IMG_BOOL bbAllProcessStats;
 	IMG_UINT32 ui32ArrSize;
 	IMG_UINT32 ui32PID;
+	IMG_BOOL bbAllProcessStats;
 } __packed PVRSRV_BRIDGE_IN_FINDPROCESSMEMSTATS;
 
 /* Bridge out structure for FindProcessMemStats */

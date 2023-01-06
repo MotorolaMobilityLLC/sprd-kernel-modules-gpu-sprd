@@ -94,6 +94,13 @@ PVRSRVRGXFWDebugSetOSNewOnlineStateKM(
 	IMG_UINT32  ui32OSNewState);
 
 PVRSRV_ERROR
+PVRSRVRGXFWDebugMapGuestHeapKM(
+	CONNECTION_DATA *psConnection,
+	PVRSRV_DEVICE_NODE *psDeviceNode,
+	IMG_UINT32 ui32OSid,
+	IMG_UINT64 ui64GuestHeapBase);
+
+PVRSRV_ERROR
 PVRSRVRGXFWDebugPHRConfigureKM(
 	CONNECTION_DATA *psConnection,
 	PVRSRV_DEVICE_NODE *psDeviceNode,
@@ -110,4 +117,8 @@ PVRSRVRGXFWDebugDumpFreelistPageListKM(
 	CONNECTION_DATA * psConnection,
 	PVRSRV_DEVICE_NODE *psDeviceNode);
 
+PVRSRV_ERROR
+PVRSRVRGXFWDebugInjectFaultKM(
+	CONNECTION_DATA *psConnection,
+	PVRSRV_DEVICE_NODE *psDeviceNode);
 #endif

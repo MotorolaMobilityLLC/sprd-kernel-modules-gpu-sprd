@@ -59,7 +59,17 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #endif
 #endif
 
-#include <stdarg.h>
+#if defined(__linux__)
+ #include <linux/version.h>
+
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
+  #include <linux/stdarg.h>
+ #else
+  #include <stdarg.h>
+ #endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0) */
+#else
+ #include <stdarg.h>
+#endif /* __linux__ */
 
 #if defined(__QNXNTO__)
 #include <stdio.h>
@@ -432,6 +442,47 @@ PVRSRV_ERROR OSThreadCreatePriority(IMG_HANDLE *phThread,
 PVRSRV_ERROR OSThreadDestroy(IMG_HANDLE hThread);
 
 /*************************************************************************/ /*!
+@Function       OSIsMapPhysNonContigSupported
+@Description    Determine if the Heap Non contiguous allocation feature is
+                available on the given OS.
+
+@Return         IMG_BOOL
+*/ /**************************************************************************/
+IMG_BOOL OSIsMapPhysNonContigSupported(void);
+
+/*************************************************************************/ /*!
+@Function       OSUnMapPhysArrayToLin
+@Description    UnMap a kernel virtual address that was produced by mapping
+                a number of Pages in OSMapPhysArrayToLin.
+
+@Input          pvLinAddr       The linear mapping to be unmapped
+@Input          pvPrivData      Optional implementation specific data.
+
+@Return         None
+*/ /**************************************************************************/
+void OSUnMapPhysArrayToLin(void *pvLinAddr, void *pvPrivData);
+
+/*************************************************************************/ /*!
+@Function       OSMapPhysArrayToLin
+@Description    Given an array of OS page physical addresses and a count
+                of said Pages, this function will map those pages into a
+                virtually contiguous range, this allows for non physically
+                contiguous allocations to be mapped into the kernel.
+                Page size is assumed to be OS page size.
+
+@Input          pPagePA          Array of Pages
+@Input          uiPageCount      Page count of pulPages
+@Output         ppvLinAddr       Pointer to a virtual kernel address of the
+                                 mapped Pages.
+@Output         ppvPrivData      Optional implementation specific data.
+@Return         Standard PVRSRV_ERROR error code.
+*/ /**************************************************************************/
+PVRSRV_ERROR OSMapPhysArrayToLin(IMG_CPU_PHYADDR pPagePA[],
+                                 IMG_UINT32 uiPageCount,
+                                 void **ppvLinAddr,
+                                 void **ppvPrivData);
+
+/*************************************************************************/ /*!
 @Function       OSMapPhysToLin
 @Description    Maps physical memory into a linear address range.
 @Input          BasePAddr    physical CPU address
@@ -644,8 +695,7 @@ IMG_INT OSMemCmp(void *pvBufA, void *pvBufB, size_t uiLen);
                 If allocations made by this function are CPU cached then
                 OSPhyContigPagesClean has to be implemented to write the
                 cached data to memory.
-@Input          psDevNode     the device for which the allocation is
-                              required
+@Input          psPhysHeap    the heap from which to allocate
 @Input          uiSize        the size of the required allocation (in bytes)
 @Output         psMemHandle   a returned handle to be used to refer to this
                               allocation
@@ -654,24 +704,24 @@ IMG_INT OSMemCmp(void *pvBufA, void *pvBufB, size_t uiLen);
                               be associated with
 @Return         PVRSRV_OK on success, a failure code otherwise.
 *****************************************************************************/
-PVRSRV_ERROR OSPhyContigPagesAlloc(PVRSRV_DEVICE_NODE *psDevNode, size_t uiSize,
+PVRSRV_ERROR OSPhyContigPagesAlloc(PHYS_HEAP *psPhysHeap, size_t uiSize,
 							PG_HANDLE *psMemHandle, IMG_DEV_PHYADDR *psDevPAddr,
 							IMG_PID uiPid);
 
 /*************************************************************************/ /*!
 @Function       OSPhyContigPagesFree
 @Description    Frees a previous allocation of contiguous physical pages
-@Input          psDevNode     the device on which the allocation was made
+@Input          psPhysHeap    the heap from which to allocate
 @Input          psMemHandle   the handle of the allocation to be freed
 @Return         None.
 *****************************************************************************/
-void OSPhyContigPagesFree(PVRSRV_DEVICE_NODE *psDevNode, PG_HANDLE *psMemHandle);
+void OSPhyContigPagesFree(PHYS_HEAP *psPhysHeap, PG_HANDLE *psMemHandle);
 
 /*************************************************************************/ /*!
 @Function       OSPhyContigPagesMap
 @Description    Maps the specified allocation of contiguous physical pages
                 to a kernel virtual address
-@Input          psDevNode     the device on which the allocation was made
+@Input          psPhysHeap    the heap from which to allocate
 @Input          psMemHandle   the handle of the allocation to be mapped
 @Input          uiSize        the size of the allocation (in bytes)
 @Input          psDevPAddr    the physical address of the allocation
@@ -679,7 +729,7 @@ void OSPhyContigPagesFree(PVRSRV_DEVICE_NODE *psDevNode, PG_HANDLE *psMemHandle)
                               allocation is now mapped
 @Return         PVRSRV_OK on success, a failure code otherwise.
 *****************************************************************************/
-PVRSRV_ERROR OSPhyContigPagesMap(PVRSRV_DEVICE_NODE *psDevNode, PG_HANDLE *psMemHandle,
+PVRSRV_ERROR OSPhyContigPagesMap(PHYS_HEAP *psPhysHeap, PG_HANDLE *psMemHandle,
 						size_t uiSize, IMG_DEV_PHYADDR *psDevPAddr,
 						void **pvPtr);
 
@@ -687,13 +737,13 @@ PVRSRV_ERROR OSPhyContigPagesMap(PVRSRV_DEVICE_NODE *psDevNode, PG_HANDLE *psMem
 @Function       OSPhyContigPagesUnmap
 @Description    Unmaps the kernel mapping for the specified allocation of
                 contiguous physical pages
-@Input          psDevNode     the device on which the allocation was made
+@Input          psPhysHeap    the heap from which to allocate
 @Input          psMemHandle   the handle of the allocation to be unmapped
 @Input          pvPtr         the virtual kernel address to which the
                               allocation is currently mapped
 @Return         None.
 *****************************************************************************/
-void OSPhyContigPagesUnmap(PVRSRV_DEVICE_NODE *psDevNode, PG_HANDLE *psMemHandle, void *pvPtr);
+void OSPhyContigPagesUnmap(PHYS_HEAP *psPhysHeap, PG_HANDLE *psMemHandle, void *pvPtr);
 
 /*************************************************************************/ /*!
 @Function       OSPhyContigPagesClean
@@ -704,14 +754,14 @@ void OSPhyContigPagesUnmap(PVRSRV_DEVICE_NODE *psDevNode, PG_HANDLE *psMemHandle
                 (i.e. flush).
                 If allocations returned by OSPhyContigPagesAlloc are always
                 uncached this can be implemented as nop.
-@Input          psDevNode     device on which the allocation was made
+@Input          psPhysHeap    the heap from which to allocate
 @Input          psMemHandle   the handle of the allocation to be flushed
 @Input          uiOffset      the offset in bytes from the start of the
                               allocation from where to start flushing
 @Input          uiLength      the amount to flush from the offset in bytes
 @Return         PVRSRV_OK on success, a failure code otherwise.
 *****************************************************************************/
-PVRSRV_ERROR OSPhyContigPagesClean(PVRSRV_DEVICE_NODE *psDevNode,
+PVRSRV_ERROR OSPhyContigPagesClean(PHYS_HEAP *psPhysHeap,
                                    PG_HANDLE *psMemHandle,
                                    IMG_UINT32 uiOffset,
                                    IMG_UINT32 uiLength);
@@ -733,12 +783,6 @@ PVRSRV_ERROR OSInitEnvData(void);
 @Return         None.
 */ /**************************************************************************/
 void OSDeInitEnvData(void);
-
-/*************************************************************************/ /*!
-@Function       OSVSScanf
-@Description    OS function to support the standard C vsscanf() function.
-*/ /**************************************************************************/
-IMG_UINT32 OSVSScanf(const IMG_CHAR *pStr, const IMG_CHAR *pszFormat, ...);
 
 /*************************************************************************/ /*!
 @Function       OSStringLCat
@@ -967,19 +1011,8 @@ void OSSleepms(IMG_UINT32 ui32Timems);
 void OSReleaseThreadQuanta(void);
 
 #if defined(__linux__) && defined(__KERNEL__)
-#define OSWriteMemoryBarrier() wmb()
 #define OSReadMemoryBarrier() rmb()
-#define OSMemoryBarrier() mb()
 #else
-/*************************************************************************/ /*!
-@Function       OSWriteMemoryBarrier
-@Description    Insert a write memory barrier.
-                The write memory barrier guarantees that all store operations
-                (writes) specified before the barrier will appear to happen
-                before all of the store operations specified after the barrier.
-@Return         PVRSRV_OK on success, a failure code otherwise.
-*/ /**************************************************************************/
-void OSWriteMemoryBarrier(void);
 /*************************************************************************/ /*!
 @Function       OSReadMemoryBarrier
 @Description    Insert a read memory barrier.
@@ -988,6 +1021,7 @@ void OSWriteMemoryBarrier(void);
                 before all of the load operations specified after the barrier.
 */ /**************************************************************************/
 void OSReadMemoryBarrier(void);
+#endif
 /*************************************************************************/ /*!
 @Function       OSMemoryBarrier
 @Description    Insert a read/write memory barrier.
@@ -995,10 +1029,24 @@ void OSReadMemoryBarrier(void);
                 (read) and all store (write) operations specified before the
                 barrier will appear to happen before all of the load/store
                 operations specified after the barrier.
+@Input          hReadback     Optional pointer to memory to read back, can be
+                useful for flushing queues in bus interconnects to RAM before
+                device (GPU) access the shared memory.
 @Return         None.
 */ /**************************************************************************/
-void OSMemoryBarrier(void);
-#endif
+void OSMemoryBarrier(volatile void *hReadback);
+/*************************************************************************/ /*!
+@Function       OSWriteMemoryBarrier
+@Description    Insert a write memory barrier.
+                The write memory barrier guarantees that all store operations
+                (writes) specified before the barrier will appear to happen
+                before all of the store operations specified after the barrier.
+@Input          hReadback     Optional pointer to memory to read back, can be
+                useful for flushing queues in bus interconnects to RAM before
+                device (GPU) access the shared memory.
+@Return         None.
+*/ /**************************************************************************/
+void OSWriteMemoryBarrier(volatile void *hReadback);
 
 /*************************************************************************/ /*!
 */ /**************************************************************************/
@@ -1008,23 +1056,23 @@ void OSMemoryBarrier(void);
  * macros may change in future to accommodate different access requirements.
  */
 /*! Performs a 32 bit word read from the device memory. */
-#define OSReadDeviceMem32(addr)        (*((volatile IMG_UINT32 __force *)(addr)))
+#define OSReadDeviceMem32(addr)        (*((volatile IMG_UINT32 __force *)((void*)addr)))
 /*! Performs a 32 bit word write to the device memory. */
-#define OSWriteDeviceMem32(addr, val)  (*((volatile IMG_UINT32 __force *)(addr)) = (IMG_UINT32)(val))
+#define OSWriteDeviceMem32(addr, val)  (*((volatile IMG_UINT32 __force *)((void*)addr)) = (IMG_UINT32)(val))
 /*! Performs a 32 bit word write to the device memory and issues a write memory barrier */
 #define OSWriteDeviceMem32WithWMB(addr, val) \
 	do { \
-		*((volatile IMG_UINT32 __force *)(addr)) = (IMG_UINT32)(val); \
-		OSWriteMemoryBarrier(); \
+		*((volatile IMG_UINT32 __force *)((void*)addr)) = (IMG_UINT32)(val); \
+		OSWriteMemoryBarrier(addr); \
 	} while (0)
 
 #if defined(__linux__) && defined(__KERNEL__) && !defined(NO_HARDWARE)
-	#define OSReadHWReg8(addr, off)  ((IMG_UINT8)readb((IMG_BYTE __iomem *)(addr) + (off)))
-	#define OSReadHWReg16(addr, off) ((IMG_UINT16)readw((IMG_BYTE __iomem *)(addr) + (off)))
-	#define OSReadHWReg32(addr, off) ((IMG_UINT32)readl((IMG_BYTE __iomem *)(addr) + (off)))
+	#define OSReadUncheckedHWReg8(addr, off)  ((IMG_UINT8)readb((IMG_BYTE __iomem *)(addr) + (off)))
+	#define OSReadUncheckedHWReg16(addr, off) ((IMG_UINT16)readw((IMG_BYTE __iomem *)(addr) + (off)))
+	#define OSReadUncheckedHWReg32(addr, off) ((IMG_UINT32)readl((IMG_BYTE __iomem *)(addr) + (off)))
 
 	/* Little endian support only */
-	#define OSReadHWReg64(addr, off) \
+	#define OSReadUncheckedHWReg64(addr, off) \
 			({ \
 				__typeof__(addr) _addr = addr; \
 				__typeof__(off) _off = off; \
@@ -1035,11 +1083,11 @@ void OSMemoryBarrier(void);
 				); \
 			})
 
-	#define OSWriteHWReg8(addr, off, val)  writeb((IMG_UINT8)(val), (IMG_BYTE __iomem *)(addr) + (off))
-	#define OSWriteHWReg16(addr, off, val) writew((IMG_UINT16)(val), (IMG_BYTE __iomem *)(addr) + (off))
-	#define OSWriteHWReg32(addr, off, val) writel((IMG_UINT32)(val), (IMG_BYTE __iomem *)(addr) + (off))
+	#define OSWriteUncheckedHWReg8(addr, off, val)  writeb((IMG_UINT8)(val), (IMG_BYTE __iomem *)(addr) + (off))
+	#define OSWriteUncheckedHWReg16(addr, off, val) writew((IMG_UINT16)(val), (IMG_BYTE __iomem *)(addr) + (off))
+	#define OSWriteUncheckedHWReg32(addr, off, val) writel((IMG_UINT32)(val), (IMG_BYTE __iomem *)(addr) + (off))
 	/* Little endian support only */
-	#define OSWriteHWReg64(addr, off, val) do \
+	#define OSWriteUncheckedHWReg64(addr, off, val) do \
 			{ \
 				__typeof__(addr) _addr = addr; \
 				__typeof__(off) _off = off; \
@@ -1048,23 +1096,61 @@ void OSMemoryBarrier(void);
 				writel((IMG_UINT32)(((IMG_UINT64)(_val) >> 32) & 0xffffffff), (IMG_BYTE __iomem *)(_addr) + (_off) + 4); \
 			} while (0)
 
+	#define OSReadHWReg8(addr, off)  ({PVR_ASSERT((off) < RGX_HOST_SECURE_REGBANK_OFFSET); OSReadUncheckedHWReg8(addr, off);})
+	#define OSReadHWReg16(addr, off) ({PVR_ASSERT((off) < RGX_HOST_SECURE_REGBANK_OFFSET); OSReadUncheckedHWReg16(addr, off);})
+	#define OSReadHWReg32(addr, off) ({PVR_ASSERT((off) < RGX_HOST_SECURE_REGBANK_OFFSET); OSReadUncheckedHWReg32(addr, off);})
+	#define OSReadHWReg64(addr, off) ({PVR_ASSERT((off) < RGX_HOST_SECURE_REGBANK_OFFSET); OSReadUncheckedHWReg64(addr, off);})
+
+	#define OSWriteHWReg8(addr, off, val) do \
+			{ \
+				PVR_ASSERT((off) < RGX_HOST_SECURE_REGBANK_OFFSET); \
+				OSWriteUncheckedHWReg8(addr, off, val); \
+			} while (0)
+
+	#define OSWriteHWReg16(addr, off, val) do \
+			{ \
+				PVR_ASSERT((off) < RGX_HOST_SECURE_REGBANK_OFFSET); \
+				OSWriteUncheckedHWReg16(addr, off, val); \
+			} while (0)
+
+	#define OSWriteHWReg32(addr, off, val) do \
+			{ \
+				PVR_ASSERT((off) < RGX_HOST_SECURE_REGBANK_OFFSET); \
+				OSWriteUncheckedHWReg32(addr, off, val); \
+			} while (0)
+
+	#define OSWriteHWReg64(addr, off, val) do \
+			{ \
+				PVR_ASSERT((off) < RGX_HOST_SECURE_REGBANK_OFFSET); \
+				OSWriteUncheckedHWReg64(addr, off, val); \
+			} while (0)
 
 #elif defined(NO_HARDWARE)
 	/* OSReadHWReg operations skipped in no hardware builds */
-	#define OSReadHWReg8(addr, off)  (0x4eU)
-	#define OSReadHWReg16(addr, off) (0x3a4eU)
-	#define OSReadHWReg32(addr, off) (0x30f73a4eU)
+	#define OSReadHWReg8(addr, off)  ((void)(addr), 0x4eU)
+	#define OSReadHWReg16(addr, off) ((void)(addr), 0x3a4eU)
+	#define OSReadHWReg32(addr, off) ((void)(addr), 0x30f73a4eU)
 #if defined(__QNXNTO__) && __SIZEOF_LONG__ == 8
 	/* This is needed for 64-bit QNX builds where the size of a long is 64 bits */
-	#define OSReadHWReg64(addr, off) (0x5b376c9d30f73a4eUL)
+	#define OSReadHWReg64(addr, off) ((void)(addr), 0x5b376c9d30f73a4eUL)
 #else
-	#define OSReadHWReg64(addr, off) (0x5b376c9d30f73a4eULL)
+	#define OSReadHWReg64(addr, off) ((void)(addr), 0x5b376c9d30f73a4eULL)
 #endif
 
 	#define OSWriteHWReg8(addr, off, val)
 	#define OSWriteHWReg16(addr, off, val)
 	#define OSWriteHWReg32(addr, off, val)
 	#define OSWriteHWReg64(addr, off, val)
+
+	#define OSReadUncheckedHWReg8(addr, off) OSReadHWReg8(addr, off)
+	#define OSReadUncheckedHWReg16(addr, off) OSReadHWReg16(addr, off)
+	#define OSReadUncheckedHWReg32(addr, off) OSReadHWReg32(addr, off)
+	#define OSReadUncheckedHWReg64(addr, off) OSReadHWReg64(addr, off)
+
+	#define OSWriteUncheckedHWReg8(addr, off, val) OSWriteHWReg8(addr, off, val)
+	#define OSWriteUncheckedHWReg16(addr, off, val) OSWriteHWReg16(addr, off, val)
+	#define OSWriteUncheckedHWReg32(addr, off, val) OSWriteHWReg32(addr, off, val)
+	#define OSWriteUncheckedHWReg64(addr, off, val) OSWriteHWReg64(addr, off, val)
 
 #else
 /*************************************************************************/ /*!
@@ -1195,6 +1281,16 @@ void OSMemoryBarrier(void);
 @Return         None.
 */ /**************************************************************************/
 	void OSWriteHWReg64(volatile void *pvLinRegBaseAddr, IMG_UINT32 ui32Offset, IMG_UINT64 ui64Value);
+
+	#define OSReadUncheckedHWReg8(addr, off) OSReadHWReg8(addr, off)
+	#define OSReadUncheckedHWReg16(addr, off) OSReadHWReg16(addr, off)
+	#define OSReadUncheckedHWReg32(addr, off) OSReadHWReg32(addr, off)
+	#define OSReadUncheckedHWReg64(addr, off) OSReadHWReg64(addr, off)
+
+	#define OSWriteUncheckedHWReg8(addr, off, val) OSWriteHWReg8(addr, off, val)
+	#define OSWriteUncheckedHWReg16(addr, off, val) OSWriteHWReg16(addr, off, val)
+	#define OSWriteUncheckedHWReg32(addr, off, val) OSWriteHWReg32(addr, off, val)
+	#define OSWriteUncheckedHWReg64(addr, off, val) OSWriteHWReg64(addr, off, val)
 #endif
 
 /*************************************************************************/ /*!
@@ -1350,9 +1446,8 @@ PVRSRV_ERROR OSPlatformBridgeInit(void);
 @Description    Called during device destruction to allow the OS port to
                 deregister its OS specific bridges and clean up other
                 related resources.
-@Return         PVRSRV_OK on success, a failure code otherwise.
 */ /**************************************************************************/
-PVRSRV_ERROR OSPlatformBridgeDeInit(void);
+void OSPlatformBridgeDeInit(void);
 
 /*************************************************************************/ /*!
 @Function       PVRSRVToNativeError
@@ -1382,6 +1477,7 @@ int PVRSRVToNativeError(PVRSRV_ERROR e);
 #define OSWRLockDestroy(psLock) ({OSFreeMem(psLock); PVRSRV_OK;})
 
 #define OSWRLockAcquireRead(psLock) ({down_read(psLock); PVRSRV_OK;})
+#define OSWRLockAcquireReadNested(psLock, subclass) ({down_read_nested((psLock), (subclass)); PVRSRV_OK;})
 #define OSWRLockReleaseRead(psLock) ({up_read(psLock); PVRSRV_OK;})
 #define OSWRLockAcquireWrite(psLock) ({down_write(psLock); PVRSRV_OK;})
 #define OSWRLockReleaseWrite(psLock) ({up_write(psLock); PVRSRV_OK;})
@@ -1392,11 +1488,17 @@ int PVRSRVToNativeError(PVRSRV_ERROR e);
 PVRSRV_ERROR OSWRLockCreate(POSWR_LOCK *ppsLock);
 void OSWRLockDestroy(POSWR_LOCK psLock);
 void OSWRLockAcquireRead(POSWR_LOCK psLock);
+#define OSWRLockAcquireReadNested(psLock, subclass) OSWRLockAcquireRead((psLock))
 void OSWRLockReleaseRead(POSWR_LOCK psLock);
 void OSWRLockAcquireWrite(POSWR_LOCK psLock);
 void OSWRLockReleaseWrite(POSWR_LOCK psLock);
 
 #else
+
+#if !defined(DOXYGEN)
+#define OSFUNC_NOT_IMPLEMENTED 0
+#define OSFUNC_NOT_IMPLEMENTED_ASSERT() PVR_ASSERT(OSFUNC_NOT_IMPLEMENTED)
+#endif
 
 /*************************************************************************/ /*!
 @Function       OSWRLockCreate
@@ -1409,7 +1511,10 @@ void OSWRLockReleaseWrite(POSWR_LOCK psLock);
 static INLINE PVRSRV_ERROR OSWRLockCreate(POSWR_LOCK *ppsLock)
 {
 	PVR_UNREFERENCED_PARAMETER(ppsLock);
-	return PVRSRV_OK;
+
+	OSFUNC_NOT_IMPLEMENTED_ASSERT();
+
+	return PVRSRV_ERROR_NOT_IMPLEMENTED;
 }
 
 /*************************************************************************/ /*!
@@ -1421,6 +1526,7 @@ static INLINE PVRSRV_ERROR OSWRLockCreate(POSWR_LOCK *ppsLock)
 static INLINE void OSWRLockDestroy(POSWR_LOCK psLock)
 {
 	PVR_UNREFERENCED_PARAMETER(psLock);
+	OSFUNC_NOT_IMPLEMENTED_ASSERT();
 }
 
 /*************************************************************************/ /*!
@@ -1435,6 +1541,31 @@ static INLINE void OSWRLockDestroy(POSWR_LOCK psLock)
 static INLINE void OSWRLockAcquireRead(POSWR_LOCK psLock)
 {
 	PVR_UNREFERENCED_PARAMETER(psLock);
+	OSFUNC_NOT_IMPLEMENTED_ASSERT();
+}
+
+/*************************************************************************/ /*!
+@Function       OSWRLockAcquireReadNested
+@Description    Acquire a nested writer/reader read lock.
+                If the write lock is already acquired, the caller will
+                block until it is released.
+                For operating systems other than Linux, this equates to an
+                OSWRLockAcquireRead() call. On Linux, this function wraps a call
+                to down_read_nested(). This recognises the scenario where
+                there may be multiple subclasses within a particular class
+                of lock. In such cases, the order in which the locks belonging
+                these various subclasses are acquired is important and must be
+                validated.
+@Input          psLock     The handle of the WR lock to be acquired for
+                           reading.
+@Input          iSubclass  The subclass of the lock.
+@Return         None.
+*/ /**************************************************************************/
+static INLINE void OSWRLockAcquireReadNested(POSWR_LOCK psLock, IMG_INT iSubclass)
+{
+	PVR_UNREFERENCED_PARAMETER(psLock);
+	PVR_UNREFERENCED_PARAMETER(iSubclass);
+	OSFUNC_NOT_IMPLEMENTED_ASSERT();
 }
 
 /*************************************************************************/ /*!
@@ -1447,6 +1578,7 @@ static INLINE void OSWRLockAcquireRead(POSWR_LOCK psLock)
 static INLINE void OSWRLockReleaseRead(POSWR_LOCK psLock)
 {
 	PVR_UNREFERENCED_PARAMETER(psLock);
+	OSFUNC_NOT_IMPLEMENTED_ASSERT();
 }
 
 /*************************************************************************/ /*!
@@ -1461,6 +1593,7 @@ static INLINE void OSWRLockReleaseRead(POSWR_LOCK psLock)
 static INLINE void OSWRLockAcquireWrite(POSWR_LOCK psLock)
 {
 	PVR_UNREFERENCED_PARAMETER(psLock);
+	OSFUNC_NOT_IMPLEMENTED_ASSERT();
 }
 
 /*************************************************************************/ /*!
@@ -1473,6 +1606,7 @@ static INLINE void OSWRLockAcquireWrite(POSWR_LOCK psLock)
 static INLINE void OSWRLockReleaseWrite(POSWR_LOCK psLock)
 {
 	PVR_UNREFERENCED_PARAMETER(psLock);
+	OSFUNC_NOT_IMPLEMENTED_ASSERT();
 }
 #endif
 
@@ -1647,6 +1781,16 @@ PVRSRV_ERROR OSDmaSubmitTransfer(PVRSRV_DEVICE_NODE *psDevNode, void *pvOSData, 
 void OSDmaForceCleanup(PVRSRV_DEVICE_NODE *psDevNode, void *pvChan,
 					   void *pvOSData, IMG_HANDLE pvServerCleanupParam,
 					   PFN_SERVER_CLEANUP pfnServerCleanup);
+#endif
+#if defined(SUPPORT_SECURE_ALLOC_KM)
+PVRSRV_ERROR
+OSAllocateSecBuf(PVRSRV_DEVICE_NODE *psDeviceNode,
+				 IMG_DEVMEM_SIZE_T uiSize,
+				 const IMG_CHAR *pszName,
+				 PMR **ppsPMR);
+
+void
+OSFreeSecBuf(PMR *psPMR);
 #endif
 #endif /* OSFUNC_H */
 

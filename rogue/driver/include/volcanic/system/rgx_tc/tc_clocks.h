@@ -87,10 +87,15 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #define RGX_TC_SYS_CLOCK_SPEED		(45000000) /*< Unused */
 
-#if 1
+#if defined(TC_ODIN_27_5_254_2)
+ #define RGX_TC_CORE_CLOCK_SPEED	(94000000)
+ #define RGX_TC_MEM_CLOCK_SPEED		(40000000)
+ #define RGX_TC_CLOCK_MULTIPLEX    (16)
+#else
  /* FPGA tcfvuquad with Odin */
  #define RGX_TC_CORE_CLOCK_SPEED	(50000000) /* 3.125MHz */
  #define RGX_TC_MEM_CLOCK_SPEED		(40000000) /* 3.75MHz */
+ #define RGX_TC_CLOCK_MULTIPLEX    (1)
 #endif
 
 #endif /* if !defined(TC_CLOCKS_H) */

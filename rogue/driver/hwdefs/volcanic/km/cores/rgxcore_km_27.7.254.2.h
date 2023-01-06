@@ -42,8 +42,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #ifndef RGXCORE_KM_27_7_254_2_H
 #define RGXCORE_KM_27_7_254_2_H
 
-/* Automatically generated file (17/02/2021 09:01:17): Do not edit manually */
-/* CS: @5910553 */
+/* Automatically generated file (23/03/2022 09:02:26): Do not edit manually */
+/* CS: @5941981 */
 
 /******************************************************************************
  * BVNC = 27.7.254.2
@@ -63,6 +63,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 /******************************************************************************
  * Enhancements
  *****************************************************************************/
+#define HW_ERN_65104
 
 
 

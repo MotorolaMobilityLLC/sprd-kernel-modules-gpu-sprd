@@ -146,7 +146,6 @@ $(call directory-must-exist,$(TOP)/build/linux/$(PVR_BUILD_DIR))
 # Output directory for configuration, object code,
 # final programs/libraries, and install/rc scripts.
 #
-BUILD        ?= release
 ifneq ($(filter $(WINDOW_SYSTEM),xorg wayland nullws nulldrmws screen surfaceless lws-generic),)
 OUT          ?= $(TOP)/binary_$(PVR_BUILD_DIR)_$(WINDOW_SYSTEM)_$(BUILD)
 else
@@ -256,6 +255,13 @@ SUPPORT_SIGNAL_FILTER := \
 SUPPORT_COMPUTE_ONLY := \
  $(shell grep -qw RGX_FEATURE_COMPUTE_ONLY $(RGX_BNC_CONFIG_KM) && echo 1)
 
+# FBC descriptors are used by both volcanic and oceanic
+SUPPORT_FBC_DESCRIPTORS := \
+ $(shell grep -qw 'RGX_FEATURE_FBCDC' $(RGX_BNC_CONFIG_KM) && ! grep -qw 'RGX_FEATURE_FBC_MAX_DEFAULT_DESCRIPTORS (0U)' $(RGX_BNC_CONFIG_KM) && echo 1)
+
+CORE_SUPPORTS_MULTICORE :=\
+ $(shell grep -qw RGX_FEATURE_GPU_MULTICORE_SUPPORT $(RGX_BNC_CONFIG_KM) && grep -qw RGX_FEATURE_XPU_MAX_SLAVES $(RGX_BNC_CONFIG_KM) && echo 1)
+
 # Macro used by client driver makefiles only.
 ifneq ($(wildcard $(RGX_BNC_CONFIG_H)),)
  SUPPORT_ES32 :=\
@@ -315,9 +321,18 @@ endif
 
 # Safety Critical Services
 $(eval $(call TunableBothConfigMake,SERVICES_SC,$(SERVICES_SC)))
+$(eval $(call TunableBothConfigC,SERVICES_SC,))
 
 ifeq ($(SERVICES_SC),1)
+$(eval $(call BothConfigMake,PVRSRV_DIR, services_sc))
 $(eval $(call TunableBothConfigC,SUPPORT_FREELIST_GROW,))
+
+$(eval $(call TunableBothConfigMake,SUPPORT_SERVICES_SC_UNITTESTS,))
+$(eval $(call TunableBothConfigC,SUPPORT_SERVICES_SC_UNITTESTS,,\
+Enable runtime unit tests for services_sc._\
+))
+else
+$(eval $(call BothConfigMake,PVRSRV_DIR, services))
 endif
 
 # Set up the host and target compiler.
@@ -390,6 +405,8 @@ $(if $(filter config,$(D)),$(info Build configuration:))
 
 -include ../config/core-internal.mk
 
+# Link Time Optimisation
+
 $(eval $(call AppHintConfigC,PVRSRV_APPHINT_FIRMWARE_HEAP_POLICY,5,\
 Apphint that configures the Firmware Heap mode. First two bits configures_\
 the free block selection policy. Bit 2 configures the bucket selection policy_\
@@ -436,11 +453,14 @@ endif
 
 # Alternatively, allow the CC used for kbuild to be overridden
 # exactly, bypassing any KERNEL_CROSS_COMPILE configuration.
-# LD, NM and OBJCOPY could be overridden by set of CC tools.
+# AR, LD, NM, OBJCOPY and OBJDUMP could be overridden by set
+# of CC tools.
+$(eval $(call TunableBothConfigMake,KERNEL_AR,))
 $(eval $(call TunableBothConfigMake,KERNEL_CC,))
 $(eval $(call TunableBothConfigMake,KERNEL_LD,))
 $(eval $(call TunableBothConfigMake,KERNEL_NM,))
 $(eval $(call TunableBothConfigMake,KERNEL_OBJCOPY,))
+$(eval $(call TunableBothConfigMake,KERNEL_OBJDUMP,))
 
 # Check the KERNELDIR has a kernel built and also check that it is
 # not 64-bit, which we do not support.
@@ -642,7 +662,6 @@ $(eval $(call BothConfigC,PVR_BUILD_TYPE,"\"$(BUILD)\""))
 $(eval $(call BothConfigC,PVRSRV_MODNAME,"\"$(PVRSRV_MODNAME)\""))
 $(eval $(call BothConfigMake,PVRSRV_MODNAME,$(PVRSRV_MODNAME)))
 $(eval $(call BothConfigC,PVRSYNC_MODNAME,"\"$(PVRSYNC_MODNAME)\""))
-$(eval $(call BothConfigMake,PVRSYNC_MODNAME,$(PVRSYNC_MODNAME)))
 $(eval $(call BothConfigMake,PVR_BUILD_DIR,$(PVR_BUILD_DIR)))
 $(eval $(call BothConfigMake,PVR_BUILD_TYPE,$(BUILD)))
 
@@ -677,6 +696,33 @@ ifeq ($(MESA_EGL),1)
 else ifeq ($(SC_EGL),1)
 else
 endif
+
+$(eval $(call TunableBothConfigC,USE_PVRSYNC_DEVNODE,,\
+Use a separate device node for PVR Sync._\
+This is set on a per-platform basis$(comma) and should not normally be changed._\
+It is a tunable in order to make testing easier._\
+))
+$(eval $(call TunableKernelConfigMake,USE_PVRSYNC_DEVNODE,))
+
+# Derive PVRSRV_HWPERF_COUNTERS_PERBLK. If not set this is defaulted to
+# 12 for non-SUPPORT_VALIDATION or 64 for SUPPORT_VALIDATION builds.
+ifeq ($(PVRSRV_HWPERF_COUNTERS_PERBLK),)
+ ifeq ($(SUPPORT_VALIDATION),1)
+  override PVRSRV_HWPERF_COUNTERS_PERBLK := 64
+ else
+  override PVRSRV_HWPERF_COUNTERS_PERBLK := 12
+ endif
+endif
+$(eval $(call TunableBothConfigC,PVRSRV_HWPERF_COUNTERS_PERBLK,,\
+Specify the maximum number of HWPerf counters to allow per non-multiplexed block (12..64)._\
+This is only applicable to directly addressable counters in non-mux HWPerf counter blocks._\
+))
+
+# Validate that we have a reasonable value for PVRSRV_HWPERF_COUNTERS_PERBLK.
+# Odd values will fail with a static assert so we limit the range from 8 to
+# 64 with a 4-step increment.
+ValidRange := 8 12 16 20 24 28 32 36 40 44 48 52 56 60 64
+$(eval $(call ValidateValues,PVRSRV_HWPERF_COUNTERS_PERBLK,$(ValidRange)))
 
 # Build-type dependent options
 #
@@ -731,6 +777,7 @@ PVRSRV_ENABLE_GPU_MEMORY_INFO ?= 1
 PVRSRV_DEBUG_HANDLE_LOCK ?= 1
 PVRSRV_APPHINT_ENABLEFWPOISONONFREE ?= IMG_TRUE
 PVRSRV_TIMER_CORRELATION_HISTORY ?= 1
+PVRSRV_PHYSMEM_CPUMAP_HISTORY ?= 1
 endif
 
 # enable sync prim poisoning in debug builds
@@ -756,10 +803,6 @@ $(error BUILD= must be either debug, release or timing)
 
 endif # $BUILD
 
-
-# Memtest, currently implemented for Linux only
-$(eval $(call TunableKernelConfigC,SUPPORT_PHYSMEM_TEST,1))
-$(eval $(call TunableKernelConfigMake,SUPPORT_PHYSMEM_TEST,1))
 
 
 $(eval $(call TunableKernelConfigMake,KERNEL_DEBUGLINK,,\
@@ -790,6 +833,7 @@ endif
 
 # User-configurable options
 #
+$(eval $(call TunableBothConfigMake,RGX_BNC,))
 ifneq ($(RGX_BVNC),)
 $(eval $(call TunableKernelConfigC,RGX_BVNC_CORE_KM_HEADER,))
 endif
@@ -800,6 +844,13 @@ endif
 $(eval $(call TunableBothConfigC,PVRSRV_DEBUG_HANDLE_LOCK,,\
 Enable checking that the handle lock is held when a handle reference_\
 count is modified))
+
+$(eval $(call TunableKernelConfigMake,PVRSRV_PHYSMEM_CPUMAP_HISTORY,,\
+Enable and include debug module to track KM CPU PMR mappings \
+))
+$(eval $(call TunableKernelConfigC,PVRSRV_PHYSMEM_CPUMAP_HISTORY,,\
+Enable and include debug module to track KM CPU PMR mappings \
+))
 
 $(eval $(call TunableBothConfigC,PVR_DBG_BREAK_ASSERT_FAIL,,\
 Enable this to treat PVR_DBG_BREAK as PVR_ASSERT(0)._\
@@ -823,6 +874,12 @@ of the binary data dumped to out2.prm which can be verified offline._\
 $(eval $(call TunableKernelConfigC,PVRSRV_NEED_PVR_DPF,1,\
 Enables PVR_DPF messages in the kernel mode driver._\
 ))
+
+ifeq ($(BUILD),debug)
+else ifeq ($(SUPPORT_VALIDATION),1)
+else
+endif
+
 $(eval $(call TunableBothConfigC,PVRSRV_NEED_PVR_ASSERT,,\
 Enable this to turn on PVR_ASSERT in release builds._\
 ))
@@ -839,6 +896,16 @@ ifeq ($(SUPPORT_ANDROID_PLATFORM),1)
 $(warning Since Android O it's not allowed to link to libunwind.)
 endif
 endif
+
+# Memtest, currently implemented for Linux only
+ifeq ($(PDUMP),1)
+$(eval $(call TunableKernelConfigC,SUPPORT_PHYSMEM_TEST,))
+$(eval $(call TunableKernelConfigMake,SUPPORT_PHYSMEM_TEST,))
+else
+$(eval $(call TunableKernelConfigC,SUPPORT_PHYSMEM_TEST,1))
+$(eval $(call TunableKernelConfigMake,SUPPORT_PHYSMEM_TEST,1))
+endif
+
 $(eval $(call TunableBothConfigC,REFCOUNT_DEBUG,))
 $(eval $(call TunableBothConfigC,DC_DEBUG,,\
 Enable debug tracing in the DC (display class) server code))
@@ -855,21 +922,50 @@ $(eval $(call TunableBothConfigC,SUPPORT_DISPLAY_CLASS,,\
 Enable DC (display class) support. Disable if not using a DC display driver.))
 $(eval $(call TunableBothConfigC,PVRSRV_DEBUG_CCB_MAX,))
 
+
+ifeq ($(SUPPORT_DISPLAY_CLASS),1)
+override SUPPORT_EXTERNAL_PHYSHEAP_INTERFACE := 1
+endif
+
+$(eval $(call TunableKernelConfigC,SUPPORT_EXTERNAL_PHYSHEAP_INTERFACE,,\
+Enable the external physheap interface._\
+This may be required by some non-DC display drivers._\
+The interface is enabled by default for DC display drivers._\
+))
+$(eval $(call TunableKernelConfigMake,SUPPORT_EXTERNAL_PHYSHEAP_INTERFACE,,))
+
 $(eval $(call TunableBothConfigMake,SUPPORT_TRUSTED_DEVICE,))
 $(eval $(call TunableBothConfigC,SUPPORT_TRUSTED_DEVICE,,\
 Enable a build mode targeting an REE._\
 ))
 
 ifeq ($(SUPPORT_TRUSTED_DEVICE),1)
+SUPPORT_SECURE_ALLOC_KM ?= 1
 ifeq ($(NO_HARDWARE),1)
 SUPPORT_SECURITY_VALIDATION ?= 1
 endif
+
+$(eval $(call TunableBothConfigC,ENABLE_SECURE_MIPS_DEBUG_WA,,))
+$(eval $(call TunableBothConfigMake,ENABLE_SECURE_MIPS_DEBUG_WA,,))
 endif
 
 $(eval $(call TunableBothConfigC,SUPPORT_SECURITY_VALIDATION,,\
 Enable DRM security validation mode._\
 ))
 $(eval $(call TunableBothConfigMake,SUPPORT_SECURITY_VALIDATION,))
+
+$(eval $(call TunableBothConfigC,SUPPORT_SECURE_ALLOC_KM,,\
+Add Support for allocating secure memory from KM._\
+Adds functions OSAllocateSecBuf/OSFreeSecBuf to KM osfunc.h._\
+Only for driver with SUPPORT_TRUSTED_DEVICE=1 enabled._\
+Secure allocations from UM may be possible if not supported from KM._\
+))
+
+ifeq ($(SUPPORT_SECURE_ALLOC_KM),1)
+ ifeq ($(SUPPORT_TRUSTED_DEVICE),)
+  $(error SUPPORT_SECURE_ALLOC_KM=1 requires SUPPORT_TRUSTED_DEVICE=1)
+ endif
+endif
 
 $(eval $(call TunableBothConfigC,PM_INTERACTIVE_MODE,,\
 Enable PM interactive mode._\
@@ -890,6 +986,9 @@ Enable RGXTQ bridge which is always present on Rogue cores_\
 ))
 
 
+ifeq ($(PVR_ARCH_DEFS),oceanic)
+ override PVRSRV_SUPPORT_LEGACY_CSW_MODULE := 0
+endif
 
 $(eval $(call TunableBothConfigC,SUPPORT_MIPS_CONTIGUOUS_FW_MEMORY,,\
 Use a single big allocation for the FW code and another one_\
@@ -919,9 +1018,7 @@ ifeq ($(GTRACE_TOOL),1)
 endif
 
 
-IMG_1_11_OPTS?=0xffffffff
 
-IMG_1_12_OPTS?=0xffffffff
 
 
 
@@ -929,11 +1026,11 @@ IMG_1_12_OPTS?=0xffffffff
 
 # poison values for the Services
 $(eval $(call TunableBothConfigC,PVRSRV_POISON_ON_ALLOC_VALUE,0xd9,\
-Poison on alloc value))
+Poison on alloc byte value))
 $(eval $(call TunableBothConfigC,PVRSRV_POISON_ON_FREE_VALUE,0x63,\
-Poison on free value))
+Poison on free byte value))
 
-$(eval $(call TunableBothConfigC,SUPPORT_MIPS_64K_PAGE_SIZE,,\
+$(eval $(call BothConfigMake,SUPPORT_MIPS_64K_PAGE_SIZE,$(SUPPORT_MIPS_64K_PAGE_SIZE),\
 Enable this to change the MIPS FW page size to 64K._\
 ))
 
@@ -1066,8 +1163,8 @@ Includes power-monitoring component in firmware build._\
 ))
 
 $(eval $(call TunableKernelConfigC,SUPPORT_LMA_SUSPEND_TO_RAM,,\
-Enables additional argument to PVRSRVSetDevicePowerStateKM() that allows\
-passing information if the current power state change requires preserving\
+Enables additional argument to PVRSRVSetDevicePowerStateKM() that allows_\
+passing information if the current power state change requires preserving_\
 Video RAM in System RAM._\
 ))
 
@@ -1215,7 +1312,6 @@ endif
 
 
 
-
 # Support version 3 of the loader. Versions 0/1/2 should not be used.
 # Default needs to be set separately otherwise 0 gets replaced with the default
 SUPPORT_LUNARG_LOADER_VERSION ?= 3
@@ -1246,16 +1342,28 @@ $(eval $(call TunableBothConfigMake,PDUMP,))
 $(eval $(call TunableBothConfigMake,SUPPORT_INSECURE_EXPORT,))
 $(eval $(call TunableBothConfigMake,SUPPORT_SECURE_EXPORT,))
 $(eval $(call TunableBothConfigMake,SUPPORT_DISPLAY_CLASS,))
+ifeq ($(SUPPORT_META_COREMEM),1)
+
+ ifeq ($(SUPPORT_FW_COREMEM_OPTIMISATION),1)
+  ifeq ($(SUPPORT_RISCV_FIRMWARE),1)
+  else
+  endif
+ endif
+endif
 $(eval $(call TunableBothConfigMake,CLDNN,,\
 Build CLDNN graph libraries._\
 ))
-$(eval $(call TunableBothConfigC,SUPPORT_EXTRA_METASP_DEBUG,,\
-Enable extra debug information using the META Slave Port._\
+$(eval $(call TunableBothConfigC,SUPPORT_FW_VIEW_EXTRA_DEBUG,,\
+Enable extra debug information using the META Slave Port or RISC-V Debug Module._\
 Checks the validity of the Firmware code and dumps sync values_\
-using the GPU memory subsystem via the META Slave Port._\
+using the GPU memory subsystem via the META Slave Port or RISC-V Debug Module._\
+))
+$(eval $(call TunableBothConfigC,SUPPORT_RISCV_GDB,,\
+Enable debugfs entry used to attach GDB to the RISC-V Firmware._\
 ))
 $(eval $(call TunableBothConfigC,TRACK_FW_BOOT,,Enable FW boot tracking.))
 # Required to pass the build flag to the META FW makefile
+$(eval $(call TunableBothConfigC,SUPPORT_FASTRENDER_DM,))
 
 $(eval $(call TunableBothConfigMake,OPTIM,,\
 Specify the optimisation flags passed to the compiler. Normally this_\
@@ -1311,7 +1419,7 @@ Buffer size in bytes for storing signature check data))
 
 $(eval $(call AppHintConfigC,PVRSRV_APPHINT_ENABLEFULLSYNCTRACKING,IMG_FALSE,\
 Enable full sync tracking))
-$(eval $(call AppHintConfigC,PVRSRV_APPHINT_ENABLEPAGEFAULTDEBUG,APPHNT_BLDVAR_ENABLEPAGEFAULTDEBUG,\
+$(eval $(call AppHintConfigC,PVRSRV_APPHINT_ENABLEPAGEFAULTDEBUG,IMG_TRUE,\
 Enable page fault debug))
 
 # Validation AppHint defaults
@@ -1334,10 +1442,10 @@ $(eval $(call AppHintConfigC,PVRSRV_APPHINT_ENABLESOFTRESETCNTEXTSWITCH,0,\
 Enable soft GPU resets on context switching))
 $(eval $(call AppHintConfigC,PVRSRV_APPHINT_ENABLEFWCONTEXTSWITCH,RGXFWIF_INICFG_OS_CTXSWITCH_DM_ALL,\
 Enable firmware context switching))
-$(eval $(call AppHintConfigC,PVRSRV_APPHINT_VDMCONTEXTSWITCHMODE,RGXFWIF_INICFG_VDM_CTX_STORE_MODE_INDEX,\
-Enable VDM context switching mode))
 $(eval $(call AppHintConfigC,PVRSRV_APPHINT_ENABLERDPOWERISLAND,RGX_RD_POWER_ISLAND_DEFAULT,\
 Enable RD power island))
+$(eval $(call AppHintConfigC,PVRSRV_APPHINT_ENABLESPUCLOCKGATING,IMG_FALSE,\
+Enable SPU clock gating))
 
 $(eval $(call AppHintConfigC,PVRSRV_APPHINT_FIRMWAREPERF,FW_PERF_CONF_NONE,\
 Force the initial Firmware Performance Configuration to the specified value))
@@ -1351,6 +1459,17 @@ $(eval $(call AppHintConfigC,PVRSRV_APPHINT_HWPERFHOSTBUFSIZEINKB,2048,\
 Buffer size in KB of the hardware performance host buffer))
 $(eval $(call AppHintConfigC,PVRSRV_APPHINT_HWPERFHOSTTHREADTIMEOUTINMS,50,\
 Timeout in milliseconds of the hardware performance host thread))
+
+$(eval $(call AppHintConfigC,PVRSRV_APPHINT_TFBCCOMPRESSIONCONTROLGROUP,1,\
+Override default TFBC compression control group if supported \
+(0) Group 0: 25%/50%/75% lossy modes \
+(1) Group 1: 25%/37.5%/75% lossy modes))
+
+$(eval $(call AppHintConfigC,PVRSRV_APPHINT_TFBCCOMPRESSIONCONTROLSCHEME,0,\
+Override default TFBC compression scheme if supported \
+(0) All compression schemes enabled \
+(1) Delta standard and correlation \
+(2) Delta standard only))
 
 $(eval $(call AppHintConfigC,PVRSRV_APPHINT_JONESDISABLEMASK,0,\
 Disable Jones))
@@ -1459,6 +1578,12 @@ allowing testing of SLR))
 $(eval $(call AppHintConfigC,PVRSRV_APPHINT_RISCVDMITEST,0,\
 Enable RISC-V FW DMI test))
 
+$(eval $(call AppHintConfigC,PVRSRV_APPHINT_VALIDATESOCUSCTIMERS,0,\
+Used to validate SOC and USC timer integration. \
+Enables extra code in the kernel driver and FW to check that these \
+timers increase after each TA and 3D kick. The code is built both \
+when generating Pdumps for NOHW targets and as a driver live test.))
+
 # GLSL compiler options
 ifeq ($(BUILD),debug)
 DUMP_LOGFILES ?= 1
@@ -1479,6 +1604,7 @@ $(eval $(call TunableBothConfigC,RGXFW_DEBUG_LOG_GROUP,,\
 Enable the usage of DEBUG log group in the Firmware logs._\
 ))
 
+
 $(eval $(call TunableBothConfigC,SUPPORT_SOC_TIMER,,\
 Enable the use of the SoC timer. When enabled the SoC system layer must implement the pfnSoCTimerRead_\
 callback that when invoked returns the current value of the SoC timer._\
@@ -1486,6 +1612,12 @@ callback that when invoked returns the current value of the SoC timer._\
 $(eval $(call TunableBothConfigC,SOC_TIMER_FREQ,20,\
 The SoC timer frequency. This default to 20 MHz if not specified_\
 ))
+
+#
+# OCL internal memory test support.
+#
+ifeq ($(SUPPORT_VALIDATION),1)
+endif
 
 #
 # Tile Lifetime tracking support.
@@ -1511,6 +1643,10 @@ Allocate FW code and private data from dedicated FW memory._\
 ))
 $(eval $(call TunableBothConfigC,SUPPORT_DEDICATED_FW_MEMORY,))
 
+$(eval $(call TunableBothConfigMake,SUPPORT_WGP,,\
+Enables Safe Compute workgroup protection._\
+))
+$(eval $(call TunableBothConfigC,SUPPORT_WGP,))
 
 
 #
@@ -1552,6 +1688,9 @@ $(eval $(call BothConfigC,SUPPORT_PDVFS,1))
 $(eval $(call BothConfigC,SUPPORT_PDVFS_IDLE,$(SUPPORT_PDVFS_IDLE),\
 This enables idle management in PDVFS._\
 ))
+
+ifeq ($(BUILD),debug)
+endif
 endif
 
 ifeq ($(SUPPORT_WORKLOAD_ESTIMATION),1)
@@ -1560,6 +1699,9 @@ Enabling this feature enables workload intensity estimation from a workloads_\
 characteristics and assigning a deadline to it._\
 ))
 $(eval $(call BothConfigC,SUPPORT_WORKLOAD_ESTIMATION,1))
+
+ifeq ($(BUILD),debug)
+endif
 endif
 
 #
@@ -1660,7 +1802,11 @@ $(eval $(call TunableBothConfigMake,SUPPORT_DMABUF_BRIDGE,1))
 # SUPPORT_USC_BREAKPOINT is set to include the rgxbreakpoint.brg in bridge generation
 # and to enable USC breakpoint in FW. Enabled by default for all Linux based builds.
 #
+ifeq ($(PVR_USC_ARCH),volcanic)
+SUPPORT_USC_BREAKPOINT ?= 0
+else
 SUPPORT_USC_BREAKPOINT ?= 1
+endif
 $(eval $(call TunableBothConfigMake,SUPPORT_USC_BREAKPOINT,))
 $(eval $(call TunableBothConfigC,SUPPORT_USC_BREAKPOINT,,Enable the USC breakpoint support))
 
@@ -1717,13 +1863,36 @@ Enable gcov support for firmware._\
 $(eval $(call TunableBothConfigMake,SUPPORT_TRP,))
 $(eval $(call TunableBothConfigC,SUPPORT_TRP,))
 
+ifeq ($(CORE_SUPPORTS_MULTICORE),1)
+SUPPORT_AGP ?= 1
+$(eval $(call TunableBothConfigC,MULTICORE_FIXED_PRIMARIES,,\
+Number of primary GPU cores._\
+))
+
+$(eval $(call TunableBothConfigC,MULTICORE_FIXED_SECONDARIES,,\
+Number of secondary GPU cores._\
+))
+MULTICORE_FIXED_SECONDARIES ?= 0
+
+ifneq ($(MULTICORE_FIXED_PRIMARIES),)
+ifeq ($(shell test $(MULTICORE_FIXED_PRIMARIES) -lt 2; echo $$?),0)
+ SUPPORT_AGP := 0
+endif
+endif
+
+$(eval $(call TunableBothConfigC,SUPPORT_AGP,,\
+Enable Alternate Geometry Processing support for multicore devices._\
+))
+endif
+
 $(eval $(call TunableKernelConfigC,RGXFW_SAFETY_WATCHDOG_PERIOD_IN_US,1000000,\
 The period in microseconds before the watchdog will trigger a safety_\
 event if not reset in time.\
 ))
 
 ifeq ($(PVRSRV_ENABLE_GPU_MEMORY_INFO),1)
-# Increase the default annotation max length to 96 if RI_DEBUG is enabled
+# Increase the default annotation max length to 96 when PVRSRV_ENABLE_GPU_MEMORY_INFO
+# is enabled
 override PVR_ANNOTATION_MAX_LEN ?= 96
 endif
 
@@ -1733,11 +1902,15 @@ Defines the max length for PMR$(comma) MemDesc$(comma) Device_\
 Memory History and RI debug annotations stored in memory.\
 ))
 
-$(eval $(call TunableKernelConfigC,SUPPORT_FWLOAD_ON_PROBE,,\
-Enable loading of Firmware as part of the driver probe function$(comma)_\
+$(eval $(call TunableBothConfigC,PVRSRV_DEVICE_INIT_MODE,PVRSRV_LINUX_DEV_INIT_ON_CONNECT,\
+Specify when device initialisation (and loading of Firmware) will be done._\
+PVRSRV_LINUX_DEV_INIT_ON_PROBE means do this as part of the driver probe function$(comma)_\
 which is the moment an instance of the device gets bound to the driver._\
 If the driver fails to load the Firmware at this point$(comma) it will return_\
 an error and it will not be possible to open a connection to the device._\
+PVRSRV_LINUX_DEV_INIT_ON_OPEN means do this when the device is first opened._\
+PVRSRV_LINUX_DEV_INIT_ON_CONNECT means do this when the first connection_\
+is made to the device._\
 This is a Linux-only feature.\
 ))
 
@@ -1866,6 +2039,24 @@ Setting this option enables the write attribute for all the device mappings acqu
 through the PVRSRVWrapExtMem interface. Otherwise the option is disabled by default._\
 ))
 
+# Enable checking of Linux kernel init_on_alloc setting in the KM driver's UMA allocator on
+# Linux kernels 5.3 or later. Helps avoid duplicating the zero on alloc behaviour in the
+# driver on such systems. Make option values supported:
+#  1 - Check runtime setting value via want_init_on_alloc() API
+#  2 - Assume runtime setting value (modparam) not used on system, assume config value
+#  0 - Ignore kernel behaviour, driver zeroes on alloc when required
+# 
+PVRSRV_USE_LINUX_INIT_ON_ALLOC ?= 1
+ifeq ($(PVRSRV_USE_LINUX_INIT_ON_ALLOC),0)
+$(eval $(call KernelConfigC,PVRSRV_USE_LINUX_CONFIG_INIT_ON_ALLOC,0))
+else ifeq ($(PVRSRV_USE_LINUX_INIT_ON_ALLOC),1)
+$(eval $(call KernelConfigC,PVRSRV_USE_LINUX_CONFIG_INIT_ON_ALLOC,1))
+else ifeq ($(PVRSRV_USE_LINUX_INIT_ON_ALLOC),2)
+$(eval $(call KernelConfigC,PVRSRV_USE_LINUX_CONFIG_INIT_ON_ALLOC,2))
+else
+$(error Invalid value supplied to PVRSRV_USE_LINUX_INIT_ON_ALLOC in KM build)
+endif
+
 ifeq ($(PDUMP),1)
 $(eval $(call TunableKernelConfigC,PDUMP_PARAM_INIT_STREAM_SIZE,0x200000,\
 Default size of pdump param init buffer is 2MB))
@@ -1982,11 +2173,10 @@ fragmentation that can lead to vmalloc space exhaustion on 32 bit Linux systems.
 This flag only affects 64 bit Linux builds$(comma) on 32 bit we always default_\
 to use vmap because of the described fragmentation problem._\
 ))
-
 ifeq ($(ARCH),arm)
 $(eval $(call TunableBothConfigC,DEVICE_MEMSETCPY_ALIGN_IN_BYTES,8,\
 Sets pointer alignment (in bytes) for PVRSRVDeviceMemSet/Copy._\
-This value should reflect memory bus width e.g. if the bus is 64 bits_\
+This value should reflect memory bus width e.g. if the bus is 32 bits_\
 wide this value should be set to 8 bytes (though it's not a hard requirement)._\
 ))
 else
@@ -1996,7 +2186,6 @@ This value should reflect memory bus width e.g. if the bus is 64 bits_\
 wide this value should be set to 8 bytes (though it's not a hard requirement)._\
 ))
 endif
-
 
 $(eval $(call TunableKernelConfigC,PVRSRV_DEBUG_LISR_EXECUTION,,\
 Collect information about the last execution of the LISR in order to_\
@@ -2049,6 +2238,10 @@ $(eval $(call TunableBothConfigC,PVRSRV_RGX_LOG2_CLIENT_CCB_SIZE_TDM,14,\
 Define the log2 size of the TDM client CCB._\
 ))
 
+$(eval $(call TunableBothConfigC,PVRSRV_RGX_LOG2_CLIENT_CCB_SIZE_RDM,13,\
+Define the log2 size of the RDM client CCB._\
+))
+
 # Max sizes (used in CCB grow feature)
 $(eval $(call TunableBothConfigC,PVRSRV_RGX_LOG2_CLIENT_CCB_MAX_SIZE_TQ3D,17,\
 Define the log2 max size of the TQ3D client CCB._\
@@ -2078,12 +2271,24 @@ $(eval $(call TunableBothConfigC,PVRSRV_RGX_LOG2_CLIENT_CCB_MAX_SIZE_TDM,17,\
 Define the log2 max size of the TDM client CCB._\
 ))
 
+$(eval $(call TunableBothConfigC,PVRSRV_RGX_LOG2_CLIENT_CCB_MAX_SIZE_RDM,15,\
+Define the log2 max size of the RDM client CCB._\
+))
+
+$(eval $(call TunableBothConfigC,SUPPORT_FW_HOST_SIDE_RECOVERY,,\
+Enable to recover the device through the Host if the FW was unresponsive._\
+))
+
 endif # INTERNAL_CLOBBER_ONLY
 
 export INTERNAL_CLOBBER_ONLY
 export TOP
 export OUT
 export PVR_ARCH
+export PVR_ARCH_DEFS
+export PVR_USC_ARCH
+export PVR_TPU_ARCH
+export PVR_FBC_ARCH
 export HWDEFS_ALL_PATHS
 
 MAKE_ETC := -Rr --no-print-directory -C $(TOP) \

@@ -70,6 +70,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #if defined(SUPPORT_WORKLOAD_ESTIMATION)
 #include "rgxworkest.h"
+#include "rgxworkest_ray.h"
 #endif
 
 /* Enable this to dump the compiled list of UFOs prior to kick call */
@@ -99,11 +100,13 @@ struct _RGX_SERVER_RAY_CONTEXT_ {
 
 PVRSRV_ERROR PVRSRVRGXCreateRayContextKM(CONNECTION_DATA			*psConnection,
 											 PVRSRV_DEVICE_NODE		*psDeviceNode,
-											 IMG_UINT32				ui32Priority,
+											 IMG_INT32				i32Priority,
 											 IMG_HANDLE				hMemCtxPrivData,
 											 IMG_UINT32				ui32ContextFlags,
 											 IMG_UINT32				ui32StaticRayContextStateSize,
 											 IMG_PBYTE				pStaticRayContextState,
+											 IMG_UINT64				ui64RobustnessAddress,
+											 IMG_UINT32				ui32MaxDeadlineMS,
 											 RGX_SERVER_RAY_CONTEXT	**ppsRayContext)
 {
 	DEVMEM_MEMDESC				*psFWMemContextMemDesc = RGXGetFWMemDescFromMemoryContextHandle(hMemCtxPrivData);
@@ -147,7 +150,7 @@ PVRSRV_ERROR PVRSRVRGXCreateRayContextKM(CONNECTION_DATA			*psConnection,
 		goto fail_createlock;
 	}
 
-	PDUMPCOMMENT("Allocate RGX firmware ray context suspend state");
+	PDUMPCOMMENT(psDeviceNode, "Allocate RGX firmware ray context suspend state");
 
 	eError = DevmemFwAllocate(psDevInfo,
 							  sizeof(RGXFWIF_COMPUTECTX_STATE),
@@ -164,12 +167,12 @@ PVRSRV_ERROR PVRSRVRGXCreateRayContextKM(CONNECTION_DATA			*psConnection,
 									 offsetof(RGXFWIF_FWRAYCONTEXT, sRDMContext),
 									 psFWMemContextMemDesc,
 									 psRayContext->psContextStateMemDesc,
-									 RGX_CDM_CCB_SIZE_LOG2,
-									 RGX_CDM_CCB_MAX_SIZE_LOG2,
+									 RGX_RDM_CCB_SIZE_LOG2,
+									 RGX_RDM_CCB_MAX_SIZE_LOG2,
 									 ui32ContextFlags,
-									 ui32Priority,
-									 UINT_MAX,
-									 0,
+									 i32Priority,
+									 ui32MaxDeadlineMS,
+									 ui64RobustnessAddress,
 									 &sInfo,
 									 &psRayContext->psServerCommonContext);
 	if (eError != PVRSRV_OK)
@@ -187,6 +190,10 @@ PVRSRV_ERROR PVRSRVRGXCreateRayContextKM(CONNECTION_DATA			*psConnection,
 	{
 		goto fail_acquire_cpu_mapping;
 	}
+
+#if defined(SUPPORT_WORKLOAD_ESTIMATION)
+	WorkEstInitRay(psDevInfo, &psRayContext->sWorkEstData);
+#endif
 
 	OSDeviceMemCopy(&psFWRayContext->sStaticRayContextState, pStaticRayContextState, ui32StaticRayContextStateSize);
 	DevmemPDumpLoadMem(psRayContext->psFWRayContextMemDesc, 0, sizeof(RGXFWIF_FWCOMPUTECONTEXT), PDUMP_FLAGS_CONTINUOUS);
@@ -215,6 +222,36 @@ PVRSRV_ERROR PVRSRVRGXDestroyRayContextKM(RGX_SERVER_RAY_CONTEXT *psRayContext)
 	PVRSRV_ERROR eError = PVRSRV_OK;
 	PVRSRV_RGXDEV_INFO *psDevInfo = psRayContext->psDeviceNode->pvDevice;
 
+#if defined(SUPPORT_WORKLOAD_ESTIMATION)
+	RGXFWIF_FWRAYCONTEXT	*psFWRayContext;
+	IMG_UINT32 ui32WorkEstCCBSubmitted;
+
+	eError = DevmemAcquireCpuVirtAddr(psRayContext->psFWRayContextMemDesc,
+			(void **)&psFWRayContext);
+	if (eError != PVRSRV_OK)
+	{
+		PVR_DPF((PVR_DBG_ERROR,
+				"%s: Failed to map firmware ray context (%s)",
+				__func__,
+				PVRSRVGetErrorString(eError)));
+		return eError;
+	}
+
+	ui32WorkEstCCBSubmitted = psFWRayContext->ui32WorkEstCCBSubmitted;
+
+	DevmemReleaseCpuVirtAddr(psRayContext->psFWRayContextMemDesc);
+
+	/* Check if all of the workload estimation CCB commands for this workload are read */
+	if (ui32WorkEstCCBSubmitted != psRayContext->sWorkEstData.ui32WorkEstCCBReceived)
+	{
+		PVR_DPF((PVR_DBG_WARNING,
+		        "%s: WorkEst # cmds submitted (%u) and received (%u) mismatch",
+		        __func__, ui32WorkEstCCBSubmitted,
+		        psRayContext->sWorkEstData.ui32WorkEstCCBReceived));
+
+		return PVRSRV_ERROR_RETRY;
+	}
+#endif
 
 	/* Check if the FW has finished with this resource ... */
 	eError = RGXFWRequestCommonContextCleanUp(psRayContext->psDeviceNode,
@@ -235,9 +272,12 @@ PVRSRV_ERROR PVRSRVRGXDestroyRayContextKM(RGX_SERVER_RAY_CONTEXT *psRayContext)
 
 	/* ... it has so we can free its resources */
 	FWCommonContextFree(psRayContext->psServerCommonContext);
-	//DevmemFwUnmapAndFree(psDevInfo, psRayContext->psContextStateMemDesc);
+	DevmemFwUnmapAndFree(psDevInfo, psRayContext->psContextStateMemDesc);
 	psRayContext->psServerCommonContext = NULL;
 
+#if defined(SUPPORT_WORKLOAD_ESTIMATION)
+	WorkEstDeInitRay(psDevInfo, &psRayContext->sWorkEstData);
+#endif
 
 	DevmemFwUnmapAndFree(psDevInfo, psRayContext->psFWRayContextMemDesc);
 
@@ -249,7 +289,6 @@ PVRSRV_ERROR PVRSRVRGXDestroyRayContextKM(RGX_SERVER_RAY_CONTEXT *psRayContext)
 
 
 PVRSRV_ERROR PVRSRVRGXKickRDMKM(RGX_SERVER_RAY_CONTEXT	*psRayContext,
-								IMG_UINT32				ui32ClientCacheOpSeqNum,
 								IMG_UINT32				ui32ClientUpdateCount,
 								SYNC_PRIMITIVE_BLOCK	**pauiClientUpdateUFODevVarBlock,
 								IMG_UINT32				*paui32ClientUpdateSyncOffset,
@@ -261,7 +300,10 @@ PVRSRV_ERROR PVRSRVRGXKickRDMKM(RGX_SERVER_RAY_CONTEXT	*psRayContext,
 								IMG_UINT32				ui32CmdSize,
 								IMG_PBYTE				pui8DMCmd,
 								IMG_UINT32				ui32PDumpFlags,
-								IMG_UINT32				ui32ExtJobRef)
+								IMG_UINT32				ui32ExtJobRef,
+								IMG_UINT32				ui32AccStructSizeInBytes,
+								IMG_UINT32				ui32DispatchSize,
+								IMG_UINT64				ui64DeadlineInus)
 {
 
 	RGXFWIF_KCCB_CMD		sRayKCCBCmd;
@@ -276,8 +318,17 @@ PVRSRV_ERROR PVRSRVRGXKickRDMKM(RGX_SERVER_RAY_CONTEXT	*psRayContext,
 	RGX_CLIENT_CCB          *psClientCCB;
 	IMG_UINT32              ui32IntJobRef;
 
-	IMG_BOOL				bCCBStateOpen = IMG_FALSE;
+#if defined(SUPPORT_WORKLOAD_ESTIMATION)
+	RGXFWIF_WORKEST_KICK_DATA sWorkloadKickDataRay = {0};
+	IMG_UINT32 ui32RDMWorkloadDataRO = 0;
+	IMG_UINT32 ui32RDMCmdHeaderOffset = 0;
+	IMG_UINT32 ui32RDMCmdOffsetWrapCheck = 0;
+	IMG_UINT32 ui32RDMCmdOffset = 0;
+	RGX_WORKLOAD sWorkloadCharacteristics = {0};
+#endif
 
+	IMG_BOOL				bCCBStateOpen = IMG_FALSE;
+	IMG_UINT64 ui64FBSCEntryMask;
 	IMG_UINT32 ui32IntClientFenceCount = 0;
 	PRGXFWIF_UFO_ADDR *pauiIntFenceUFOAddress = NULL;
 	IMG_UINT32 ui32IntClientUpdateCount = 0;
@@ -561,8 +612,49 @@ PVRSRV_ERROR PVRSRVRGXKickRDMKM(RGX_SERVER_RAY_CONTEXT	*psRayContext,
 	                          &pPostAddr,
 	                          &pRMWUFOAddr);
 
-	RGXCmdHelperInitCmdCCB(psClientCCB,
-	                       0, // ui64FBSCEntryMask,
+	/*
+	* Extract the FBSC entries from MMU Context for the deferred FBSC invalidate command,
+	* in other words, take the value and set it to zero afterwards.
+	* FBSC Entry Mask must be extracted from MMU ctx and updated just before the kick starts
+	* as it must be ready at the time of context activation.
+	*/
+	{
+		eError = RGXExtractFBSCEntryMaskFromMMUContext(psRayContext->psDeviceNode,
+														FWCommonContextGetServerMMUCtx(psRayContext->psServerCommonContext),
+														&ui64FBSCEntryMask);
+		if (eError != PVRSRV_OK)
+		{
+			PVR_DPF((PVR_DBG_ERROR, "Failed to extract FBSC Entry Mask (%d)", eError));
+			goto fail_invalfbsc;
+		}
+	}
+
+#if defined(SUPPORT_WORKLOAD_ESTIMATION)
+	sWorkloadCharacteristics.sRay.ui32AccStructSize = ui32AccStructSizeInBytes;
+	sWorkloadCharacteristics.sRay.ui32DispatchSize = ui32DispatchSize;
+
+	/* Prepare workload estimation */
+	WorkEstPrepare(psRayContext->psDeviceNode->pvDevice,
+			&psRayContext->sWorkEstData,
+			&psRayContext->sWorkEstData.uWorkloadMatchingData.sCompute.sDataCDM,
+			RGXFWIF_CCB_CMD_TYPE_RAY,
+			&sWorkloadCharacteristics,
+			ui64DeadlineInus,
+			&sWorkloadKickDataRay);
+
+	if (sWorkloadKickDataRay.ui32CyclesPrediction != 0)
+	{
+		PVR_DPF((PVR_DBG_MESSAGE, "%s: Dispatch size = %u, Acc struct size = %u, prediction = %u",
+				__func__,
+				sWorkloadCharacteristics.sRay.ui32DispatchSize,
+				sWorkloadCharacteristics.sRay.ui32AccStructSize,
+				sWorkloadKickDataRay.ui32CyclesPrediction));
+	}
+#endif
+
+	RGXCmdHelperInitCmdCCB(psDevInfo,
+	                       psClientCCB,
+	                       ui64FBSCEntryMask,
 	                       ui32IntClientFenceCount,
 	                       pauiIntFenceUFOAddress,
 	                       NULL,
@@ -579,7 +671,7 @@ PVRSRV_ERROR PVRSRVRGXKickRDMKM(RGX_SERVER_RAY_CONTEXT	*psRayContext,
 	                       ui32IntJobRef,
 	                       ui32PDumpFlags,
 #if defined(SUPPORT_WORKLOAD_ESTIMATION)
-	                       NULL,
+	                       &sWorkloadKickDataRay,
 #else
 	                       NULL,
 #endif
@@ -594,6 +686,9 @@ PVRSRV_ERROR PVRSRVRGXKickRDMKM(RGX_SERVER_RAY_CONTEXT	*psRayContext,
 
 	if (eError == PVRSRV_OK)
 	{
+#if defined(SUPPORT_WORKLOAD_ESTIMATION)
+		ui32RDMCmdOffset = RGXGetHostWriteOffsetCCB(psClientCCB);
+#endif
 		/*
 			All the required resources are ready at this point, we can't fail so
 			take the required server sync operations and commit all the resources
@@ -601,15 +696,55 @@ PVRSRV_ERROR PVRSRVRGXKickRDMKM(RGX_SERVER_RAY_CONTEXT	*psRayContext,
 		RGXCmdHelperReleaseCmdCCB(1, asCmdHelperData, "RDM", FWCommonContextGetFWAddress(psRayContext->psServerCommonContext).ui32Addr);
 	}
 
-	/* Construct the kernel compute CCB command. */
+
+#if defined(SUPPORT_WORKLOAD_ESTIMATION)
+	/* The following is used to determine the offset of the command header containing
+	   the workload estimation data so that can be accessed when the KCCB is read */
+	ui32RDMCmdHeaderOffset = RGXCmdHelperGetDMCommandHeaderOffset(asCmdHelperData);
+
+	ui32RDMCmdOffsetWrapCheck = RGXGetHostWriteOffsetCCB(FWCommonContextGetClientCCB(psRayContext->psServerCommonContext));
+
+	/* This checks if the command would wrap around at the end of the CCB and
+	 * therefore would start at an offset of 0 rather than the current command
+	 * offset */
+	if (ui32RDMCmdOffset < ui32RDMCmdOffsetWrapCheck)
+	{
+		ui32RDMWorkloadDataRO = ui32RDMCmdOffset;
+	}
+	else
+	{
+		ui32RDMWorkloadDataRO = 0;
+	}
+#endif
+
+	/* Construct the kernel ray CCB command. */
 	sRayKCCBCmd.eCmdType = RGXFWIF_KCCB_CMD_KICK;
 	sRayKCCBCmd.uCmdData.sCmdKickData.psContext = FWCommonContextGetFWAddress(psRayContext->psServerCommonContext);
 	sRayKCCBCmd.uCmdData.sCmdKickData.ui32CWoffUpdate = RGXGetHostWriteOffsetCCB(psClientCCB);
 	sRayKCCBCmd.uCmdData.sCmdKickData.ui32CWrapMaskUpdate = RGXGetWrapMaskCCB(psClientCCB);
 	sRayKCCBCmd.uCmdData.sCmdKickData.ui32NumCleanupCtl = 0;
-	sRayKCCBCmd.uCmdData.sCmdKickData.ui32WorkEstCmdHeaderOffset = 0;
 
+	/* Add the Workload data into the KCCB kick */
+#if defined(SUPPORT_WORKLOAD_ESTIMATION)
+	/* Store the offset to the CCCB command header so that it can be referenced
+	 * when the KCCB command reaches the FW */
+	sRayKCCBCmd.uCmdData.sCmdKickData.ui32WorkEstCmdHeaderOffset = ui32RDMWorkloadDataRO + ui32RDMCmdHeaderOffset;
+#endif
 	ui32FWCtx = FWCommonContextGetFWAddress(psRayContext->psServerCommonContext).ui32Addr;
+
+	RGXSRV_HWPERF_ENQ(psRayContext,
+	                  OSGetCurrentClientProcessIDKM(),
+	                  ui32FWCtx,
+	                  ui32ExtJobRef,
+	                  ui32IntJobRef,
+	                  RGX_HWPERF_KICK_TYPE2_RS,
+	                  iCheckFence,
+	                  iUpdateFence,
+	                  iUpdateTimeline,
+	                  uiCheckFenceUID,
+	                  uiUpdateFenceUID,
+	                  NO_DEADLINE,
+	                  NO_CYCEST);
 
 	/*
 	 * Submit the compute command to the firmware.
@@ -619,7 +754,6 @@ PVRSRV_ERROR PVRSRVRGXKickRDMKM(RGX_SERVER_RAY_CONTEXT	*psRayContext,
 		eError2 = RGXScheduleCommand(psRayContext->psDeviceNode->pvDevice,
 									RGXFWIF_DM_RAY,
 									&sRayKCCBCmd,
-									ui32ClientCacheOpSeqNum,
 									ui32PDumpFlags);
 		if (eError2 != PVRSRV_ERROR_RETRY)
 		{
@@ -634,14 +768,16 @@ PVRSRV_ERROR PVRSRVRGXKickRDMKM(RGX_SERVER_RAY_CONTEXT	*psRayContext,
 				 "%s failed to schedule kernel CCB command (%s)",
 				 __func__,
 				 PVRSRVGetErrorString(eError2)));
+		if (eError == PVRSRV_OK)
+		{
+			eError = eError2;
+		}
 	}
 	else
 	{
-		/*
-		PVRGpuTraceEnqueueEvent(psRayContext->psDeviceNode->pvDevice,
+		PVRGpuTraceEnqueueEvent(psRayContext->psDeviceNode,
 		                        ui32FWCtx, ui32ExtJobRef, ui32IntJobRef,
-		                        RGX_HWPERF_KICK_TYPE_CDM);
-		*/
+		                        RGX_HWPERF_KICK_TYPE2_RS);
 	}
 	/*
 	 * Now check eError (which may have returned an error from our earlier call
@@ -696,6 +832,7 @@ PVRSRV_ERROR PVRSRVRGXKickRDMKM(RGX_SERVER_RAY_CONTEXT	*psRayContext,
 	return PVRSRV_OK;
 
 fail_cmdaquire:
+fail_invalfbsc:
 	SyncAddrListRollbackCheckpoints(psRayContext->psDeviceNode, &psRayContext->sSyncAddrListFence);
 	SyncAddrListRollbackCheckpoints(psRayContext->psDeviceNode, &psRayContext->sSyncAddrListUpdate);
 fail_alloc_update_values_mem:

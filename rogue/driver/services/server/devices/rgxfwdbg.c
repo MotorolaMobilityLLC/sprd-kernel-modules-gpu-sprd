@@ -51,6 +51,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "mmu_common.h"
 #include "devicemem_server.h"
 #include "osfunc.h"
+#include "vmm_pvz_server.h"
+#include "vz_vm.h"
 
 PVRSRV_ERROR
 PVRSRVRGXFWDebugQueryFWLogKM(
@@ -111,7 +113,7 @@ PVRSRVRGXFWDebugSetFWLogKM(
 	 * before requesting the FW to read it
 	 */
 	psDevInfo->psRGXFWIfTraceBufCtl->ui32LogType = ui32RGXFWLogType;
-	OSMemoryBarrier();
+	OSMemoryBarrier(&psDevInfo->psRGXFWIfTraceBufCtl->ui32LogType);
 
 	/* Allocate firmware trace buffer resource(s) if not already done */
 	if (RGXTraceBufferIsInitRequired(psDevInfo))
@@ -139,7 +141,7 @@ PVRSRVRGXFWDebugSetFWLogKM(
 		         "%s: Failed to allocate resource on-demand. Reverting to old value",
 		         __func__));
 		psDevInfo->psRGXFWIfTraceBufCtl->ui32LogType = ui32OldRGXFWLogTpe;
-		OSMemoryBarrier();
+		OSMemoryBarrier(&psDevInfo->psRGXFWIfTraceBufCtl->ui32LogType);
 
 		OSLockRelease(psDevInfo->hRGXFWIfBufInitLock);
 
@@ -148,7 +150,7 @@ PVRSRVRGXFWDebugSetFWLogKM(
 
 	OSLockRelease(psDevInfo->hRGXFWIfBufInitLock);
 
-	eError = PVRSRVPowerLock((const PPVRSRV_DEVICE_NODE) psDeviceNode);
+	eError = PVRSRVPowerLock((PPVRSRV_DEVICE_NODE) psDeviceNode);
 	if (eError != PVRSRV_OK)
 	{
 		PVR_DPF((PVR_DBG_ERROR,
@@ -158,7 +160,7 @@ PVRSRVRGXFWDebugSetFWLogKM(
 		return eError;
 	}
 
-	eError = PVRSRVGetDevicePowerState((const PPVRSRV_DEVICE_NODE) psDeviceNode, &ePowerState);
+	eError = PVRSRVGetDevicePowerState((PPVRSRV_DEVICE_NODE) psDeviceNode, &ePowerState);
 
 	if ((eError == PVRSRV_OK) && (ePowerState != PVRSRV_DEV_POWER_STATE_OFF))
 	{
@@ -174,7 +176,7 @@ PVRSRVRGXFWDebugSetFWLogKM(
 	}
 
 unlock:
-	PVRSRVPowerUnlock((const PPVRSRV_DEVICE_NODE) psDeviceNode);
+	PVRSRVPowerUnlock( (PPVRSRV_DEVICE_NODE) psDeviceNode);
 	if (bWaitForFwUpdate)
 	{
 		/* Wait for the LogType value to be updated in FW */
@@ -194,6 +196,46 @@ PVRSRVRGXFWDebugSetHCSDeadlineKM(
 	PVR_UNREFERENCED_PARAMETER(psConnection);
 
 	return RGXFWSetHCSDeadline(psDevInfo, ui32HCSDeadlineMS);
+}
+
+PVRSRV_ERROR
+PVRSRVRGXFWDebugMapGuestHeapKM(
+	CONNECTION_DATA *psConnection,
+	PVRSRV_DEVICE_NODE *psDeviceNode,
+	IMG_UINT32 ui32OSid,
+	IMG_UINT64 ui64GuestHeapBase)
+{
+	PVRSRV_ERROR eError;
+	IMG_UINT32 ui32DeviceID = psDeviceNode->sDevId.i32OsDeviceID;
+
+	PVR_UNREFERENCED_PARAMETER(psConnection);
+
+	if (PVRSRV_VZ_MODE_IS(HOST))
+	{
+		if (ui64GuestHeapBase == IMG_UINT64_MAX)
+		{
+			/* unmap heap and set OSID to offline */
+			eError = PvzServerUnmapDevPhysHeap(ui32OSid, ui32DeviceID);
+			eError = PvzServerOnVmOffline(ui32OSid, ui32DeviceID);
+		}
+		else
+		{
+			/* set OSID online if necessary and map firmware heap */
+			if (!IsVmOnline(ui32OSid, ui32DeviceID))
+			{
+				eError = PvzServerOnVmOnline(ui32OSid, ui32DeviceID);
+			}
+
+			eError = PvzServerMapDevPhysHeap(ui32OSid, ui32DeviceID, RGX_FIRMWARE_RAW_HEAP_SIZE, ui64GuestHeapBase);
+		}
+	}
+	else
+	{
+		eError = PVRSRV_ERROR_NOT_SUPPORTED;
+		PVR_DPF((PVR_DBG_ERROR, " %s: Driver must run in Host mode to support Guest Mapping operations\n", __func__));
+	}
+
+	return eError;
 }
 
 PVRSRV_ERROR
@@ -279,4 +321,15 @@ PVRSRVRGXFWDebugDumpFreelistPageListKM(
 
 	return PVRSRV_OK;
 
+}
+
+PVRSRV_ERROR
+PVRSRVRGXFWDebugInjectFaultKM(
+	CONNECTION_DATA *psConnection,
+	PVRSRV_DEVICE_NODE *psDeviceNode)
+{
+	PVRSRV_RGXDEV_INFO* psDevInfo = psDeviceNode->pvDevice;
+	PVR_UNREFERENCED_PARAMETER(psConnection);
+
+	return RGXFWInjectFault(psDevInfo);
 }

@@ -50,7 +50,7 @@
 #endif
 
 int apollo_init(struct tc_device *tc, struct pci_dev *pdev,
-		int *core_clock, int *mem_clock, int sys_clock,
+		int *core_clock, int *mem_clock, int sys_clock, int *clock_multiplex,
 		int pdp_mem_size, int secure_mem_size,
 		int mem_latency, int mem_wresp_latency, int mem_mode);
 int apollo_cleanup(struct tc_device *tc);

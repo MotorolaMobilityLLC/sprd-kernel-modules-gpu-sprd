@@ -80,6 +80,10 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "cache_km.h"
 #include "devicemem_server_utils.h"
 #include "pvr_vmap.h"
+#include "physheap.h"
+#if defined(PVRSRV_PHYSMEM_CPUMAP_HISTORY)
+#include "physmem_cpumap_history.h"
+#endif
 
 /* ourselves */
 #include "physmem_osmem.h"
@@ -129,6 +133,8 @@ static IMG_UINT32 g_uiMaxOrder;
 #define DMA_SET_ALIGN_ADJUSTMENT(x,y)	((x) | (((dma_addr_t)y)<<0x02))
 #define DMA_GET_ADDR(x)					(((dma_addr_t)x) & ((dma_addr_t)~0xfff))
 #define DMA_VADDR_NOT_IN_USE			0xCAFEF00DDEADBEEFULL
+
+#define PVRSRV_ZERO_VALUE 0
 
 typedef struct _PMR_OSPAGEARRAY_DATA_ {
 	/* Device for which this allocation has been made */
@@ -180,7 +186,7 @@ typedef struct _PMR_OSPAGEARRAY_DATA_ {
 #define FLAG_POISON_ON_FREE    (1U)
 #define FLAG_POISON_ON_ALLOC   (2U)
 #define FLAG_ONDEMAND          (3U)
-#define FLAG_UNPINNED          (4U)
+
 #define FLAG_IS_CMA            (5U)
 #define FLAG_UNSET_MEMORY_TYPE (6U)
 
@@ -190,7 +196,6 @@ typedef struct _PMR_OSPAGEARRAY_DATA_ {
 	 * Poison on free    - Should we Poison the memory on free.
 	 * Poison on alloc   - Should we Poison the memory on alloc.
 	 * On demand         - Is the allocation on Demand i.e Do we defer allocation to time of use.
-	 * Unpinned          - Should be protected by page pool lock
 	 * CMA               - Is CMA memory allocated via DMA framework
 	 * Unset Memory Type - Upon free do we need to revert the cache type before return to OS
 	 * */
@@ -209,6 +214,14 @@ typedef struct _PMR_OSPAGEARRAY_DATA_ {
 	 * the additional pages allocated are tracked through this additional
 	 * variable and are accounted for in the memory statistics */
 	IMG_UINT32 ui32CMAAdjustedPageCount;
+
+#if defined(PVRSRV_PHYSMEM_CPUMAP_HISTORY)
+	/*
+	  Handle on the parent PMR
+	 */
+	void *hPMR;
+#endif
+
 } PMR_OSPAGEARRAY_DATA;
 
 /***********************************
@@ -260,13 +273,6 @@ typedef struct
 	LinuxPagePoolEntry *psPoolEntry;
 } LinuxCleanupData;
 
-/* A struct for the unpinned items */
-typedef struct
-{
-	struct list_head sUnpinPoolItem;
-	PMR_OSPAGEARRAY_DATA *psPageArrayDataPtr;
-} LinuxUnpinEntry;
-
 
 /* Caches to hold page pool and page array structures */
 static struct kmem_cache *g_psLinuxPagePoolCache;
@@ -276,7 +282,6 @@ static struct kmem_cache *g_psLinuxPageArray;
  * x86 needs two page pools because we have to change the memory attributes
  * of the pages which is expensive due to an implicit flush.
  * See set_pages_array_uc/wc/wb. */
-static IMG_UINT32 g_ui32UnpinPageCount;
 static IMG_UINT32 g_ui32PagePoolUCCount;
 #if defined(CONFIG_X86)
 static IMG_UINT32 g_ui32PagePoolWCCount;
@@ -327,13 +332,20 @@ static DEFINE_MUTEX(g_sPagePoolMutex);
 /* List holding the page array pointers: */
 static LIST_HEAD(g_sPagePoolList_WC);
 static LIST_HEAD(g_sPagePoolList_UC);
-static LIST_HEAD(g_sUnpinList);
 
 #if defined(DEBUG) && defined(SUPPORT_VALIDATION)
 /* Global structure to manage GPU memory leak */
 static DEFINE_MUTEX(g_sUMALeakMutex);
 static IMG_UINT32 g_ui32UMALeakCounter = 0;
 #endif
+
+static IMG_BOOL g_bInitialisedOnAlloc = IMG_FALSE;
+
+static inline IMG_BOOL
+_ShouldInitMem(IMG_UINT32 ui32AllocFlags)
+{
+	return BIT_ISSET(ui32AllocFlags, FLAG_ZERO) && !g_bInitialisedOnAlloc;
+}
 
 static inline IMG_UINT32
 _PagesInPoolUnlocked(void)
@@ -361,53 +373,6 @@ static inline void
 _PagePoolUnlock(void)
 {
 	mutex_unlock(&g_sPagePoolMutex);
-}
-
-static PVRSRV_ERROR
-_AddUnpinListEntryUnlocked(PMR_OSPAGEARRAY_DATA *psOSPageArrayData)
-{
-	LinuxUnpinEntry *psUnpinEntry;
-
-	psUnpinEntry = OSAllocMem(sizeof(*psUnpinEntry));
-	if (!psUnpinEntry)
-	{
-		PVR_DPF((PVR_DBG_ERROR,
-				"%s: OSAllocMem failed. Cannot add entry to unpin list.",
-				__func__));
-		return PVRSRV_ERROR_OUT_OF_MEMORY;
-	}
-
-	psUnpinEntry->psPageArrayDataPtr = psOSPageArrayData;
-
-	/* Add into pool that the shrinker can access easily*/
-	list_add_tail(&psUnpinEntry->sUnpinPoolItem, &g_sUnpinList);
-
-	g_ui32UnpinPageCount += psOSPageArrayData->iNumOSPagesAllocated;
-
-	return PVRSRV_OK;
-}
-
-static void
-_RemoveUnpinListEntryUnlocked(PMR_OSPAGEARRAY_DATA *psOSPageArrayData)
-{
-	LinuxUnpinEntry *psUnpinEntry, *psTempUnpinEntry;
-
-	/* Remove from pool */
-	list_for_each_entry_safe(psUnpinEntry,
-	                         psTempUnpinEntry,
-	                         &g_sUnpinList,
-	                         sUnpinPoolItem)
-	{
-		if (psUnpinEntry->psPageArrayDataPtr == psOSPageArrayData)
-		{
-			list_del(&psUnpinEntry->sUnpinPoolItem);
-			break;
-		}
-	}
-
-	OSFreeMem(psUnpinEntry);
-
-	g_ui32UnpinPageCount -= psOSPageArrayData->iNumOSPagesAllocated;
 }
 
 static inline IMG_BOOL
@@ -454,7 +419,7 @@ static struct shrinker g_sShrinker;
 static unsigned long
 _GetNumberOfPagesInPoolUnlocked(void)
 {
-	return _PagesInPoolUnlocked() + g_ui32UnpinPageCount;
+	return _PagesInPoolUnlocked();
 }
 
 /* Linux shrinker function that informs the OS about how many pages we are caching and
@@ -482,8 +447,6 @@ static unsigned long
 _ScanObjectsInPagePool(struct shrinker *psShrinker, struct shrink_control *psShrinkControl)
 {
 	unsigned long uNumToScan = psShrinkControl->nr_to_scan;
-	unsigned long uSurplus = 0;
-	LinuxUnpinEntry *psUnpinEntry, *psTempUnpinEntry;
 	IMG_UINT32 uiPagesFreed;
 
 	PVR_ASSERT(psShrinker == &g_sShrinker);
@@ -497,66 +460,6 @@ _ScanObjectsInPagePool(struct shrinker *psShrinker, struct shrink_control *psShr
 							   &uiPagesFreed);
 	uNumToScan -= uiPagesFreed;
 
-	if (uNumToScan == 0)
-	{
-		goto e_exit;
-	}
-
-	/* Free unpinned memory, starting with LRU entries */
-	list_for_each_entry_safe(psUnpinEntry,
-							 psTempUnpinEntry,
-							 &g_sUnpinList,
-							 sUnpinPoolItem)
-	{
-		PMR_OSPAGEARRAY_DATA *psPageArrayDataPtr = psUnpinEntry->psPageArrayDataPtr;
-		IMG_UINT32 uiNumPages = (psPageArrayDataPtr->uiTotalNumOSPages > psPageArrayDataPtr->iNumOSPagesAllocated)?
-								psPageArrayDataPtr->iNumOSPagesAllocated:psPageArrayDataPtr->uiTotalNumOSPages;
-		PVRSRV_ERROR eError;
-
-		/* Free associated pages */
-		eError = _FreeOSPages(psPageArrayDataPtr,
-							  NULL,
-							  0);
-		if (eError != PVRSRV_OK)
-		{
-			PVR_DPF((PVR_DBG_ERROR,
-					"%s: Shrinker is unable to free unpinned pages. Error: %s (%d)",
-					 __func__,
-					 PVRSRVGetErrorString(eError),
-					 eError));
-			goto e_exit;
-		}
-
-		/* Remove item from pool */
-		list_del(&psUnpinEntry->sUnpinPoolItem);
-
-		g_ui32UnpinPageCount -= uiNumPages;
-
-		/* Check if there is more to free or if we already surpassed the limit */
-		if (uiNumPages < uNumToScan)
-		{
-			uNumToScan -= uiNumPages;
-
-		}
-		else if (uiNumPages > uNumToScan)
-		{
-			uSurplus += uiNumPages - uNumToScan;
-			uNumToScan = 0;
-			goto e_exit;
-		}
-		else
-		{
-			uNumToScan -= uiNumPages;
-			goto e_exit;
-		}
-	}
-
-e_exit:
-	if (list_empty(&g_sUnpinList))
-	{
-		PVR_ASSERT(g_ui32UnpinPageCount == 0);
-	}
-
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(3,12,0))
 	{
 		int remain;
@@ -567,7 +470,7 @@ e_exit:
 #else
 	/* Returning the number of pages freed during the scan */
 	_PagePoolUnlock();
-	return psShrinkControl->nr_to_scan - uNumToScan + uSurplus;
+	return psShrinkControl->nr_to_scan - uNumToScan;
 #endif
 }
 
@@ -613,6 +516,25 @@ void LinuxInitPhysmem(void)
 	}
 
 	OSAtomicWrite(&g_iPoolCleanTasks, 0);
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,3,0))
+/* Check both config and modparam setting */
+#if PVRSRV_USE_LINUX_CONFIG_INIT_ON_ALLOC == 1
+		g_bInitialisedOnAlloc = want_init_on_alloc(0x0);
+
+/* Assume modparam setting not in use on system */
+#elif PVRSRV_USE_LINUX_CONFIG_INIT_ON_ALLOC == 2
+#   if defined(CONFIG_INIT_ON_ALLOC_DEFAULT_ON)
+		g_bInitialisedOnAlloc = IMG_TRUE;
+#   else
+		g_bInitialisedOnAlloc = IMG_FALSE;
+#   endif
+
+/* Ignore both config and modparam settings */
+#else
+		g_bInitialisedOnAlloc = IMG_FALSE;
+#endif
+#endif
 }
 
 /* Unregister the shrinker and remove all pages from the pool that are still left */
@@ -953,9 +875,10 @@ _GetPagesFromPoolLocked(PVRSRV_DEVICE_NODE *psDevNode,
 
 /* Takes a page array and maps it into the kernel to write zeros */
 static PVRSRV_ERROR
-_ZeroPageArray(IMG_UINT32 uiNumToClean,
-               struct page **ppsCleanArray,
-               pgprot_t pgprot)
+_MemsetPageArray(IMG_UINT32 uiNumToClean,
+                 struct page **ppsCleanArray,
+                 pgprot_t pgprot,
+                 IMG_UINT8 ui8Pattern)
 {
 	IMG_CPU_VIRTADDR pvAddr;
 	IMG_UINT32 uiMaxPagesToMap = MIN(PVR_LINUX_PHYSMEM_MAX_KMAP_PAGES,
@@ -973,8 +896,10 @@ _ZeroPageArray(IMG_UINT32 uiNumToClean,
 		{
 			if (uiMaxPagesToMap <= 1)
 			{
-				PVR_DPF((PVR_DBG_ERROR, "%s: Out of vmalloc memory, "
-				        "unable to map pages for zeroing.", __func__));
+				PVR_DPF((PVR_DBG_ERROR,
+				        "%s: Out of vmalloc memory, unable to map pages for %s.",
+				        __func__,
+				        ui8Pattern == PVRSRV_ZERO_VALUE ? "zeroing" : "poisoning"));
 				return PVRSRV_ERROR_OUT_OF_MEMORY;
 			}
 			else
@@ -989,16 +914,15 @@ _ZeroPageArray(IMG_UINT32 uiNumToClean,
 		{
 			/* this is most likely unnecessary as all pages must be 8-bytes
 			 * aligned so there unaligned access is impossible */
-			OSDeviceMemSet(pvAddr, 0, PAGE_SIZE * uiToClean);
+			OSDeviceMemSet(pvAddr, ui8Pattern, PAGE_SIZE * uiToClean);
 		}
 		else if (pgprot_val(pgprot) == pgprot_val(pgprot_writecombine(PAGE_KERNEL)))
 		{
-			OSCachedMemSet(pvAddr, 0, PAGE_SIZE * uiToClean);
-			OSWriteMemoryBarrier();
+			OSCachedMemSetWMB(pvAddr, ui8Pattern, PAGE_SIZE * uiToClean);
 		}
 		else
 		{
-			OSCachedMemSet(pvAddr, 0, PAGE_SIZE * uiToClean);
+			OSCachedMemSet(pvAddr, ui8Pattern, PAGE_SIZE * uiToClean);
 		}
 		pvr_vunmap(pvAddr, uiToClean, pgprot);
 		ppsCleanArray = &(ppsCleanArray[uiToClean]);
@@ -1050,9 +974,9 @@ _CleanupThread_CleanPages(void *pvData)
 	/* Map and fill the pages with zeros.
 	 * For large page arrays do it PVR_LINUX_PHYSMEM_MAX_KMAP_SIZE
 	 * at a time. */
-	eError = _ZeroPageArray(psPagePoolEntry->uiItemsRemaining,
-	                        psPagePoolEntry->ppsPageArray,
-	                        pgprot);
+	eError = _MemsetPageArray(psPagePoolEntry->uiItemsRemaining,
+	                          psPagePoolEntry->ppsPageArray,
+	                          pgprot, PVRSRV_ZERO_VALUE);
 	if (eError != PVRSRV_OK)
 	{
 		goto eExit;
@@ -1068,6 +992,13 @@ _CleanupThread_CleanPages(void *pvData)
 	list_add_tail(&psPagePoolEntry->sPagePoolItem, psPoolHead);
 
 	_DumpPoolStructure();
+
+#if defined(PVRSRV_ENABLE_PROCESS_STATS)
+	/* Calling PVRSRVStatsIncrMemAllocPoolStat and PVRSRVStatsDecrMemAllocPoolStat
+	 * inside page pool lock ensures that the stat reflects the state of the pool. */
+	PVRSRVStatsIncrMemAllocPoolStat(PAGE_SIZE * psPagePoolEntry->uiItemsRemaining);
+#endif
+
 	_PagePoolUnlock();
 
 	OSFreeMem(pvData);
@@ -1092,16 +1023,6 @@ eExit:
 
 	*puiCounter -= psPagePoolEntry->uiItemsRemaining;
 
-#if defined(PVRSRV_ENABLE_PROCESS_STATS)
-	/* MemStats usually relies on having the bridge lock held, however
-	 * the page pool code may call PVRSRVStatsIncrMemAllocPoolStat and
-	 * PVRSRVStatsDecrMemAllocPoolStat without the bridge lock held, so
-	 * the page pool lock is used to ensure these calls are mutually
-	 * exclusive
-	 */
-	PVRSRVStatsDecrMemAllocPoolStat(PAGE_SIZE * psCleanupData->psPoolEntry->uiItemsRemaining);
-#endif
-
 	_PagePoolUnlock();
 
 	for (i = 0; i < psCleanupData->psPoolEntry->uiItemsRemaining; i++)
@@ -1125,7 +1046,6 @@ eExit:
 static inline IMG_BOOL
 _PutPagesToPoolLocked(IMG_UINT32 ui32CPUCacheFlags,
 					  struct page **ppsPageArray,
-					  IMG_BOOL bUnpinned,
 					  IMG_UINT32 uiOrder,
 					  IMG_UINT32 uiNumPages)
 {
@@ -1136,7 +1056,6 @@ _PutPagesToPoolLocked(IMG_UINT32 ui32CPUCacheFlags,
 #endif
 
 	if (uiOrder == 0 &&
-		!bUnpinned &&
 		!PVRSRV_CHECK_CPU_CACHED(ui32CPUCacheFlags))
 	{
 		IMG_UINT32 uiEntries;
@@ -1207,16 +1126,6 @@ _PutPagesToPoolLocked(IMG_UINT32 ui32CPUCacheFlags,
 				psCleanupThreadFn->bDependsOnHW = IMG_FALSE;
 				CLEANUP_THREAD_SET_RETRY_COUNT(psCleanupThreadFn,
 				                               CLEANUP_THREAD_RETRY_COUNT_DEFAULT);
-
-	#if defined(PVRSRV_ENABLE_PROCESS_STATS)
-				/* MemStats usually relies on having the bridge lock held, however
-				 * the page pool code may call PVRSRVStatsIncrMemAllocPoolStat and
-				 * PVRSRVStatsDecrMemAllocPoolStat without the bridge lock held, so
-				 * the page pool lock is used to ensure these calls are mutually
-				 * exclusive
-				 */
-				PVRSRVStatsIncrMemAllocPoolStat(PAGE_SIZE * uiNumPages);
-	#endif
 
 				/* We must not hold the pool lock when calling AddWork because it might call us back to
 				 * free pooled pages directly when unloading the driver	 */
@@ -1361,7 +1270,7 @@ _PoisonDevicePage(PVRSRV_DEVICE_NODE *psDevNode,
 /* Allocate and initialise the structure to hold the metadata of the allocation */
 static PVRSRV_ERROR
 _AllocOSPageArray(PVRSRV_DEVICE_NODE *psDevNode,
-				  PMR_SIZE_T uiChunkSize,
+				  PMR_SIZE_T uiSize,
 				  IMG_UINT32 ui32NumPhysChunks,
 				  IMG_UINT32 ui32NumVirtChunks,
 				  IMG_UINT32 uiLog2AllocPageSize,
@@ -1371,7 +1280,6 @@ _AllocOSPageArray(PVRSRV_DEVICE_NODE *psDevNode,
 				  PMR_OSPAGEARRAY_DATA **ppsPageArrayDataPtr)
 {
 	PVRSRV_ERROR eError;
-	PMR_SIZE_T uiSize = uiChunkSize * ui32NumVirtChunks;
 	IMG_UINT32 uiNumOSPageSizeVirtPages;
 	IMG_UINT32 uiNumDevPageSizeVirtPages;
 	PMR_OSPAGEARRAY_DATA *psPageArrayData;
@@ -1572,7 +1480,6 @@ _ApplyOSPagesAttribute(PVRSRV_DEVICE_NODE *psDevNode,
 			/* On x86 if we already have a mapping (e.g. low memory) we need to change the mode of
 				current mapping before we map it ourselves	*/
 			int ret = IMG_FALSE;
-			PVR_UNREFERENCED_PARAMETER(bFlush);
 
 			switch (PVRSRV_CPU_CACHE_MODE(ui32CPUCacheFlags))
 			{
@@ -1824,7 +1731,7 @@ static inline void _AddMemAllocRecord_UmaPages(PMR_OSPAGEARRAY_DATA *psPageArray
 	PVRSRVStatsAddMemAllocRecord(PVRSRV_MEM_ALLOC_TYPE_ALLOC_UMA_PAGES,
 	                             NULL, sCPUPhysAddr,
 	                             1 << psPageArrayData->uiLog2AllocPageSize,
-	                             NULL, psPageArrayData->uiPid
+	                             psPageArrayData->uiPid
 	                             DEBUG_MEMSTATS_VALUES);
 }
 
@@ -1875,10 +1782,10 @@ _AllocOSPages_Fast(PMR_OSPAGEARRAY_DATA *psPageArrayData)
 	IMG_BOOL bIncreaseMaxOrder = IMG_TRUE;
 
 	IMG_UINT32 ui32NumPageReq;
-	IMG_UINT32 uiPagesToAlloc;
-	IMG_UINT32 uiPagesFromPool = 0;
+	IMG_UINT32 uiOSPagesToAlloc;
+	IMG_UINT32 uiDevPagesFromPool = 0;
 
-	gfp_t gfp_flags = _GetGFPFlags(ui32MinOrder ? BIT_ISSET(psPageArrayData->ui32AllocFlags, FLAG_ZERO) : IMG_FALSE, /* Zero all pages later as batch */
+	gfp_t gfp_flags = _GetGFPFlags(ui32MinOrder ? _ShouldInitMem(psPageArrayData->ui32AllocFlags) : IMG_FALSE, /* Zero all pages later as batch */
 	                                      psPageArrayData->psDevNode);
 	gfp_t ui32GfpFlags;
 	gfp_t ui32HighOrderGfpFlags = ((gfp_flags & ~__GFP_RECLAIM) | __GFP_NORETRY);
@@ -1886,22 +1793,22 @@ _AllocOSPages_Fast(PMR_OSPAGEARRAY_DATA *psPageArrayData)
 	struct page **ppsPageArray = psPageArrayData->pagearray;
 	struct page **ppsPageAttributeArray = NULL;
 
-	uiPagesToAlloc = psPageArrayData->uiTotalNumOSPages;
+	uiOSPagesToAlloc = psPageArrayData->uiTotalNumOSPages;
 
 	/* Try to get pages from the pool since it is faster;
 	   the page pool currently only supports zero-order pages
 	   thus currently excludes all DMA/CMA allocated memory */
 	_GetPagesFromPoolLocked(psPageArrayData->psDevNode,
 							psPageArrayData->ui32CPUCacheFlags,
-							uiPagesToAlloc,
+							uiOSPagesToAlloc,
 							ui32MinOrder,
-							BIT_ISSET(psPageArrayData->ui32AllocFlags, FLAG_ZERO),
+							_ShouldInitMem(psPageArrayData->ui32AllocFlags),
 							ppsPageArray,
-							&uiPagesFromPool);
+							&uiDevPagesFromPool);
 
-	uiArrayIndex = uiPagesFromPool;
+	uiArrayIndex = uiDevPagesFromPool;
 
-	if ((uiPagesToAlloc - uiPagesFromPool) < PVR_LINUX_HIGHORDER_ALLOCATION_THRESHOLD)
+	if ((uiOSPagesToAlloc - uiDevPagesFromPool) < PVR_LINUX_HIGHORDER_ALLOCATION_THRESHOLD)
 	{	/* Small allocations: ask for one device page at a time */
 		ui32Order = ui32MinOrder;
 		bIncreaseMaxOrder = IMG_FALSE;
@@ -1934,9 +1841,9 @@ _AllocOSPages_Fast(PMR_OSPAGEARRAY_DATA *psPageArrayData)
 	ui32GfpFlags = (ui32Order > ui32MinOrder) ? ui32HighOrderGfpFlags : gfp_flags;
 	ui32NumPageReq = (1 << ui32Order);
 
-	while (uiArrayIndex < uiPagesToAlloc)
+	while (uiArrayIndex < uiOSPagesToAlloc)
 	{
-		IMG_UINT32 ui32PageRemain = uiPagesToAlloc - uiArrayIndex;
+		IMG_UINT32 ui32PageRemain = uiOSPagesToAlloc - uiArrayIndex;
 
 		while (ui32NumPageReq > ui32PageRemain)
 		{
@@ -2005,7 +1912,7 @@ _AllocOSPages_Fast(PMR_OSPAGEARRAY_DATA *psPageArrayData)
 								__func__,
 								BIT_ISSET(psPageArrayData->ui32AllocFlags, FLAG_IS_CMA) ? "dma_alloc_coherent" : "alloc_pages",
 								uiArrayIndex,
-								uiPagesToAlloc,
+								uiOSPagesToAlloc,
 								ui32GfpFlags,
 								ui32Order,
 								PVRSRVGetErrorString(eError)));
@@ -2021,48 +1928,67 @@ _AllocOSPages_Fast(PMR_OSPAGEARRAY_DATA *psPageArrayData)
 	}
 
 	/* Construct table of page pointers to apply attributes */
-	ppsPageAttributeArray = &ppsPageArray[uiPagesFromPool];
+	ppsPageAttributeArray = &ppsPageArray[uiDevPagesFromPool];
 	if (BIT_ISSET(psPageArrayData->ui32AllocFlags, FLAG_IS_CMA))
 	{
 		IMG_UINT32 uiIdx, uiIdy, uiIdz;
 
-		ppsPageAttributeArray = OSAllocMem(sizeof(struct page *) * uiPagesToAlloc);
-		if (ppsPageAttributeArray == NULL)
-		{
-			PVR_DPF((PVR_DBG_ERROR, "Failed OSAllocMem() for page attributes table"));
-			eError = PVRSRV_ERROR_OUT_OF_MEMORY;
-			goto e_free_pages;
-		}
+		ppsPageAttributeArray = OSAllocMem(sizeof(struct page *) * uiOSPagesToAlloc);
+		PVR_LOG_GOTO_IF_NOMEM(ppsPageAttributeArray, eError, e_free_pages);
 
-		for (uiIdx = 0; uiIdx < uiPagesToAlloc; uiIdx += ui32NumPageReq)
+		for (uiIdx = 0; uiIdx < uiOSPagesToAlloc; uiIdx += ui32NumPageReq)
 		{
 			uiIdy = uiIdx >> ui32Order;
 			for (uiIdz = 0; uiIdz < ui32NumPageReq; uiIdz++)
 			{
-				ppsPageAttributeArray[uiIdx+uiIdz] = psPageArrayData->pagearray[uiIdy];
+				ppsPageAttributeArray[uiIdx+uiIdz] = ppsPageArray[uiIdy];
 				ppsPageAttributeArray[uiIdx+uiIdz] += uiIdz;
 			}
 		}
 	}
 
-	if (BIT_ISSET(psPageArrayData->ui32AllocFlags, FLAG_ZERO) && ui32MinOrder == 0)
+	if (_ShouldInitMem(psPageArrayData->ui32AllocFlags) && ui32MinOrder == 0)
 	{
-		eError = _ZeroPageArray(uiPagesToAlloc - uiPagesFromPool,
-					   ppsPageAttributeArray,
-					   PAGE_KERNEL);
+		eError = _MemsetPageArray(uiOSPagesToAlloc - uiDevPagesFromPool,
+		                          ppsPageAttributeArray, PAGE_KERNEL,
+		                          PVRSRV_ZERO_VALUE);
 		if (eError != PVRSRV_OK)
 		{
 			PVR_DPF((PVR_DBG_ERROR, "Failed to zero pages (fast)"));
 			goto e_free_pages;
 		}
 	}
+	else if (BIT_ISSET(psPageArrayData->ui32AllocFlags, FLAG_POISON_ON_ALLOC))
+	{
+		/* need to call twice because ppsPageArray and ppsPageAttributeArray
+		 * can point to different allocations: first for pages obtained from
+		 * the pool and then the remaining pages */
+		eError = _MemsetPageArray(uiDevPagesFromPool, ppsPageArray, PAGE_KERNEL,
+		                          PVRSRV_POISON_ON_ALLOC_VALUE);
+		if (eError != PVRSRV_OK)
+		{
+			PVR_DPF((PVR_DBG_ERROR, "Failed to poison pages (fast)"));
+		}
+		eError = _MemsetPageArray(uiOSPagesToAlloc - uiDevPagesFromPool,
+		                          ppsPageAttributeArray, PAGE_KERNEL,
+		                          PVRSRV_POISON_ON_ALLOC_VALUE);
+		if (eError != PVRSRV_OK)
+		{
+			PVR_DPF((PVR_DBG_ERROR, "Failed to poison pages (fast)"));
+		}
 
+		/* for poisoning need to also flush the pool pages as the 0s have
+		 * been overwritten */
+		_ApplyCacheMaintenance(psPageArrayData->psDevNode, ppsPageArray,
+		                       uiDevPagesFromPool);
+	}
 
 	/* Do the cache management as required */
 	eError = _ApplyOSPagesAttribute(psPageArrayData->psDevNode,
 									ppsPageAttributeArray,
-									uiPagesToAlloc - uiPagesFromPool,
-									BIT_ISSET(psPageArrayData->ui32AllocFlags, FLAG_ZERO),
+									uiOSPagesToAlloc - uiDevPagesFromPool,
+									BIT_ISSET(psPageArrayData->ui32AllocFlags, FLAG_ZERO) ||
+									BIT_ISSET(psPageArrayData->ui32AllocFlags, FLAG_POISON_ON_ALLOC),
 									psPageArrayData->ui32CPUCacheFlags);
 	if (eError != PVRSRV_OK)
 	{
@@ -2080,13 +2006,13 @@ _AllocOSPages_Fast(PMR_OSPAGEARRAY_DATA *psPageArrayData)
 	/* Update metadata */
 	psPageArrayData->iNumOSPagesAllocated = psPageArrayData->uiTotalNumOSPages;
 
+#if defined(PVRSRV_ENABLE_PROCESS_STATS)
 	{
+#if defined(PVRSRV_ENABLE_MEMORY_STATS)
 		IMG_UINT32 ui32NumPages =
 		        psPageArrayData->iNumOSPagesAllocated >> ui32MinOrder;
 		IMG_UINT32 i;
 
-#if defined(PVRSRV_ENABLE_PROCESS_STATS)
-#if defined(PVRSRV_ENABLE_MEMORY_STATS)
 		for (i = 0; i < ui32NumPages; i++)
 		{
 			if (BIT_ISSET(psPageArrayData->ui32AllocFlags, FLAG_IS_CMA))
@@ -2099,23 +2025,11 @@ _AllocOSPages_Fast(PMR_OSPAGEARRAY_DATA *psPageArrayData)
 			}
 		}
 #else /* defined(PVRSRV_ENABLE_MEMORY_STATS) */
-		_IncrMemAllocStat_UmaPages(((uiPagesToAlloc * PAGE_SIZE)+(psPageArrayData->ui32CMAAdjustedPageCount)),
+		_IncrMemAllocStat_UmaPages(((uiOSPagesToAlloc * PAGE_SIZE)+(psPageArrayData->ui32CMAAdjustedPageCount)),
 		                           psPageArrayData->uiPid);
 #endif /* defined(PVRSRV_ENABLE_MEMORY_STATS) */
-#endif /* defined(PVRSRV_ENABLE_PROCESS_STATS) */
-
-		if (BIT_ISSET(psPageArrayData->ui32AllocFlags, FLAG_POISON_ON_ALLOC))
-		{
-			for (i = 0; i < ui32NumPages; i++)
-			{
-				_PoisonDevicePage(psPageArrayData->psDevNode,
-				                  ppsPageArray[i],
-				                  ui32MinOrder,
-				                  psPageArrayData->ui32CPUCacheFlags,
-				                  PVRSRV_POISON_ON_ALLOC_VALUE);
-			}
-		}
 	}
+#endif /* defined(PVRSRV_ENABLE_PROCESS_STATS) */
 
 	return PVRSRV_OK;
 
@@ -2151,7 +2065,7 @@ e_free_pages:
 		else
 		{
 			/* Free the pages we got from the pool */
-			for (ui32PageToFree = 0; ui32PageToFree < uiPagesFromPool; ui32PageToFree++)
+			for (ui32PageToFree = 0; ui32PageToFree < uiDevPagesFromPool; ui32PageToFree++)
 			{
 				_FreeOSPage(ui32MinOrder,
 							BIT_ISSET(psPageArrayData->ui32AllocFlags, FLAG_UNSET_MEMORY_TYPE),
@@ -2159,7 +2073,7 @@ e_free_pages:
 				ppsPageArray[ui32PageToFree] = NULL;
 			}
 
-			for (ui32PageToFree = uiPagesFromPool; ui32PageToFree < uiArrayIndex; ui32PageToFree++)
+			for (ui32PageToFree = uiDevPagesFromPool; ui32PageToFree < uiArrayIndex; ui32PageToFree++)
 			{
 				_FreeOSPage(ui32MinOrder, IMG_FALSE, ppsPageArray[ui32PageToFree]);
 				ppsPageArray[ui32PageToFree] = NULL;
@@ -2170,6 +2084,33 @@ e_free_pages:
 	}
 }
 
+static INLINE PVRSRV_ERROR
+_CheckIfIndexInRange(IMG_UINT32 ui32Index, IMG_UINT32 *pui32Indices, IMG_UINT32 ui32Limit)
+{
+	if (pui32Indices[ui32Index] >= ui32Limit)
+	{
+		PVR_DPF((PVR_DBG_ERROR, "%s: Given alloc index %u at %u is larger than page array %u.",
+		        __func__, pui32Indices[ui32Index], ui32Index, ui32Limit));
+		return PVRSRV_ERROR_DEVICEMEM_OUT_OF_RANGE;
+	}
+
+	return PVRSRV_OK;
+}
+
+static INLINE PVRSRV_ERROR
+_CheckIfPageNotAllocated(IMG_UINT32 ui32Index, IMG_UINT32 *pui32Indices, struct page **ppsPageArray)
+{
+	if (ppsPageArray[pui32Indices[ui32Index]] != NULL)
+	{
+		PVR_DPF((PVR_DBG_ERROR, "%s: Mapping number %u at page array index %u already exists. "
+		        "Page struct %p", __func__, pui32Indices[ui32Index], ui32Index,
+		        ppsPageArray[pui32Indices[ui32Index]]));
+		return PVRSRV_ERROR_PMR_MAPPING_ALREADY_EXISTS;
+	}
+
+	return PVRSRV_OK;
+}
+
 /* Allocation of OS pages: This function is used for sparse allocations.
  *
  * Sparse allocations provide only a proportion of sparse physical backing within the total
@@ -2177,183 +2118,185 @@ e_free_pages:
 static PVRSRV_ERROR
 _AllocOSPages_Sparse(PMR_OSPAGEARRAY_DATA *psPageArrayData,
 					 IMG_UINT32 *puiAllocIndices,
-					 IMG_UINT32 uiPagesToAlloc)
+					 IMG_UINT32 uiDevPagesToAlloc)
 {
 	PVRSRV_ERROR eError;
 	IMG_UINT32 i;
 	struct page **ppsPageArray = psPageArrayData->pagearray;
 	IMG_UINT32 uiOrder = psPageArrayData->uiLog2AllocPageSize - PAGE_SHIFT;
-	IMG_UINT32 uiPagesFromPool = 0;
-	IMG_UINT32 uiNumOSPagesToAlloc = uiPagesToAlloc * (1 << uiOrder);
-	IMG_UINT32 uiTotalNumAllocPages = psPageArrayData->uiTotalNumOSPages >> uiOrder;
-	gfp_t ui32GfpFlags = _GetGFPFlags(uiOrder ? BIT_ISSET(psPageArrayData->ui32AllocFlags, FLAG_ZERO):
-									  IMG_FALSE, /* Zero pages later as batch */
+	IMG_UINT32 uiDevPagesFromPool = 0;
+	IMG_UINT32 uiOSPagesToAlloc = uiDevPagesToAlloc * (1 << uiOrder);
+	IMG_UINT32 uiDevPagesAllocated = psPageArrayData->uiTotalNumOSPages >> uiOrder;
+	const IMG_UINT32 ui32AllocFlags = psPageArrayData->ui32AllocFlags;
+	gfp_t ui32GfpFlags = _GetGFPFlags(uiOrder ? _ShouldInitMem(ui32AllocFlags) : IMG_FALSE, /* Zero pages later as batch */
 									  psPageArrayData->psDevNode);
 
-	 /* We use this page array to receive pages from the pool and then reuse it afterwards to
-	  * store pages that need their cache attribute changed on x86*/
+	/* We use this page array to receive pages from the pool and then reuse it afterwards to
+	 * store pages that need their cache attribute changed on x86 */
 	struct page **ppsTempPageArray;
 	IMG_UINT32 uiTempPageArrayIndex = 0;
 
 	/* Allocate the temporary page array that we need here to receive pages
 	 * from the pool and to store pages that need their caching attributes changed.
 	 * Allocate number of OS pages to be able to use the attribute function later. */
-	ppsTempPageArray = OSAllocMem(sizeof(struct page*) * uiNumOSPagesToAlloc);
-	if (ppsTempPageArray == NULL)
-	{
-		PVR_DPF((PVR_DBG_ERROR, "%s: Failed metadata allocation", __func__));
-		eError = PVRSRV_ERROR_OUT_OF_MEMORY;
-		goto e_exit;
-	}
+	ppsTempPageArray = OSAllocMem(sizeof(struct page*) * uiOSPagesToAlloc);
+	PVR_LOG_GOTO_IF_NOMEM(ppsTempPageArray, eError, e_exit);
 
 	/* Check the requested number of pages if they fit in the page array */
-	if (uiTotalNumAllocPages <
-			((psPageArrayData->iNumOSPagesAllocated >> uiOrder) + uiPagesToAlloc) )
+	if (uiDevPagesAllocated <
+	        ((psPageArrayData->iNumOSPagesAllocated >> uiOrder) + uiDevPagesToAlloc))
 	{
 		PVR_DPF((PVR_DBG_ERROR,
 				 "%s: Trying to allocate more pages (Order %u) than this buffer can handle, "
 				 "Request + Allocated < Max! Request %u, Allocated %u, Max %u.",
 				 __func__,
 				 uiOrder,
-				 uiPagesToAlloc,
+				 uiDevPagesToAlloc,
 				 psPageArrayData->iNumOSPagesAllocated >> uiOrder,
-				 uiTotalNumAllocPages));
+				 uiDevPagesAllocated));
 		eError = PVRSRV_ERROR_PMR_BAD_MAPPINGTABLE_SIZE;
 		goto e_free_temp_array;
 	}
 
-	/* Try to get pages from the pool since it is faster */
+	/* Try to get pages from the pool since it is faster. The pages from pool are going to be
+	 * allocated only if:
+	 * - PVR_LINUX_PHYSMEM_ZERO_ALL_PAGES == 1 && uiOrder == 0
+	 * - PVR_LINUX_PHYSMEM_ZERO_ALL_PAGES == 0 && uiOrder == 0 &&
+	 *   !(BIT_ISSET(ui32AllocFlags, FLAG_ZERO) && g_bInitialisedOnAlloc) */
 	_GetPagesFromPoolLocked(psPageArrayData->psDevNode,
 							psPageArrayData->ui32CPUCacheFlags,
-							uiPagesToAlloc,
+							uiDevPagesToAlloc,
 							uiOrder,
-							BIT_ISSET(psPageArrayData->ui32AllocFlags, FLAG_ZERO),
+							_ShouldInitMem(ui32AllocFlags),
 							ppsTempPageArray,
-							&uiPagesFromPool);
+							&uiDevPagesFromPool);
 
-	/* Allocate pages from the OS or move the pages that we got from the pool
-	 * to the page array */
-	for (i = 0; i < uiPagesToAlloc; i++)
+	/* In general device pages can have higher order than 0 but page pool always provides only 0
+	 * order pages so they can be assigned to the OS pages values (in other words if we're
+	 * allocating non-4k pages uiDevPagesFromPool will always be 0) */
+	uiTempPageArrayIndex = uiDevPagesFromPool;
+
+	/* Move pages we got from the pool to the array. */
+	for (i = 0; i < uiDevPagesFromPool; i++)
 	{
-		/* Check if the indices we are allocating are in range */
-		if (puiAllocIndices[i] >= uiTotalNumAllocPages)
+		eError = _CheckIfIndexInRange(i, puiAllocIndices, uiDevPagesAllocated);
+		PVR_GOTO_IF_ERROR(eError, e_free_pool_pages);
+		eError = _CheckIfPageNotAllocated(i, puiAllocIndices, ppsPageArray);
+		PVR_GOTO_IF_ERROR(eError, e_free_pool_pages);
+
+		ppsPageArray[puiAllocIndices[i]] = ppsTempPageArray[i];
+	}
+
+	/* Allocate pages from the OS */
+	for (i = uiDevPagesFromPool; i < uiDevPagesToAlloc; i++)
+	{
+		eError = _CheckIfIndexInRange(i, puiAllocIndices, uiDevPagesAllocated);
+		PVR_GOTO_IF_ERROR(eError, e_free_pages);
+		eError = _CheckIfPageNotAllocated(i, puiAllocIndices, ppsPageArray);
+		PVR_GOTO_IF_ERROR(eError, e_free_pages);
+
+		/* Allocated pages and assign them the array. */
+		if (BIT_ISSET(ui32AllocFlags, FLAG_IS_CMA))
 		{
-			PVR_DPF((PVR_DBG_ERROR,
-					 "%s: Given alloc index %u at %u is larger than page array %u.",
-					 __func__,
-					 i,
-					 puiAllocIndices[i],
-					 uiTotalNumAllocPages));
-			eError = PVRSRV_ERROR_DEVICEMEM_OUT_OF_RANGE;
-			goto e_free_pages;
-		}
-
-		/* Check if there is not already a page allocated at this position */
-		if (NULL != ppsPageArray[puiAllocIndices[i]])
-		{
-			PVR_DPF((PVR_DBG_ERROR,
-					 "%s: Mapping number %u at page array index %u already exists. "
-					 "Page struct %p",
-					 __func__,
-					 i,
-					 puiAllocIndices[i],
-					 ppsPageArray[puiAllocIndices[i]]));
-			eError = PVRSRV_ERROR_PMR_MAPPING_ALREADY_EXISTS;
-			goto e_free_pages;
-		}
-
-		/* Finally assign a page to the array.
-		 * Either from the pool or allocate a new one. */
-		if (uiPagesFromPool != 0)
-		{
-			uiPagesFromPool--;
-			ppsPageArray[puiAllocIndices[i]] = ppsTempPageArray[uiPagesFromPool];
-		}
-		else
-		{
-			if (BIT_ISSET(psPageArrayData->ui32AllocFlags, FLAG_IS_CMA))
+			/* As the DMA/CMA framework rounds-up request to the
+			   next power-of-two, we request multiple uiMinOrder
+			   pages to satisfy allocation request in order to
+			   minimise wasting memory */
+			eError = _AllocOSPage_CMA(psPageArrayData,
+									  ui32GfpFlags,
+									  uiOrder,
+									  uiOrder,
+									  puiAllocIndices[i]);
+			if (eError != PVRSRV_OK)
 			{
-
-				/* As the DMA/CMA framework rounds-up request to the
-				   next power-of-two, we request multiple uiMinOrder
-				   pages to satisfy allocation request in order to
-				   minimise wasting memory */
-				eError = _AllocOSPage_CMA(psPageArrayData,
-										  ui32GfpFlags,
-										  uiOrder,
-										  uiOrder,
-										  puiAllocIndices[i]);
-				if (eError != PVRSRV_OK)
-				{
-					PVR_DPF((PVR_DBG_ERROR, "Failed to alloc CMA pages"));
-					goto e_free_pages;
-				}
-			}
-			else
-			{
-				DisableOOMKiller();
-				ppsPageArray[puiAllocIndices[i]] = alloc_pages(ui32GfpFlags, uiOrder);
-				EnableOOMKiller();
-			}
-
-			if (ppsPageArray[puiAllocIndices[i]] != NULL)
-			{
-				/* Reusing the temp page array if it has no pool pages anymore */
-
-				if (BIT_ISSET(psPageArrayData->ui32AllocFlags, FLAG_IS_CMA))
-				{
-					IMG_UINT32 idx;
-					struct page* psPageAddr;
-
-					psPageAddr = ppsPageArray[puiAllocIndices[i]];
-
-					for (idx = 0; idx < (1 << uiOrder); idx++)
-					{
-						ppsTempPageArray[uiTempPageArrayIndex + idx] = psPageAddr;
-						psPageAddr++;
-					}
-					uiTempPageArrayIndex += (1 << uiOrder);
-				}
-				else
-				{
-					ppsTempPageArray[uiTempPageArrayIndex] = ppsPageArray[puiAllocIndices[i]];
-					uiTempPageArrayIndex++;
-				}
-			}
-			else
-			{
-				/* Failed to alloc pages at required contiguity. Failed allocation */
-				PVR_DPF((PVR_DBG_ERROR,
-						 "%s: alloc_pages failed to honour request at %u of %u, flags = %x, order = %u",
-						 __func__,
-						 i,
-						 uiPagesToAlloc,
-						 ui32GfpFlags,
-						 uiOrder));
-				eError = PVRSRV_ERROR_PMR_FAILED_TO_ALLOC_PAGES;
+				PVR_DPF((PVR_DBG_ERROR, "Failed to alloc CMA pages"));
 				goto e_free_pages;
 			}
 		}
-	}
-
-	if (BIT_ISSET(psPageArrayData->ui32AllocFlags, FLAG_ZERO) && uiOrder == 0)
-	{
-		eError = _ZeroPageArray(uiTempPageArrayIndex,
-		                        ppsTempPageArray,
-		                        PAGE_KERNEL);
-		if (eError != PVRSRV_OK)
+		else
 		{
-			PVR_DPF((PVR_DBG_ERROR, "Failed to zero pages (sparse)"));
+			DisableOOMKiller();
+			ppsPageArray[puiAllocIndices[i]] = alloc_pages(ui32GfpFlags, uiOrder);
+			EnableOOMKiller();
+		}
+
+		if (ppsPageArray[puiAllocIndices[i]] != NULL)
+		{
+			/* Append pages to the temporary array so it's easier to process
+			 * them later on. */
+
+			if (BIT_ISSET(ui32AllocFlags, FLAG_IS_CMA))
+			{
+				IMG_UINT32 idx;
+				struct page *psPageAddr;
+
+				psPageAddr = ppsPageArray[puiAllocIndices[i]];
+
+				/* "divide" CMA pages into OS pages if they have higher order */
+				for (idx = 0; idx < (1 << uiOrder); idx++)
+				{
+					ppsTempPageArray[uiTempPageArrayIndex + idx] = psPageAddr;
+					psPageAddr++;
+				}
+				uiTempPageArrayIndex += (1 << uiOrder);
+			}
+			else
+			{
+				ppsTempPageArray[uiTempPageArrayIndex] = ppsPageArray[puiAllocIndices[i]];
+				uiTempPageArrayIndex++;
+			}
+		}
+		else
+		{
+			/* Failed to alloc pages at required contiguity. Failed allocation */
+			PVR_DPF((PVR_DBG_ERROR,
+			        "%s: alloc_pages failed to honour request at %u of %u, flags = %x, order = %u",
+			        __func__, i, uiDevPagesToAlloc, ui32GfpFlags, uiOrder));
+			eError = PVRSRV_ERROR_PMR_FAILED_TO_ALLOC_PAGES;
 			goto e_free_pages;
 		}
+	}
+
+	if (_ShouldInitMem(ui32AllocFlags) && uiOrder == 0)
+	{
+		/* At this point this array contains pages allocated from the page pool at its start
+		 * and pages allocated from the OS after that.
+		 * If there are pages from the pool here they must be zeroed already hence we don't have
+		 * to do it again. This is because if PVR_LINUX_PHYSMEM_ZERO_ALL_PAGES is enabled pool pages
+		 * are zeroed in the cleanup thread. If it's disabled they aren't, and in that case we never
+		 * allocate pages with FLAG_ZERO from the pool. This is why those pages need to be zeroed
+		 * here.
+		 * All of the above is true for the 0 order pages. For higher order we never allocated from
+		 * the pool and those pages are allocated already zeroed from the OS.
+		 * Long story short we can always skip pages allocated from the pool because they are either
+		 * zeroed or we didn't allocate any of them. */
+		eError = _MemsetPageArray(uiTempPageArrayIndex - uiDevPagesFromPool,
+		                          &ppsTempPageArray[uiDevPagesFromPool],
+		                          PAGE_KERNEL, PVRSRV_ZERO_VALUE);
+		PVR_LOG_GOTO_IF_FALSE(eError == PVRSRV_OK, "failed to zero pages (sparse)", e_free_pages);
+	}
+	else if (BIT_ISSET(ui32AllocFlags, FLAG_POISON_ON_ALLOC))
+	{
+		/* Here we need to poison all of the pages regardless if they were
+		 * allocated from the pool or from the system. */
+		eError = _MemsetPageArray(uiTempPageArrayIndex, ppsTempPageArray,
+		                          PAGE_KERNEL, PVRSRV_POISON_ON_ALLOC_VALUE);
+		PVR_LOG_IF_FALSE(eError == PVRSRV_OK, "failed to poison pages (sparse)");
+
+		/* We need to flush the cache for the poisoned pool pages here. The flush for the pages
+		 * allocated from the system is done below because we also need to add appropriate cache
+		 * attributes to them. Pages allocated from the pool already come with correct caching
+		 * mode. */
+		_ApplyCacheMaintenance(psPageArrayData->psDevNode, ppsTempPageArray, uiDevPagesFromPool);
 	}
 
 	/* Do the cache management as required */
 	eError = _ApplyOSPagesAttribute(psPageArrayData->psDevNode,
-									ppsTempPageArray,
-									uiTempPageArrayIndex,
-									BIT_ISSET(psPageArrayData->ui32AllocFlags, FLAG_ZERO),
-									psPageArrayData->ui32CPUCacheFlags);
+	                                &ppsTempPageArray[uiDevPagesFromPool],
+	                                uiTempPageArrayIndex - uiDevPagesFromPool,
+	                                BIT_ISSET(ui32AllocFlags, FLAG_ZERO) ||
+	                                BIT_ISSET(ui32AllocFlags, FLAG_POISON_ON_ALLOC),
+	                                psPageArrayData->ui32CPUCacheFlags);
 	if (eError != PVRSRV_OK)
 	{
 		PVR_DPF((PVR_DBG_ERROR, "Failed to set page attributes"));
@@ -2361,83 +2304,66 @@ _AllocOSPages_Sparse(PMR_OSPAGEARRAY_DATA *psPageArrayData,
 	}
 
 	/* Update metadata */
-	psPageArrayData->iNumOSPagesAllocated += uiNumOSPagesToAlloc;
+	psPageArrayData->iNumOSPagesAllocated += uiOSPagesToAlloc;
 
 	/* Free temporary page array */
 	OSFreeMem(ppsTempPageArray);
 
 #if defined(PVRSRV_ENABLE_PROCESS_STATS)
 #if defined(PVRSRV_ENABLE_MEMORY_STATS)
-	for (i = 0; i < uiPagesToAlloc; i++)
+	for (i = 0; i < uiDevPagesToAlloc; i++)
 	{
 		_AddMemAllocRecord_UmaPages(psPageArrayData,
 		                            ppsPageArray[puiAllocIndices[i]]);
 	}
 #else
-	_IncrMemAllocStat_UmaPages(((uiNumOSPagesToAlloc * PAGE_SIZE)+(psPageArrayData->ui32CMAAdjustedPageCount)),
+	_IncrMemAllocStat_UmaPages(((uiOSPagesToAlloc * PAGE_SIZE)+(psPageArrayData->ui32CMAAdjustedPageCount)),
 	                           psPageArrayData->uiPid);
 #endif
 #endif
 
-	if (BIT_ISSET(psPageArrayData->ui32AllocFlags, FLAG_POISON_ON_ALLOC))
+	return PVRSRV_OK;
+
+e_free_pages:
+	if (BIT_ISSET(ui32AllocFlags, FLAG_IS_CMA))
 	{
-		for (i = 0; i < uiPagesToAlloc; i++)
+		IMG_UINT32 uiDevPageSize = PAGE_SIZE << uiOrder;
+
+		/* Free the pages we just allocated from the CMA */
+		for (; i > uiDevPagesFromPool; i--)
 		{
-			_PoisonDevicePage(psPageArrayData->psDevNode,
-			                  ppsPageArray[puiAllocIndices[i]],
-			                  uiOrder,
-			                  psPageArrayData->ui32CPUCacheFlags,
-			                  PVRSRV_POISON_ON_ALLOC_VALUE);
+			_FreeOSPage_CMA(psPageArrayData->psDevNode->psDevConfig->pvOSDevice,
+			                uiDevPageSize,
+			                uiOrder,
+			                psPageArrayData->dmavirtarray[puiAllocIndices[i-1]],
+			                psPageArrayData->dmaphysarray[puiAllocIndices[i-1]],
+			                ppsPageArray[puiAllocIndices[i-1]]);
+			psPageArrayData->dmaphysarray[puiAllocIndices[i-1]]= (dma_addr_t) 0;
+			psPageArrayData->dmavirtarray[puiAllocIndices[i-1]] = NULL;
+			ppsPageArray[puiAllocIndices[i-1]] = NULL;
+		}
+	}
+	else
+	{
+		/* Free the pages we just allocated from the OS */
+		for (; i > uiDevPagesFromPool; i--)
+		{
+			_FreeOSPage(0, IMG_FALSE, ppsPageArray[puiAllocIndices[i-1]]);
+			ppsPageArray[puiAllocIndices[i-1]] = NULL;
 		}
 	}
 
-	return PVRSRV_OK;
-
-/* Error path */
-e_free_pages:
+e_free_pool_pages:
+	/* And now free all of the pages we allocated from the pool. */
+	for (i = 0; i < uiDevPagesFromPool; i++)
 	{
-		IMG_UINT32 ui32PageToFree;
+		_FreeOSPage(0, BIT_ISSET(ui32AllocFlags, FLAG_UNSET_MEMORY_TYPE),
+		            ppsTempPageArray[i]);
 
-		if (BIT_ISSET(psPageArrayData->ui32AllocFlags, FLAG_IS_CMA))
+		/* not using _CheckIfIndexInRange() to not print error message */
+		if (puiAllocIndices[i] < uiDevPagesAllocated)
 		{
-			IMG_UINT32 uiDevPageSize = PAGE_SIZE << uiOrder;
-
-			for (ui32PageToFree = 0; ui32PageToFree < i; ui32PageToFree++)
-			{
-				_FreeOSPage_CMA(psPageArrayData->psDevNode->psDevConfig->pvOSDevice,
-								uiDevPageSize,
-								uiOrder,
-								psPageArrayData->dmavirtarray[puiAllocIndices[ui32PageToFree]],
-								psPageArrayData->dmaphysarray[puiAllocIndices[ui32PageToFree]],
-								ppsPageArray[puiAllocIndices[ui32PageToFree]]);
-				psPageArrayData->dmaphysarray[puiAllocIndices[ui32PageToFree]]= (dma_addr_t)0;
-				psPageArrayData->dmavirtarray[puiAllocIndices[ui32PageToFree]] = NULL;
-				ppsPageArray[puiAllocIndices[ui32PageToFree]] = NULL;
-			}
-		}
-		else
-		{
-			/* Free the pages we got from the pool */
-			for (ui32PageToFree = 0; ui32PageToFree < uiPagesFromPool; ui32PageToFree++)
-			{
-				_FreeOSPage(0,
-							BIT_ISSET(psPageArrayData->ui32AllocFlags, FLAG_UNSET_MEMORY_TYPE),
-							ppsTempPageArray[ui32PageToFree]);
-			}
-
-			/* Free the pages we just allocated from the OS */
-			for (ui32PageToFree = uiPagesFromPool; ui32PageToFree < i; ui32PageToFree++)
-			{
-				_FreeOSPage(0,
-							IMG_FALSE,
-							ppsPageArray[puiAllocIndices[ui32PageToFree]]);
-			}
-
-			/* Reset all page array entries that have been set so far*/
-			for (ui32PageToFree = 0; ui32PageToFree < i; ui32PageToFree++)
-			{
-				ppsPageArray[puiAllocIndices[ui32PageToFree]] = NULL;
-			}
+			ppsPageArray[puiAllocIndices[i]] = NULL;
 		}
 	}
 
@@ -2658,6 +2584,11 @@ _FreeOSPages_Sparse(PMR_OSPAGEARRAY_DATA *psPageArrayData,
 				                  psPageArrayData->ui32CPUCacheFlags,
 				                  PVRSRV_POISON_ON_FREE_VALUE);
 			}
+			else if (pai32FreeIndices != NULL)
+			{
+				/* Attempt to poison an index not containing a valid page */
+				return PVRSRV_ERROR_PMR_FREE_INVALID_CHUNK;
+			}
 		}
 	}
 
@@ -2681,6 +2612,19 @@ _FreeOSPages_Sparse(PMR_OSPAGEARRAY_DATA *psPageArrayData,
 				psPageArrayData->dmavirtarray[idx] = NULL;
 				ppsPageArray[idx] = NULL;
 				uiTempIdx++;
+			}
+			else if (pai32FreeIndices != NULL)
+			{
+#if defined(PVRSRV_ENABLE_PROCESS_STATS) && !defined(PVRSRV_ENABLE_MEMORY_STATS)
+				/* Attempt to keep memstats consistent in event of fail as we have
+				 * freed some pages
+				 */
+				uiTempIdx <<= uiOrder;
+				_DecrMemAllocStat_UmaPages(uiTempIdx * PAGE_SIZE,
+										   psPageArrayData->uiPid);
+#endif
+				/* Attempt to free an already free index, could be duplicated free indices */
+				return PVRSRV_ERROR_PMR_FREE_INVALID_CHUNK;
 			}
 		}
 		uiTempIdx <<= uiOrder;
@@ -2713,12 +2657,31 @@ _FreeOSPages_Sparse(PMR_OSPAGEARRAY_DATA *psPageArrayData,
 
 				ppsPageArray[uiPageIndex] = NULL;
 			}
+			else if (pai32FreeIndices != NULL)
+			{
+				/* Attempt to free an already free index, could be duplicated free indices.
+				 * We don't have a need to unwind here as this isn't something we want to
+				 * recover from, we do want to try and maintain some consistency with pages we
+				 * can free before the error occurred and adjusting the memstats as required.
+				 */
+				for (i = 0; i < uiTempIdx; i++)
+				{
+					__free_pages(ppsTempPageArray[i], 0);
+				}
+
+#if defined(PVRSRV_ENABLE_PROCESS_STATS) && !defined(PVRSRV_ENABLE_MEMORY_STATS)
+				_DecrMemAllocStat_UmaPages(uiTempIdx * PAGE_SIZE,
+										   psPageArrayData->uiPid);
+#endif
+
+				OSFreeMemNoStats(ppsTempPageArray);
+				return PVRSRV_ERROR_PMR_FREE_INVALID_CHUNK;
+			}
 		}
 
 		/* Try to move the temp page array to the pool */
 		bSuccess = _PutPagesToPoolLocked(psPageArrayData->ui32CPUCacheFlags,
 										 ppsTempPageArray,
-										 BIT_ISSET(psPageArrayData->ui32AllocFlags, FLAG_UNPINNED),
 										 0,
 										 uiTempIdx);
 		if (bSuccess)
@@ -2816,7 +2779,6 @@ _FreeOSPages_Fast(PMR_OSPAGEARRAY_DATA *psPageArrayData)
 	/* Try to move the page array to the pool */
 	bSuccess = _PutPagesToPoolLocked(psPageArrayData->ui32CPUCacheFlags,
 									 ppsPageArray,
-									 BIT_ISSET(psPageArrayData->ui32AllocFlags, FLAG_UNPINNED),
 									 uiOrder,
 									 uiNumPages);
 	if (bSuccess)
@@ -2939,12 +2901,6 @@ PMRFinalizeOSMem(PMR_IMPL_PRIVDATA pvPriv)
 
 		mutex_unlock(&g_sUMALeakMutex);
 #endif
-		_PagePoolLock();
-		if (BIT_ISSET(psOSPageArrayData->ui32AllocFlags, FLAG_UNPINNED))
-		{
-			_RemoveUnpinListEntryUnlocked(psOSPageArrayData);
-		}
-		_PagePoolUnlock();
 
 		eError = _FreeOSPages(psOSPageArrayData,
 							  NULL,
@@ -3002,6 +2958,13 @@ PMRUnlockSysPhysAddressesOSMem(PMR_IMPL_PRIVDATA pvPriv)
 	return eError;
 }
 
+static INLINE IMG_BOOL IsOffsetValid(const PMR_OSPAGEARRAY_DATA *psOSPageArrayData,
+                                     IMG_UINT32 ui32Offset)
+{
+	return (ui32Offset >> psOSPageArrayData->uiLog2AllocPageSize) <
+	    psOSPageArrayData->uiTotalNumOSPages;
+}
+
 /* Determine PA for specified offset into page array. */
 static IMG_DEV_PHYADDR GetOffsetPA(const PMR_OSPAGEARRAY_DATA *psOSPageArrayData,
                                    IMG_UINT32 ui32Offset)
@@ -3011,7 +2974,6 @@ static IMG_DEV_PHYADDR GetOffsetPA(const PMR_OSPAGEARRAY_DATA *psOSPageArrayData
 	IMG_UINT32 ui32InPageOffset = ui32Offset - (ui32PageIndex << ui32Log2AllocPageSize);
 	IMG_DEV_PHYADDR sPA;
 
-	PVR_ASSERT(ui32PageIndex < psOSPageArrayData->uiTotalNumOSPages);
 	PVR_ASSERT(ui32InPageOffset < (1U << ui32Log2AllocPageSize));
 
 	sPA.uiAddr = page_to_phys(psOSPageArrayData->pagearray[ui32PageIndex]);
@@ -3046,6 +3008,9 @@ PMRSysPhysAddrOSMem(PMR_IMPL_PRIVDATA pvPriv,
 	{
 		if (pbValid[uiIdx])
 		{
+			PVR_LOG_RETURN_IF_FALSE(IsOffsetValid(psOSPageArrayData, puiOffset[uiIdx]),
+			                        "puiOffset out of range", PVRSRV_ERROR_OUT_OF_RANGE);
+
 			psDevPAddr[uiIdx] = GetOffsetPA(psOSPageArrayData, puiOffset[uiIdx]);
 
 #if !defined(PVR_LINUX_PHYSMEM_USE_HIGHMEM_ONLY)
@@ -3074,6 +3039,9 @@ typedef struct _PMR_OSPAGEARRAY_KERNMAP_DATA_ {
 	void *pvBase;
 	IMG_UINT32 ui32PageCount;
 	pgprot_t PageProps;
+#if defined(PVRSRV_PHYSMEM_CPUMAP_HISTORY)
+	IMG_UINT32 ui32CpuCacheFlags;
+#endif
 } PMR_OSPAGEARRAY_KERNMAP_DATA;
 
 static PVRSRV_ERROR
@@ -3221,8 +3189,23 @@ PMRAcquireKernelMappingDataOSMem(PMR_IMPL_PRIVDATA pvPriv,
 		OSFreeMem(pagearray);
 	}
 
-	return PVRSRV_OK;
+#if defined(PVRSRV_PHYSMEM_CPUMAP_HISTORY)
+	{
+		IMG_CPU_PHYADDR pvAddrPhy;
+		pvAddrPhy.uiAddr = IMG_CAST_TO_CPUPHYADDR_UINT(page_to_phys(*pagearray));
+		InsertMappingRecord(PMR_GetAnnotation(psOSPageArrayData->hPMR),
+							psOSPageArrayData->uiPid,
+							pvAddress,
+							pvAddrPhy,
+							psOSPageArrayData->ui32CPUCacheFlags,
+							uiMapOffset,
+							ui32PageCount);
 
+		psData->ui32CpuCacheFlags = psOSPageArrayData->ui32CPUCacheFlags;
+	}
+#endif
+
+	return PVRSRV_OK;
 	/*
 	  error exit paths follow
 	*/
@@ -3244,121 +3227,19 @@ static void PMRReleaseKernelMappingDataOSMem(PMR_IMPL_PRIVDATA pvPriv,
 	PMR_OSPAGEARRAY_KERNMAP_DATA *psData = hHandle;
 	PVR_UNREFERENCED_PARAMETER(pvPriv);
 
+#if defined(PVRSRV_PHYSMEM_CPUMAP_HISTORY)
+	{
+		IMG_CPU_PHYADDR pvAddrPhy;
+		pvAddrPhy.uiAddr = IMG_CAST_TO_CPUPHYADDR_UINT(page_to_phys(vmalloc_to_page(psData->pvBase)));
+		InsertUnMappingRecord(psData->pvBase,
+				pvAddrPhy,
+				psData->ui32CpuCacheFlags,
+				psData->ui32PageCount);
+	}
+#endif
+
 	pvr_vunmap(psData->pvBase, psData->ui32PageCount, psData->PageProps);
 	OSFreeMem(psData);
-}
-
-static
-PVRSRV_ERROR PMRUnpinOSMem(PMR_IMPL_PRIVDATA pPriv)
-{
-	PMR_OSPAGEARRAY_DATA *psOSPageArrayData = pPriv;
-	PVRSRV_ERROR eError = PVRSRV_OK;
-
-	/* Lock down the pool and add the array to the unpin list */
-	_PagePoolLock();
-
-	/* Check current state */
-	PVR_ASSERT(BIT_ISSET(psOSPageArrayData->ui32AllocFlags, FLAG_UNPINNED) == IMG_FALSE);
-	PVR_ASSERT(BIT_ISSET(psOSPageArrayData->ui32AllocFlags, FLAG_ONDEMAND) == IMG_FALSE);
-
-	eError = _AddUnpinListEntryUnlocked(psOSPageArrayData);
-
-	if (eError != PVRSRV_OK)
-	{
-		PVR_DPF((PVR_DBG_ERROR,
-		         "%s: Unable to add allocation to unpinned list (%d).",
-		         __func__,
-		         eError));
-
-		goto e_exit;
-	}
-
-	/* Set the Unpinned bit */
-	BIT_SET(psOSPageArrayData->ui32AllocFlags, FLAG_UNPINNED);
-
-e_exit:
-	_PagePoolUnlock();
-	return eError;
-}
-
-static
-PVRSRV_ERROR PMRPinOSMem(PMR_IMPL_PRIVDATA pPriv,
-						PMR_MAPPING_TABLE *psMappingTable)
-{
-	PVRSRV_ERROR eError;
-	PMR_OSPAGEARRAY_DATA *psOSPageArrayData = pPriv;
-	IMG_UINT32 *pui32MapTable = NULL;
-	IMG_UINT32 i, j = 0, ui32Temp = 0;
-
-	_PagePoolLock();
-
-	/* Check current state */
-	PVR_ASSERT(BIT_ISSET(psOSPageArrayData->ui32AllocFlags, FLAG_UNPINNED));
-
-	/* Clear unpinned bit */
-	BIT_UNSET(psOSPageArrayData->ui32AllocFlags, FLAG_UNPINNED);
-
-	/* If there are still pages in the array remove entries from the pool */
-	if (psOSPageArrayData->iNumOSPagesAllocated != 0)
-	{
-		_RemoveUnpinListEntryUnlocked(psOSPageArrayData);
-		_PagePoolUnlock();
-
-		eError = PVRSRV_OK;
-		goto e_exit_mapalloc_failure;
-	}
-	_PagePoolUnlock();
-
-	/* If pages were reclaimed we allocate new ones and
-	 * return PVRSRV_ERROR_PMR_NEW_MEMORY */
-	if (psMappingTable->ui32NumVirtChunks == 1)
-	{
-		eError = _AllocOSPages(psOSPageArrayData, NULL, psOSPageArrayData->uiTotalNumOSPages);
-	}
-	else
-	{
-		pui32MapTable = (IMG_UINT32 *)OSAllocMem(sizeof(*pui32MapTable) * psMappingTable->ui32NumPhysChunks);
-		if (NULL == pui32MapTable)
-		{
-			eError = PVRSRV_ERROR_PMR_FAILED_TO_ALLOC_PAGES;
-			PVR_DPF((PVR_DBG_ERROR,
-					 "%s: Unable to Alloc Map Table.",
-					 __func__));
-			goto e_exit_mapalloc_failure;
-		}
-
-		for (i = 0, j = 0; i < psMappingTable->ui32NumVirtChunks; i++)
-		{
-			ui32Temp = psMappingTable->aui32Translation[i];
-			if (TRANSLATION_INVALID != ui32Temp)
-			{
-				pui32MapTable[j++] = ui32Temp;
-			}
-		}
-		eError = _AllocOSPages(psOSPageArrayData, pui32MapTable, psMappingTable->ui32NumPhysChunks);
-	}
-
-	if (eError != PVRSRV_OK)
-	{
-		PVR_DPF((PVR_DBG_ERROR,
-				 "%s: Unable to get new pages for unpinned allocation.",
-				 __func__));
-
-		eError = PVRSRV_ERROR_PMR_FAILED_TO_ALLOC_PAGES;
-		goto e_exit;
-	}
-
-	PVR_DPF((PVR_DBG_MESSAGE,
-			 "%s: Allocating new pages for unpinned allocation. "
-			 "Old content is lost!",
-			 __func__));
-
-	eError = PVRSRV_ERROR_PMR_NEW_MEMORY;
-
-e_exit:
-	OSFreeMem(pui32MapTable);
-e_exit_mapalloc_failure:
-	return eError;
 }
 
 /*************************************************************************/ /*!
@@ -3405,7 +3286,7 @@ PMRChangeSparseMemOSMem(PMR_IMPL_PRIVDATA pPriv,
 		ui32CommonRequestCount = (ui32AllocPageCount > ui32FreePageCount) ?
 				ui32FreePageCount : ui32AllocPageCount;
 
-		PDUMP_PANIC(SPARSEMEM_SWAP, "Request to swap alloc & free pages not supported");
+		PDUMP_PANIC(PMR_DeviceNode(psPMR), SPARSEMEM_SWAP, "Request to swap alloc & free pages not supported");
 	}
 
 	if (SPARSE_RESIZE_ALLOC == (uiFlags & SPARSE_RESIZE_ALLOC))
@@ -3656,8 +3537,6 @@ static PMR_IMPL_FUNCTAB _sPMROSPFuncTab = {
 	.pfnReleaseKernelMappingData = &PMRReleaseKernelMappingDataOSMem,
 	.pfnReadBytes = NULL,
 	.pfnWriteBytes = NULL,
-	.pfnUnpinMem = &PMRUnpinOSMem,
-	.pfnPinMem = &PMRPinOSMem,
 	.pfnChangeSparseMem = &PMRChangeSparseMemOSMem,
 	.pfnChangeSparseMemCPUMap = &PMRChangeSparseMemCPUMapOSMem,
 	.pfnFinalize = &PMRFinalizeOSMem,
@@ -3669,7 +3548,6 @@ DoPageAlloc(PMR_OSPAGEARRAY_DATA *psPrivData,
             IMG_UINT32 *puiAllocIndices,
             IMG_UINT32 ui32NumPhysChunks,
             IMG_UINT32 ui32NumVirtChunks,
-            IMG_DEVMEM_SIZE_T uiChunkSize,
             IMG_UINT32 ui32Log2AllocPageSize)
 {
 	PVRSRV_ERROR eError = PVRSRV_OK;
@@ -3685,17 +3563,9 @@ DoPageAlloc(PMR_OSPAGEARRAY_DATA *psPrivData,
 	}
 	else if (ui32NumPhysChunks != 0)
 	{
-		/* Calculate the number of pages we want to allocate */
-		IMG_UINT32 ui32PagesToAlloc =
-			(IMG_UINT32)((((ui32NumPhysChunks * uiChunkSize) - 1) >> ui32Log2AllocPageSize) + 1);
-
-		/* Make sure calculation is correct */
-		PVR_ASSERT(((PMR_SIZE_T) ui32PagesToAlloc << ui32Log2AllocPageSize) ==
-		           (ui32NumPhysChunks * uiChunkSize));
-
 		/* Allocate the physical pages */
 		eError = _AllocOSPages(psPrivData, puiAllocIndices,
-		                       ui32PagesToAlloc);
+		                       ui32NumPhysChunks);
 	}
 
 	return eError;
@@ -3734,11 +3604,13 @@ static void _EncodeAllocationFlags(IMG_UINT32 uiLog2AllocPageSize,
 		BIT_SET(*ui32AllocFlags, FLAG_POISON_ON_ALLOC);
 	}
 
+#if defined(DEBUG)
 	/* Poison on free? */
 	if (PVRSRV_CHECK_POISON_ON_FREE(uiFlags))
 	{
 		BIT_SET(*ui32AllocFlags, FLAG_POISON_ON_FREE);
 	}
+#endif
 
 	/* Indicate whether this is an allocation with default caching attribute (i.e cached) or not */
 	if (PVRSRV_CHECK_CPU_UNCACHED(uiFlags) ||
@@ -3749,11 +3621,24 @@ static void _EncodeAllocationFlags(IMG_UINT32 uiLog2AllocPageSize,
 
 }
 
+void PhysmemGetOSRamMemStats(PHEAP_IMPL_DATA pvImplData,
+                                   	   IMG_UINT64 *pui64TotalSize,
+                                   	   IMG_UINT64 *pui64FreeSize)
+{
+	struct sysinfo sMeminfo;
+	si_meminfo(&sMeminfo);
+
+	PVR_UNREFERENCED_PARAMETER(pvImplData);
+
+	*pui64TotalSize = sMeminfo.totalram * sMeminfo.mem_unit;
+	*pui64FreeSize = sMeminfo.freeram * sMeminfo.mem_unit;
+
+}
+
 PVRSRV_ERROR
 PhysmemNewOSRamBackedPMR(PHYS_HEAP *psPhysHeap,
 						 CONNECTION_DATA *psConnection,
 						 IMG_DEVMEM_SIZE_T uiSize,
-						 IMG_DEVMEM_SIZE_T uiChunkSize,
 						 IMG_UINT32 ui32NumPhysChunks,
 						 IMG_UINT32 ui32NumVirtChunks,
 						 IMG_UINT32 *puiAllocIndices,
@@ -3827,7 +3712,7 @@ PhysmemNewOSRamBackedPMR(PHYS_HEAP *psPhysHeap,
 
 	/* Create Array structure that hold the physical pages */
 	eError = _AllocOSPageArray(psDevNode,
-							   uiChunkSize,
+							   uiSize,
 							   ui32NumPhysChunks,
 							   ui32NumVirtChunks,
 							   uiLog2AllocPageSize,
@@ -3843,7 +3728,7 @@ PhysmemNewOSRamBackedPMR(PHYS_HEAP *psPhysHeap,
 	if (!BIT_ISSET(ui32AllocFlags, FLAG_ONDEMAND))
 	{
 		eError = DoPageAlloc(psPrivData, puiAllocIndices, ui32NumPhysChunks,
-		                     ui32NumVirtChunks, uiChunkSize, uiLog2AllocPageSize);
+		                     ui32NumVirtChunks, uiLog2AllocPageSize);
 		if (eError != PVRSRV_OK)
 		{
 			goto errorOnAllocPages;
@@ -3868,12 +3753,11 @@ PhysmemNewOSRamBackedPMR(PHYS_HEAP *psPhysHeap,
 
 	if (BIT_ISSET(ui32AllocFlags, FLAG_ONDEMAND))
 	{
-		PDUMPCOMMENT("Deferred Allocation PMR (UMA)");
+		PDUMPCOMMENT(PhysHeapDeviceNode(psPhysHeap), "Deferred Allocation PMR (UMA)");
 	}
 
 	eError = PMRCreatePMR(psPhysHeap,
 						  uiSize,
-						  uiChunkSize,
 						  ui32NumPhysChunks,
 						  ui32NumVirtChunks,
 						  puiAllocIndices,
@@ -3889,6 +3773,10 @@ PhysmemNewOSRamBackedPMR(PHYS_HEAP *psPhysHeap,
 	{
 		goto errorOnCreate;
 	}
+
+#if defined(PVRSRV_PHYSMEM_CPUMAP_HISTORY)
+	psPrivData->hPMR = psPMR;
+#endif
 
 	*ppsPMRPtr = psPMR;
 

@@ -3567,7 +3567,7 @@ Init Bit Sent Flag for VCE0
 
 #if defined(RGX_FEATURE_PM_BYTE_ALIGNED_BASE_ADDRESSES)
 /*
-The PM FreeListState Buffer Layout - this will apply to 3 resources - FSTACK, UFSTACK and MMUSTACK
+The PM FreeListState Buffer Layout - this will apply to 3 resources - FSTACK, UFSTACK and MMUSTACK 
 */
 typedef struct RGX_PM_FREELISTSTATE_BUFFER_TAG {
      IMG_UINT32 u32_0;
@@ -3645,7 +3645,7 @@ Base address of the free stack - points to the bottom of the stack.
 
 #if !defined(RGX_FEATURE_PM_BYTE_ALIGNED_BASE_ADDRESSES)
 /*
-The PM FreeListState Buffer Layout - this will apply to 3 resources - FSTACK, UFSTACK and MMUSTACK
+The PM FreeListState Buffer Layout - this will apply to 3 resources - FSTACK, UFSTACK and MMUSTACK 
 */
 typedef struct RGX_PM_FREELISTSTATE_BUFFER_TAG {
      IMG_UINT32 u32_0;
@@ -3774,7 +3774,7 @@ Maximum range supported by hardware is 23 bits.
 
 #if defined(RGX_FEATURE_PM_REGISTER_CONFIG_MODE)&&defined(RGX_FEATURE_PM_BYTE_ALIGNED_BASE_ADDRESSES)&&!defined(RGX_FEATURE_SINGLE_TE_VSPACE)
 /*
-The PM Render Context Buffer Layout
+The PM Render Context Buffer Layout 
 */
 typedef struct RGX_PM_RENDERSTATE_BUFFER_TAG {
      IMG_UINT32 u32_0;
@@ -3920,7 +3920,7 @@ The number of entries on the ALIST.  Must be initialised to zero, meaning no pag
 
 #if defined(RGX_FEATURE_PM_REGISTER_CONFIG_MODE)&&!defined(RGX_FEATURE_PM_BYTE_ALIGNED_BASE_ADDRESSES)&&!defined(RGX_FEATURE_SINGLE_TE_VSPACE)
 /*
-The PM Render Context Buffer Layout
+The PM Render Context Buffer Layout 
 */
 typedef struct RGX_PM_RENDERSTATE_BUFFER_TAG {
      IMG_UINT32 u32_0;
@@ -4032,7 +4032,7 @@ The number of entries on the ALIST.  Must be initialised to zero, meaning no pag
 
 #if defined(RGX_FEATURE_SINGLE_TE_VSPACE)
 /*
-The PM Render Context Buffer Layout
+The PM Render Context Buffer Layout 
 */
 typedef struct RGX_PM_RENDERSTATE_BUFFER_TAG {
      IMG_UINT32 u32_0;
@@ -4407,7 +4407,7 @@ The number of entries on the ALIST.
 
 #if !(defined(RGX_FEATURE_PM_REGISTER_CONFIG_MODE)&&defined(RGX_FEATURE_PM_BYTE_ALIGNED_BASE_ADDRESSES)&&!defined(RGX_FEATURE_SINGLE_TE_VSPACE)) && !(defined(RGX_FEATURE_PM_REGISTER_CONFIG_MODE)&&!defined(RGX_FEATURE_PM_BYTE_ALIGNED_BASE_ADDRESSES)&&!defined(RGX_FEATURE_SINGLE_TE_VSPACE)) && !(defined(RGX_FEATURE_SINGLE_TE_VSPACE))
 /*
-The PM Render Context Buffer Layout
+The PM Render Context Buffer Layout 
 */
 typedef struct RGX_PM_RENDERSTATE_BUFFER_TAG {
      IMG_UINT32 u32_0;

@@ -51,7 +51,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #if (RGX_NUM_OS_SUPPORTED > 1)
 static PVRSRV_ERROR
-PvzConnectionValidate(PVRSRV_DEVICE_CONFIG *psDevConfig)
+PvzConnectionValidate(void)
 {
 	VMM_PVZ_CONNECTION *psVmmPvz;
 	PVRSRV_ERROR eError = PVRSRV_OK;
@@ -112,13 +112,13 @@ e0:
 }
 #endif /* (RGX_NUM_OS_SUPPORTED > 1) */
 
-PVRSRV_ERROR PvzConnectionInit(PVRSRV_DEVICE_CONFIG *psDevConfig)
+PVRSRV_ERROR PvzConnectionInit(void)
 {
 	PVRSRV_ERROR eError;
 	PVRSRV_DATA *psPVRSRVData = PVRSRVGetPVRSRVData();
 
 #if (RGX_NUM_OS_SUPPORTED == 1)
-# if !defined(PVRSRV_NEED_PVR_DPF)
+#if !defined(PVRSRV_NEED_PVR_DPF)
 	PVR_UNREFERENCED_PARAMETER(psPVRSRVData);
 # endif
 	PVR_DPF((PVR_DBG_ERROR, "This kernel driver does not support virtualization. Please rebuild with RGX_NUM_OS_SUPPORTED > 1"));
@@ -127,6 +127,14 @@ PVRSRV_ERROR PvzConnectionInit(PVRSRV_DEVICE_CONFIG *psDevConfig)
 	eError = PVRSRV_ERROR_NOT_SUPPORTED;
 	goto e0;
 #else
+
+	if ((psPVRSRVData->hPvzConnection != NULL) &&
+		(psPVRSRVData->hPvzConnectionLock != NULL))
+	{
+		eError = PVRSRV_OK;
+		PVR_DPF((PVR_DBG_MESSAGE, "PVzConnection already initialised."));
+		goto e0;
+	}
 
 	/* Create para-virtualization connection lock */
 	eError = OSLockCreate(&psPVRSRVData->hPvzConnectionLock);
@@ -144,10 +152,8 @@ PVRSRV_ERROR PvzConnectionInit(PVRSRV_DEVICE_CONFIG *psDevConfig)
 	}
 
 	/* Ensure pvz connection is configured correctly */
-	eError = PvzConnectionValidate(psDevConfig);
+	eError = PvzConnectionValidate();
 	PVR_LOG_RETURN_IF_ERROR(eError, "PvzConnectionValidate");
-
-	psPVRSRVData->abVmOnline[RGXFW_HOST_OS] = IMG_TRUE;
 #endif
 e0:
 	return eError;
@@ -156,6 +162,13 @@ e0:
 void PvzConnectionDeInit(void)
 {
 	PVRSRV_DATA *psPVRSRVData = PVRSRVGetPVRSRVData();
+
+	if ((psPVRSRVData->hPvzConnection == NULL) &&
+		(psPVRSRVData->hPvzConnectionLock == NULL))
+	{
+		PVR_DPF((PVR_DBG_MESSAGE, "PVzConnection already deinitialised."));
+		return;
+	}
 
 	VMMDestroyPvzConnection(psPVRSRVData->hPvzConnection);
 	psPVRSRVData->hPvzConnection = NULL;

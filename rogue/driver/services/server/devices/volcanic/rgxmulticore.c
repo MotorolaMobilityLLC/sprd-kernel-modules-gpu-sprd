@@ -165,7 +165,9 @@ PVRSRV_ERROR RGXInitMultiCoreInfo(PVRSRV_DEVICE_NODE *psDeviceNode)
 		psDeviceNode->ui32MultiCoreNumCores = ui32NumCores;
 
 		PVR_DPF((PVR_DBG_MESSAGE, "Multicore domain has %d cores with primary id %u\n", ui32NumCores, ui32PrimaryId));
-		PDUMPCOMMENT("RGX Multicore domain has %d cores with primary id %u\n", ui32NumCores, ui32PrimaryId);
+		PDUMPCOMMENT(psDeviceNode,
+		             "RGX Multicore domain has %d cores with primary id %u\n",
+		             ui32NumCores, ui32PrimaryId);
 		for (i = 0, id = 0; id < ui32TotalCores; ++id)
 		{
 			if ((ui32PrimaryCoreIds & 0x7) == ui32PrimaryId)
@@ -176,7 +178,8 @@ PVRSRV_ERROR RGXInitMultiCoreInfo(PVRSRV_DEVICE_NODE *psDeviceNode)
 				                    | RGX_MULTICORE_CAPABILITY_GEOMETRY_EN
 				                    | RGX_MULTICORE_CAPABILITY_COMPUTE_EN
 				                    | RGX_MULTICORE_CAPABILITY_FRAGMENT_EN;
-				PDUMPCOMMENT("\tCore %u has caps 0x%08x", id, (IMG_UINT32)psDeviceNode->pui64MultiCoreCapabilities[i]);
+				PDUMPCOMMENT(psDeviceNode, "\tCore %u has caps 0x%08x", id,
+				             (IMG_UINT32)psDeviceNode->pui64MultiCoreCapabilities[i]);
 				PVR_DPF((PVR_DBG_MESSAGE, "Core %u has caps 0x%08x", id, (IMG_UINT32)psDeviceNode->pui64MultiCoreCapabilities[i]));
 				++i;
 			}

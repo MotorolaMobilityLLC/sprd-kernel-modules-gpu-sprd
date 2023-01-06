@@ -61,6 +61,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvrsrv.h"
 
 #include "rgxinit.h"
+#include "rgxmulticore.h"
 
 #include "rgx_compat_bvnc.h"
 
@@ -103,6 +104,22 @@ RGX_CNT_BLK_TYPE_MODEL_INDIRECT_LIST
 #define	HW_PERF_FILTER_DEFAULT         0x00000000 /* Default to no HWPerf */
 #define HW_PERF_FILTER_DEFAULT_ALL_ON  0xFFFFFFFF /* All events */
 #define AVAIL_POW_UNITS_MASK_DEFAULT   (PVRSRV_APPHINT_HWVALAVAILABLESPUMASK)
+#define AVAIL_RAC_MASK_DEFAULT         (PVRSRV_APPHINT_HWVALAVAILABLERACMASK)
+
+/* Kernel CCB size */
+
+#if !defined(PVRSRV_RGX_LOG2_KERNEL_CCB_MIN_SIZE)
+#define PVRSRV_RGX_LOG2_KERNEL_CCB_MIN_SIZE 4
+#endif
+#if !defined(PVRSRV_RGX_LOG2_KERNEL_CCB_MAX_SIZE)
+#define PVRSRV_RGX_LOG2_KERNEL_CCB_MAX_SIZE 16
+#endif
+
+#if PVRSRV_APPHINT_KCCB_SIZE_LOG2 < PVRSRV_RGX_LOG2_KERNEL_CCB_MIN_SIZE
+#error PVRSRV_APPHINT_KCCB_SIZE_LOG2 is too low.
+#elif PVRSRV_APPHINT_KCCB_SIZE_LOG2 > PVRSRV_RGX_LOG2_KERNEL_CCB_MAX_SIZE
+#error PVRSRV_APPHINT_KCCB_SIZE_LOG2 is too high.
+#endif
 
 #if defined(SUPPORT_VALIDATION)
 #include "pvrsrv_apphint.h"
@@ -151,7 +168,7 @@ static SRV_INIT_PARAM_UINT32_LOOKUP fwt_loggroup_tbl[] = { RGXFWIF_LOG_GROUP_NAM
 /*
  * Services AppHints initialisation
  */
-#define X(a, b, c, d, e) SrvInitParamInit ## b(a, d, e)
+#define X(a, b, c, d, e, f) SrvInitParamInit ## b(a, d, e)
 APPHINT_LIST_ALL
 #undef X
 #endif /* defined(__linux__) */
@@ -173,6 +190,7 @@ typedef struct _RGX_SRVINIT_APPHINTS_
 	IMG_BOOL   bValidateIrq;
 	IMG_BOOL   bValidateSOCUSCTimer;
 	IMG_UINT32 ui32AvailablePowUnitsMask;
+	IMG_UINT32 ui32AvailableRACMask;
 	IMG_BOOL   bInjectPowUnitsStateMaskChange;
 	IMG_BOOL   bEnablePowUnitsStateMaskChange;
 	IMG_UINT32 ui32FBCDCVersionOverride;
@@ -209,6 +227,7 @@ typedef struct _RGX_SRVINIT_APPHINTS_
 	FW_PERF_CONF eFirmwarePerf;
 	RGX_ACTIVEPM_CONF eRGXActivePMConf;
 	RGX_RD_POWER_ISLAND_CONF eRGXRDPowerIslandConf;
+	IMG_BOOL bSPUClockGating;
 
 	IMG_BOOL   bEnableTrustedDeviceAceConfig;
 	IMG_UINT32 ui32FWContextSwitchCrossDM;
@@ -237,39 +256,63 @@ static INLINE void GetApphints(PVRSRV_RGXDEV_INFO *psDevInfo, RGX_SRVINIT_APPHIN
 	/*
 	 * NB AppHints initialised to a default value via SrvInitParamInit* macros above
 	 */
-	SrvInitParamGetUINT32(pvParamState,  DriverMode, psHints->ui32DriverMode);
-	SrvInitParamGetBOOL(pvParamState,    EnableSignatureChecks, psHints->bEnableSignatureChecks);
-	SrvInitParamGetUINT32(pvParamState,  SignatureChecksBufSize, psHints->ui32SignatureChecksBufSize);
+	SrvInitParamGetUINT32(INITPARAM_NO_DEVICE,        pvParamState,    DriverMode,                         psHints->ui32DriverMode);
+	SrvInitParamGetBOOL(INITPARAM_NO_DEVICE,          pvParamState,    EnableSignatureChecks,      psHints->bEnableSignatureChecks);
+	SrvInitParamGetUINT32(INITPARAM_NO_DEVICE,        pvParamState,    SignatureChecksBufSize, psHints->ui32SignatureChecksBufSize);
 
-	SrvInitParamGetBOOL(pvParamState,    AssertOutOfMemory, psHints->bAssertOnOutOfMem);
-	SrvInitParamGetBOOL(pvParamState,    AssertOnHWRTrigger, psHints->bAssertOnHWRTrigger);
-	SrvInitParamGetBOOL(pvParamState,    CheckMList, psHints->bCheckMlist);
-	SrvInitParamGetBOOL(pvParamState,    DisableClockGating, psHints->bDisableClockGating);
-	SrvInitParamGetBOOL(pvParamState,    DisableDMOverlap, psHints->bDisableDMOverlap);
-	SrvInitParamGetBOOL(pvParamState,    DisableFEDLogging, psHints->bDisableFEDLogging);
-	SrvInitParamGetUINT32(pvParamState,  EnableAPM, ui32ParamTemp);
+	SrvInitParamGetBOOL(psDevInfo->psDeviceNode,      pvParamState,    AssertOutOfMemory,               psHints->bAssertOnOutOfMem);
+	SrvInitParamGetBOOL(psDevInfo->psDeviceNode,      pvParamState,    AssertOnHWRTrigger,            psHints->bAssertOnHWRTrigger);
+	SrvInitParamGetBOOL(psDevInfo->psDeviceNode,      pvParamState,    CheckMList,                            psHints->bCheckMlist);
+	SrvInitParamGetBOOL(INITPARAM_NO_DEVICE,          pvParamState,    DisableClockGating,            psHints->bDisableClockGating);
+	SrvInitParamGetBOOL(INITPARAM_NO_DEVICE,          pvParamState,    DisableDMOverlap,                psHints->bDisableDMOverlap);
+	SrvInitParamGetBOOL(psDevInfo->psDeviceNode,      pvParamState,    DisableFEDLogging,              psHints->bDisableFEDLogging);
+	SrvInitParamGetUINT32(psDevInfo->psDeviceNode,    pvParamState,    EnableAPM,                                    ui32ParamTemp);
 	psHints->eRGXActivePMConf = ui32ParamTemp;
-	SrvInitParamGetBOOL(pvParamState,    EnableGenericDMKillingRandMode, psHints->bEnableDMKillRand);
-	SrvInitParamGetBOOL(pvParamState,    EnableRandomContextSwitch, psHints->bEnableRandomCsw);
-	SrvInitParamGetBOOL(pvParamState,    EnableSoftResetContextSwitch, psHints->bEnableSoftResetCsw);
-	SrvInitParamGetUINT32(pvParamState,  EnableFWContextSwitch, psHints->ui32EnableFWContextSwitch);
-	SrvInitParamGetUINT32(pvParamState,  EnableRDPowerIsland, ui32ParamTemp);
+	SrvInitParamGetBOOL(INITPARAM_NO_DEVICE,          pvParamState,    EnableGenericDMKillingRandMode,  psHints->bEnableDMKillRand);
+	SrvInitParamGetBOOL(INITPARAM_NO_DEVICE,          pvParamState,    EnableRandomContextSwitch,        psHints->bEnableRandomCsw);
+	SrvInitParamGetBOOL(INITPARAM_NO_DEVICE,          pvParamState,    EnableSoftResetContextSwitch,  psHints->bEnableSoftResetCsw);
+	SrvInitParamGetUINT32(INITPARAM_NO_DEVICE,        pvParamState,    EnableFWContextSwitch,   psHints->ui32EnableFWContextSwitch);
+	SrvInitParamGetUINT32(INITPARAM_NO_DEVICE,        pvParamState,    EnableRDPowerIsland,                          ui32ParamTemp);
 	psHints->eRGXRDPowerIslandConf = ui32ParamTemp;
-	SrvInitParamGetUINT32(pvParamState,  FirmwarePerf, ui32ParamTemp);
+	SrvInitParamGetBOOL(INITPARAM_NO_DEVICE,		  pvParamState,    EnableSPUClockGating,              psHints->bSPUClockGating);
+	SrvInitParamGetUINT32(INITPARAM_NO_DEVICE,        pvParamState,    FirmwarePerf,                                 ui32ParamTemp);
 	psHints->eFirmwarePerf = ui32ParamTemp;
-	SrvInitParamGetUINT32(pvParamState,  FWContextSwitchProfile, psHints->ui32FWContextSwitchProfile);
-	SrvInitParamGetBOOL(pvParamState,    HWPerfDisableCounterFilter, psHints->bHWPerfDisableCounterFilter);
-	SrvInitParamGetUINT32(pvParamState,  HWPerfHostBufSizeInKB, psHints->ui32HWPerfHostBufSize);
-	SrvInitParamGetUINT32(pvParamState,  HWPerfFWBufSizeInKB, psHints->ui32HWPerfFWBufSize);
-	SrvInitParamGetUINT32(pvParamState,  KernelCCBSizeLog2, psHints->ui32KCCBSizeLog2);
-	SrvInitParamGetUINT32(pvParamState,  ISPSchedulingLatencyMode, psHints->ui32ISPSchedulingLatencyMode);
-	SrvInitParamGetUINT32(pvParamState,  CDMArbitrationOverride, psHints->ui32CDMArbitrationMode);
+	SrvInitParamGetUINT32(INITPARAM_NO_DEVICE,        pvParamState,    FWContextSwitchProfile, psHints->ui32FWContextSwitchProfile);
+	SrvInitParamGetBOOL(INITPARAM_NO_DEVICE,          pvParamState,
+		HWPerfDisableCounterFilter, psHints->bHWPerfDisableCounterFilter);
+	SrvInitParamGetUINT32(INITPARAM_NO_DEVICE,        pvParamState,    HWPerfHostBufSizeInKB,       psHints->ui32HWPerfHostBufSize);
+	SrvInitParamGetUINT32(INITPARAM_NO_DEVICE,        pvParamState,    HWPerfFWBufSizeInKB,           psHints->ui32HWPerfFWBufSize);
+	SrvInitParamGetUINT32(psDevInfo->psDeviceNode,    pvParamState,    KernelCCBSizeLog2,                psHints->ui32KCCBSizeLog2);
+
+	if (psHints->ui32KCCBSizeLog2 < PVRSRV_RGX_LOG2_KERNEL_CCB_MIN_SIZE)
+	{
+		PVR_DPF((PVR_DBG_WARNING, "KCCB size %u is too low, setting to %u",
+		         psHints->ui32KCCBSizeLog2, PVRSRV_RGX_LOG2_KERNEL_CCB_MIN_SIZE));
+		psHints->ui32KCCBSizeLog2 = PVRSRV_RGX_LOG2_KERNEL_CCB_MIN_SIZE;
+	}
+	else if (psHints->ui32KCCBSizeLog2 > PVRSRV_RGX_LOG2_KERNEL_CCB_MAX_SIZE)
+	{
+		PVR_DPF((PVR_DBG_WARNING, "KCCB size %u is too high, setting to %u",
+		         psHints->ui32KCCBSizeLog2, PVRSRV_RGX_LOG2_KERNEL_CCB_MAX_SIZE));
+		psHints->ui32KCCBSizeLog2 = PVRSRV_RGX_LOG2_KERNEL_CCB_MAX_SIZE;
+	}
+
+#if defined(SUPPORT_VALIDATION)
+	if (psHints->ui32KCCBSizeLog2 != PVRSRV_APPHINT_KCCB_SIZE_LOG2)
+	{
+		PVR_LOG(("KernelCCBSizeLog2 set to %u", psHints->ui32KCCBSizeLog2));
+	}
+#endif
+
+	SrvInitParamGetUINT32(INITPARAM_NO_DEVICE,        pvParamState,
+		ISPSchedulingLatencyMode, psHints->ui32ISPSchedulingLatencyMode);
+	SrvInitParamGetUINT32(INITPARAM_NO_DEVICE,        pvParamState,     CDMArbitrationOverride,    psHints->ui32CDMArbitrationMode);
 #if defined(__linux__)
 	/* name changes */
 	{
 		IMG_UINT64 ui64Tmp;
-		SrvInitParamGetBOOL(pvParamState,    DisablePDumpPanic, psHints->bDisablePDP);
-		SrvInitParamGetUINT64(pvParamState,  HWPerfFWFilter, ui64Tmp);
+		SrvInitParamGetBOOL(psDevInfo->psDeviceNode,    pvParamState,    DisablePDumpPanic,                 psHints->bDisablePDP);
+		SrvInitParamGetUINT64(psDevInfo->psDeviceNode,  pvParamState,    HWPerfFWFilter,                                 ui64Tmp);
 		psHints->ui32HWPerfFilter0 = (IMG_UINT32)(ui64Tmp & 0xffffffffllu);
 		psHints->ui32HWPerfFilter1 = (IMG_UINT32)((ui64Tmp >> 32) & 0xffffffffllu);
 	}
@@ -278,53 +321,54 @@ static INLINE void GetApphints(PVRSRV_RGXDEV_INFO *psDevInfo, RGX_SRVINIT_APPHIN
 	SrvInitParamUnreferenced(HWPerfFWFilter);
 	SrvInitParamUnreferenced(RGXBVNC);
 #endif
-	SrvInitParamGetUINT32(pvParamState, HWPerfHostFilter, psHints->ui32HWPerfHostFilter);
-	SrvInitParamGetUINT32List(pvParamState, TimeCorrClock, psHints->ui32TimeCorrClock);
-	SrvInitParamGetUINT32(pvParamState, HWRDebugDumpLimit, ui32ParamTemp);
+	SrvInitParamGetUINT32(psDevInfo->psDeviceNode,      pvParamState,    HWPerfHostFilter,             psHints->ui32HWPerfHostFilter);
+	SrvInitParamGetUINT32List(psDevInfo->psDeviceNode,  pvParamState,    TimeCorrClock,                   psHints->ui32TimeCorrClock);
+	SrvInitParamGetUINT32(psDevInfo->psDeviceNode,      pvParamState,    HWRDebugDumpLimit,                            ui32ParamTemp);
 	psHints->ui32HWRDebugDumpLimit = MIN(ui32ParamTemp, RGXFWIF_HWR_DEBUG_DUMP_ALL);
-	SrvInitParamGetUINT32(pvParamState, JonesDisableMask, ui32ParamTemp);
+	SrvInitParamGetUINT32(INITPARAM_NO_DEVICE,          pvParamState,    JonesDisableMask,                             ui32ParamTemp);
 	psHints->ui32JonesDisableMask = ui32ParamTemp & RGX_CR_JONES_FIX__ROGUE3__DISABLE_CLRMSK;
 
-	SrvInitParamGetBOOL(pvParamState, NewFilteringMode, psHints->bFilteringMode);
-	SrvInitParamGetUINT32(pvParamState, TruncateMode, psHints->ui32TruncateMode);
+	SrvInitParamGetBOOL(INITPARAM_NO_DEVICE,            pvParamState,    NewFilteringMode,                   psHints->bFilteringMode);
+	SrvInitParamGetUINT32(INITPARAM_NO_DEVICE,          pvParamState,    TruncateMode,                     psHints->ui32TruncateMode);
 
-	SrvInitParamGetBOOL(pvParamState, ZeroFreelist, psHints->bZeroFreelist);
+	SrvInitParamGetBOOL(psDevInfo->psDeviceNode,        pvParamState,    ZeroFreelist,                        psHints->bZeroFreelist);
 #if defined(__linux__)
-	SrvInitParamGetUINT32(pvParamState, FWContextSwitchCrossDM, psHints->ui32FWContextSwitchCrossDM);
+	SrvInitParamGetUINT32(INITPARAM_NO_DEVICE,          pvParamState,    FWContextSwitchCrossDM, psHints->ui32FWContextSwitchCrossDM);
 #else
 	SrvInitParamUnreferenced(FWContextSwitchCrossDM);
 #endif
 
 #if defined(SUPPORT_PHYSMEM_TEST) && !defined(INTEGRITY_OS) && !defined(__QNXNTO__)
-	SrvInitParamGetUINT32(pvParamState, PhysMemTestPasses, psHints->ui32PhysMemTestPasses);
+	SrvInitParamGetUINT32(INITPARAM_NO_DEVICE,          pvParamState,    PhysMemTestPasses,           psHints->ui32PhysMemTestPasses);
 #endif
 
 #if defined(SUPPORT_VALIDATION)
-	SrvInitParamGetUINT32(pvParamState, KillingCtl, psHints->ui32RenderKillingCtl);
-	SrvInitParamGetUINT32(pvParamState, CDMTDMKillingCtl, psHints->ui32CDMTDMKillingCtl);
-	SrvInitParamGetBOOL(pvParamState,   ValidateIrq, psHints->bValidateIrq);
-	SrvInitParamGetBOOL(pvParamState,   ValidateSOCUSCTimer, psHints->bValidateSOCUSCTimer);
-	SrvInitParamGetUINT32(pvParamState, HWValAvailableSPUMask, psHints->ui32AvailablePowUnitsMask);
-	SrvInitParamGetBOOL(pvParamState,   GPUUnitsPowerChange, psHints->bInjectPowUnitsStateMaskChange);
-	SrvInitParamGetBOOL(pvParamState,   HWValEnableSPUPowerMaskChange, psHints->bEnablePowUnitsStateMaskChange);
-	SrvInitParamGetUINT32(pvParamState, FBCDCVersionOverride, psHints->ui32FBCDCVersionOverride);
+	SrvInitParamGetUINT32(INITPARAM_NO_DEVICE,        pvParamState,  KillingCtl,                              psHints->ui32RenderKillingCtl);
+	SrvInitParamGetUINT32(INITPARAM_NO_DEVICE,        pvParamState,  CDMTDMKillingCtl,                        psHints->ui32CDMTDMKillingCtl);
+	SrvInitParamGetBOOL(INITPARAM_NO_DEVICE,          pvParamState,  ValidateIrq,                                     psHints->bValidateIrq);
+	SrvInitParamGetBOOL(INITPARAM_NO_DEVICE,          pvParamState,  ValidateSOCUSCTimer,                     psHints->bValidateSOCUSCTimer);
+	SrvInitParamGetUINT32(INITPARAM_NO_DEVICE,        pvParamState,  HWValAvailableSPUMask,              psHints->ui32AvailablePowUnitsMask);
+	SrvInitParamGetUINT32(INITPARAM_NO_DEVICE,        pvParamState,  HWValAvailableRACMask,                   psHints->ui32AvailableRACMask);
+	SrvInitParamGetBOOL(psDevInfo->psDeviceNode,      pvParamState,  GPUUnitsPowerChange,           psHints->bInjectPowUnitsStateMaskChange);
+	SrvInitParamGetBOOL(INITPARAM_NO_DEVICE,          pvParamState,  HWValEnableSPUPowerMaskChange, psHints->bEnablePowUnitsStateMaskChange);
+	SrvInitParamGetUINT32(INITPARAM_NO_DEVICE,        pvParamState,  FBCDCVersionOverride,                psHints->ui32FBCDCVersionOverride);
 
 	/* Apphints for Unified Store virtual partitioning. */
-	SrvInitParamGetUINT32(pvParamState, USRMNumRegionsVDM, psHints->aui32USRMNumRegions[RGXFWIF_USRM_DM_VDM]);
-	SrvInitParamGetUINT32(pvParamState, USRMNumRegionsDDM, psHints->aui32USRMNumRegions[RGXFWIF_USRM_DM_DDM]);
-	SrvInitParamGetUINT32(pvParamState, USRMNumRegionsCDM, psHints->aui32USRMNumRegions[RGXFWIF_USRM_DM_CDM]);
-	SrvInitParamGetUINT32(pvParamState, USRMNumRegionsPDM, psHints->aui32USRMNumRegions[RGXFWIF_USRM_DM_PDM]);
-	SrvInitParamGetUINT32(pvParamState, USRMNumRegionsTDM, psHints->aui32USRMNumRegions[RGXFWIF_USRM_DM_TDM]);
+	SrvInitParamGetUINT32(INITPARAM_NO_DEVICE,        pvParamState,  USRMNumRegionsVDM,   psHints->aui32USRMNumRegions[RGXFWIF_USRM_DM_VDM]);
+	SrvInitParamGetUINT32(INITPARAM_NO_DEVICE,        pvParamState,  USRMNumRegionsDDM,   psHints->aui32USRMNumRegions[RGXFWIF_USRM_DM_DDM]);
+	SrvInitParamGetUINT32(INITPARAM_NO_DEVICE,        pvParamState,  USRMNumRegionsCDM,   psHints->aui32USRMNumRegions[RGXFWIF_USRM_DM_CDM]);
+	SrvInitParamGetUINT32(INITPARAM_NO_DEVICE,        pvParamState,  USRMNumRegionsPDM,   psHints->aui32USRMNumRegions[RGXFWIF_USRM_DM_PDM]);
+	SrvInitParamGetUINT32(INITPARAM_NO_DEVICE,        pvParamState,  USRMNumRegionsTDM,   psHints->aui32USRMNumRegions[RGXFWIF_USRM_DM_TDM]);
 
 	/* Apphints for UVB virtual partitioning. */
-	SrvInitParamGetUINT64(pvParamState, UVBRMNumRegionsVDM, psHints->aui64UVBRMNumRegions[RGXFWIF_UVBRM_DM_VDM]);
-	SrvInitParamGetUINT64(pvParamState, UVBRMNumRegionsDDM, psHints->aui64UVBRMNumRegions[RGXFWIF_UVBRM_DM_DDM]);
+	SrvInitParamGetUINT64(INITPARAM_NO_DEVICE,        pvParamState,  UVBRMNumRegionsVDM, psHints->aui64UVBRMNumRegions[RGXFWIF_UVBRM_DM_VDM]);
+	SrvInitParamGetUINT64(INITPARAM_NO_DEVICE,        pvParamState,  UVBRMNumRegionsDDM, psHints->aui64UVBRMNumRegions[RGXFWIF_UVBRM_DM_DDM]);
 
 	/* Apphints for TPU trilinear frac masking */
-	SrvInitParamGetUINT32(pvParamState, TPUTrilinearFracMaskPDM, psHints->aui32TPUTrilinearFracMask[RGXFWIF_TPU_DM_PDM]);
-	SrvInitParamGetUINT32(pvParamState, TPUTrilinearFracMaskVDM, psHints->aui32TPUTrilinearFracMask[RGXFWIF_TPU_DM_VDM]);
-	SrvInitParamGetUINT32(pvParamState, TPUTrilinearFracMaskCDM, psHints->aui32TPUTrilinearFracMask[RGXFWIF_TPU_DM_CDM]);
-	SrvInitParamGetUINT32(pvParamState, TPUTrilinearFracMaskTDM, psHints->aui32TPUTrilinearFracMask[RGXFWIF_TPU_DM_TDM]);
+	SrvInitParamGetUINT32(INITPARAM_NO_DEVICE,        pvParamState,  TPUTrilinearFracMaskPDM, psHints->aui32TPUTrilinearFracMask[RGXFWIF_TPU_DM_PDM]);
+	SrvInitParamGetUINT32(INITPARAM_NO_DEVICE,        pvParamState,  TPUTrilinearFracMaskVDM, psHints->aui32TPUTrilinearFracMask[RGXFWIF_TPU_DM_VDM]);
+	SrvInitParamGetUINT32(INITPARAM_NO_DEVICE,        pvParamState,  TPUTrilinearFracMaskCDM, psHints->aui32TPUTrilinearFracMask[RGXFWIF_TPU_DM_CDM]);
+	SrvInitParamGetUINT32(INITPARAM_NO_DEVICE,        pvParamState,  TPUTrilinearFracMaskTDM, psHints->aui32TPUTrilinearFracMask[RGXFWIF_TPU_DM_TDM]);
 #endif
 
 	/*
@@ -333,8 +377,8 @@ static INLINE void GetApphints(PVRSRV_RGXDEV_INFO *psDevInfo, RGX_SRVINIT_APPHIN
 	{
 		IMG_UINT32 ui32LogGroup, ui32TraceOrTBI;
 
-		SrvInitParamGetUINT32BitField(pvParamState, EnableLogGroup, ui32LogGroup);
-		SrvInitParamGetUINT32List(pvParamState, FirmwareLogType, ui32TraceOrTBI);
+		SrvInitParamGetUINT32BitField(psDevInfo->psDeviceNode,  pvParamState,    EnableLogGroup,    ui32LogGroup);
+		SrvInitParamGetUINT32List(psDevInfo->psDeviceNode,      pvParamState,    FirmwareLogType, ui32TraceOrTBI);
 
 		/* Defaulting to TRACE */
 		BITMASK_SET(ui32LogGroup, RGXFWIF_LOG_TYPE_TRACE);
@@ -354,7 +398,7 @@ static INLINE void GetApphints(PVRSRV_RGXDEV_INFO *psDevInfo, RGX_SRVINIT_APPHIN
 		psHints->ui32LogType = ui32LogGroup;
 	}
 
-	SrvInitParamGetBOOL(pvParamState, EnableTrustedDeviceAceConfig, psHints->bEnableTrustedDeviceAceConfig);
+	SrvInitParamGetBOOL(INITPARAM_NO_DEVICE,  pvParamState,  EnableTrustedDeviceAceConfig,  psHints->bEnableTrustedDeviceAceConfig);
 
 	SrvInitParamClose(pvParamState);
 }
@@ -408,13 +452,12 @@ static INLINE void GetFWConfigFlags(PVRSRV_DEVICE_NODE *psDeviceNode,
 #endif
 #endif
 		ui32FWConfigFlags |= psHints->bHWPerfDisableCounterFilter ? RGXFWIF_INICFG_HWP_DISABLE_FILTER : 0;
-		ui32FWConfigFlags |= (psHints->eFirmwarePerf == FW_PERF_CONF_CUSTOM_TIMER) ? RGXFWIF_INICFG_CUSTOM_PERF_TIMER_EN : 0;
-		ui32FWConfigFlags |= (psHints->eFirmwarePerf == FW_PERF_CONF_POLLS) ? RGXFWIF_INICFG_POLL_COUNTERS_EN : 0;
 		ui32FWConfigFlags |= (psHints->ui32FWContextSwitchProfile << RGXFWIF_INICFG_CTXSWITCH_PROFILE_SHIFT) & RGXFWIF_INICFG_CTXSWITCH_PROFILE_MASK;
 
 #if defined(SUPPORT_VALIDATION)
 		ui32FWConfigFlags |= psHints->bEnablePowUnitsStateMaskChange ? RGXFWIF_INICFG_SPU_POWER_STATE_MASK_CHANGE_EN : 0;
 		ui32FWConfigFlags |= psHints->bValidateSOCUSCTimer ? RGXFWIF_INICFG_VALIDATE_SOCUSC_TIMER : 0;
+		ui32FWConfigFlags |= psHints->bSPUClockGating ? RGXFWIF_INICFG_SPU_CLOCK_GATE : 0;
 
 		if ((ui32FWConfigFlags & RGXFWIF_INICFG_VALIDATE_SOCUSC_TIMER) &&
 		    ((psHints->eRGXActivePMConf != 0) || (psHints->eRGXRDPowerIslandConf != 0)))
@@ -525,7 +568,7 @@ static INLINE void InitDeviceFlags(RGX_SRVINIT_APPHINTS *psHints,
 ******************************************************************************/
 static PVRSRV_ERROR RGXTDProcessFWImage(PVRSRV_DEVICE_NODE *psDeviceNode,
                                         OS_FW_IMAGE *psRGXFW,
-                                        RGX_FW_BOOT_PARAMS *puFWParams)
+                                        PVRSRV_FW_BOOT_PARAMS *puFWParams)
 {
 	PVRSRV_DEVICE_CONFIG *psDevConfig = psDeviceNode->psDevConfig;
 	PVRSRV_RGXDEV_INFO *psDevInfo = psDeviceNode->pvDevice;
@@ -543,14 +586,11 @@ static PVRSRV_ERROR RGXTDProcessFWImage(PVRSRV_DEVICE_NODE *psDeviceNode,
 
 	if (RGX_IS_FEATURE_VALUE_SUPPORTED(psDevInfo, META))
 	{
-		sTDFWParams.uFWP.sMeta.sFWCodeDevVAddr        = puFWParams->sMeta.sFWCodeDevVAddr;
-		sTDFWParams.uFWP.sMeta.sFWDataDevVAddr        = puFWParams->sMeta.sFWDataDevVAddr;
-		sTDFWParams.uFWP.sMeta.sFWCorememCodeDevVAddr = puFWParams->sMeta.sFWCorememCodeDevVAddr;
-		sTDFWParams.uFWP.sMeta.sFWCorememCodeFWAddr   = puFWParams->sMeta.sFWCorememCodeFWAddr;
-		sTDFWParams.uFWP.sMeta.uiFWCorememCodeSize    = puFWParams->sMeta.uiFWCorememCodeSize;
-		sTDFWParams.uFWP.sMeta.sFWCorememDataDevVAddr = puFWParams->sMeta.sFWCorememDataDevVAddr;
-		sTDFWParams.uFWP.sMeta.sFWCorememDataFWAddr   = puFWParams->sMeta.sFWCorememDataFWAddr;
-		sTDFWParams.uFWP.sMeta.ui32NumThreads         = puFWParams->sMeta.ui32NumThreads;
+		sTDFWParams.uFWP.sMeta = puFWParams->sMeta;
+	}
+	else
+	{
+		sTDFWParams.uFWP.sRISCV = puFWParams->sRISCV;
 	}
 
 	eError = psDevConfig->pfnTDSendFWImage(psDevConfig->hSysData, &sTDFWParams);
@@ -594,7 +634,7 @@ static PVRSRV_ERROR InitFirmware(PVRSRV_DEVICE_NODE *psDeviceNode,
 	IMG_DEVMEM_SIZE_T uiFWCorememDataAllocSize;
 	void              *pvFWCorememDataHostAddr = NULL;
 
-	RGX_FW_BOOT_PARAMS uFWParams;
+	PVRSRV_FW_BOOT_PARAMS uFWParams;
 	RGX_LAYER_PARAMS sLayerParams;
 	PVRSRV_ERROR eError = PVRSRV_OK;
 
@@ -782,14 +822,16 @@ static PVRSRV_ERROR InitFirmware(PVRSRV_DEVICE_NODE *psDeviceNode,
 	 */
 
 #if !defined(SUPPORT_TRUSTED_DEVICE) || defined(NO_HARDWARE) || defined(SUPPORT_SECURITY_VALIDATION)
-	PDUMPCOMMENTWITHFLAGS(PDUMP_FLAGS_CONTINUOUS, "Dump firmware code image");
+	PDUMPCOMMENTWITHFLAGS(psDeviceNode, PDUMP_FLAGS_CONTINUOUS,
+	                      "Dump firmware code image");
 	DevmemPDumpLoadMem(psDevInfo->psRGXFWCodeMemDesc,
 	                   0,
 	                   uiFWCodeAllocSize,
 	                   PDUMP_FLAGS_CONTINUOUS);
 #endif
 
-	PDUMPCOMMENTWITHFLAGS(PDUMP_FLAGS_CONTINUOUS, "Dump firmware data image");
+	PDUMPCOMMENTWITHFLAGS(psDeviceNode, PDUMP_FLAGS_CONTINUOUS,
+	                      "Dump firmware data image");
 	DevmemPDumpLoadMem(psDevInfo->psRGXFWDataMemDesc,
 	                   0,
 	                   uiFWDataAllocSize,
@@ -798,7 +840,8 @@ static PVRSRV_ERROR InitFirmware(PVRSRV_DEVICE_NODE *psDeviceNode,
 #if !defined(SUPPORT_TRUSTED_DEVICE) || defined(NO_HARDWARE) || defined(SUPPORT_SECURITY_VALIDATION)
 	if (uiFWCorememCodeAllocSize != 0)
 	{
-		PDUMPCOMMENTWITHFLAGS(PDUMP_FLAGS_CONTINUOUS, "Dump firmware coremem code image");
+		PDUMPCOMMENTWITHFLAGS(psDeviceNode, PDUMP_FLAGS_CONTINUOUS,
+		                      "Dump firmware coremem code image");
 		DevmemPDumpLoadMem(psDevInfo->psRGXFWCorememCodeMemDesc,
 						   0,
 						   uiFWCorememCodeAllocSize,
@@ -809,7 +852,8 @@ static PVRSRV_ERROR InitFirmware(PVRSRV_DEVICE_NODE *psDeviceNode,
 #if !defined(SUPPORT_TRUSTED_DEVICE) || defined(NO_HARDWARE) || defined(SUPPORT_SECURITY_VALIDATION)
 	if (uiFWCorememDataAllocSize != 0)
 	{
-		PDUMPCOMMENTWITHFLAGS(PDUMP_FLAGS_CONTINUOUS, "Dump firmware coremem data store image");
+		PDUMPCOMMENTWITHFLAGS(psDeviceNode, PDUMP_FLAGS_CONTINUOUS,
+		                      "Dump firmware coremem data store image");
 		DevmemPDumpLoadMem(psDevInfo->psRGXFWIfCorememDataStoreMemDesc,
 						   0,
 						   uiFWCorememDataAllocSize,
@@ -906,8 +950,20 @@ RGXHWPerfMaxDefinedBlks(PVRSRV_RGXDEV_INFO *psDevInfo)
 #ifdef DEBUG
 		else
 		{
-			PVR_DPF((PVR_DBG_WARNING, "%s: Block %u *NOT* present",
-			        __func__, ui));
+			if (psHWPBlkConfig[ui].uiCntBlkIdBase == RGX_CNTBLK_ID_RAC0)
+			{
+				if (PVRSRV_GET_DEVICE_FEATURE_VALUE(psDevInfo->psDeviceNode,
+				    RAY_TRACING_ARCH) > 2U)
+				{
+					PVR_DPF((PVR_DBG_WARNING, "%s: Block %u *NOT* present",
+					        __func__, ui));
+				}
+			}
+			else
+			{
+				PVR_DPF((PVR_DBG_WARNING, "%s: Block %u *NOT* present",
+				        __func__, ui));
+			}
 		}
 #endif
 	}
@@ -934,7 +990,10 @@ RGXHWPerfMaxDefinedBlks(PVRSRV_RGXDEV_INFO *psDevInfo)
 
 ******************************************************************************/
 
-static void InitialiseHWPerfCounters(void *pvDevice, DEVMEM_MEMDESC *psHWPerfDataMemDesc, RGXFWIF_HWPERF_CTL *psHWPerfInitDataInt)
+static void InitialiseHWPerfCounters(PVRSRV_DEVICE_NODE *psDeviceNode,
+                                     void *pvDevice,
+                                     DEVMEM_MEMDESC *psHWPerfDataMemDesc,
+                                     RGXFWIF_HWPERF_CTL *psHWPerfInitDataInt)
 {
 	RGXFWIF_HWPERF_CTL_BLK *psHWPerfInitBlkData;
 	IMG_UINT32 ui32CntBlkModelLen;
@@ -954,7 +1013,8 @@ static void InitialiseHWPerfCounters(void *pvDevice, DEVMEM_MEMDESC *psHWPerfDat
 	 */
 	psHWPerfInitDataInt->ui32NumBlocks = RGXHWPerfMaxDefinedBlks(pvDevice);
 
-	PDUMPCOMMENTWITHFLAGS(PDUMP_FLAGS_CONTINUOUS, "HWPerf Block count = %u.",
+	PDUMPCOMMENTWITHFLAGS(psDeviceNode, PDUMP_FLAGS_CONTINUOUS,
+	    "HWPerf Block count = %u.",
 	    psHWPerfInitDataInt->ui32NumBlocks);
 #if defined(PDUMP)
 	/* Ensure that we record the BVNC specific ui32NumBlocks in the PDUMP data
@@ -965,7 +1025,7 @@ static void InitialiseHWPerfCounters(void *pvDevice, DEVMEM_MEMDESC *psHWPerfDat
 	    psHWPerfInitDataInt->ui32NumBlocks, PDUMP_FLAGS_CONTINUOUS);
 #endif	/* defined(PDUMP) */
 
-	PDUMPCOMMENTWITHFLAGS(PDUMP_FLAGS_CONTINUOUS,
+	PDUMPCOMMENTWITHFLAGS(psDeviceNode, PDUMP_FLAGS_CONTINUOUS,
 	    "HWPerf Counter config starts here.");
 
 	/* Simply iterate over all the RGXFWIW_HWPERF_CTL blocks in order */
@@ -1025,19 +1085,21 @@ static void InitialiseHWPerfCounters(void *pvDevice, DEVMEM_MEMDESC *psHWPerfDat
 
 			if (bDirect)
 			{
-				PDUMPCOMMENTWITHFLAGS(PDUMP_FLAGS_CONTINUOUS,
+				PDUMPCOMMENTWITHFLAGS(psDeviceNode, PDUMP_FLAGS_CONTINUOUS,
 				    "Block : %s", psBlkTypeDesc->pszBlockNameComment);
 			}
 			else
 			{
-				PDUMPCOMMENTWITHFLAGS(PDUMP_FLAGS_CONTINUOUS,
+				PDUMPCOMMENTWITHFLAGS(psDeviceNode,
+				    PDUMP_FLAGS_CONTINUOUS,
 				    "Unit %d Block : %s%d",
 				    ui32BlockID-psBlkTypeDesc->uiCntBlkIdBase,
 				    psBlkTypeDesc->pszBlockNameComment, uiUnit);
 			}
 
 			psHWPerfInitBlkData->uiBlockID = ui32BlockID;
-			PDUMPCOMMENTWITHFLAGS(PDUMP_FLAGS_CONTINUOUS, "uiBlockID: The Block ID for the layout block. See RGX_CNTBLK_ID for further information.");
+			PDUMPCOMMENTWITHFLAGS(psDeviceNode, PDUMP_FLAGS_CONTINUOUS,
+			    "uiBlockID: The Block ID for the layout block. See RGX_CNTBLK_ID for further information.");
 #if defined(PDUMP)
 			DevmemPDumpLoadMemValue32(psHWPerfDataMemDesc,
 							(size_t)&(psHWPerfInitBlkData->uiBlockID) - (size_t)(psHWPerfInitDataInt),
@@ -1046,7 +1108,7 @@ static void InitialiseHWPerfCounters(void *pvDevice, DEVMEM_MEMDESC *psHWPerfDat
 #endif	/* PDUMP */
 
 			psHWPerfInitBlkData->uiNumCounters = 0;
-			PDUMPCOMMENTWITHFLAGS(PDUMP_FLAGS_CONTINUOUS,
+			PDUMPCOMMENTWITHFLAGS(psDeviceNode, PDUMP_FLAGS_CONTINUOUS,
 			    "uiNumCounters (X): Specifies the number of valid counters"
 			    " [0..%d] which follow.", RGX_CNTBLK_COUNTERS_MAX);
 #if defined(PDUMP)
@@ -1057,7 +1119,8 @@ static void InitialiseHWPerfCounters(void *pvDevice, DEVMEM_MEMDESC *psHWPerfDat
 #endif	/* PDUMP */
 
 			psHWPerfInitBlkData->uiEnabled = 0;
-			PDUMPCOMMENTWITHFLAGS(PDUMP_FLAGS_CONTINUOUS, "uiEnabled: Set to 0x1 if the block needs to be enabled during playback.");
+			PDUMPCOMMENTWITHFLAGS(psDeviceNode, PDUMP_FLAGS_CONTINUOUS,
+			    "uiEnabled: Set to 0x1 if the block needs to be enabled during playback.");
 #if defined(PDUMP)
 			DevmemPDumpLoadMemValue32(psHWPerfDataMemDesc,
 			    (size_t)&(psHWPerfInitBlkData->uiEnabled) - (size_t)(psHWPerfInitDataInt),
@@ -1071,13 +1134,15 @@ static void InitialiseHWPerfCounters(void *pvDevice, DEVMEM_MEMDESC *psHWPerfDat
 
 				if (bDirect)
 				{
-					PDUMPCOMMENTWITHFLAGS(PDUMP_FLAGS_CONTINUOUS,
+					PDUMPCOMMENTWITHFLAGS(psDeviceNode,
+					    PDUMP_FLAGS_CONTINUOUS,
 					    "%s_COUNTER_%d",
 					    psBlkTypeDesc->pszBlockNameComment, ui32CounterIdx);
 				}
 				else
 				{
-					PDUMPCOMMENTWITHFLAGS(PDUMP_FLAGS_CONTINUOUS,
+					PDUMPCOMMENTWITHFLAGS(psDeviceNode,
+					    PDUMP_FLAGS_CONTINUOUS,
 					    "%s%d_COUNTER_%d",
 					    psBlkTypeDesc->pszBlockNameComment,
 					    uiUnit, ui32CounterIdx);
@@ -1102,8 +1167,8 @@ static void InitialiseHWPerfCounters(void *pvDevice, DEVMEM_MEMDESC *psHWPerfDat
 			}
 		}
 	}
-	PDUMPCOMMENTWITHFLAGS(PDUMP_FLAGS_CONTINUOUS,
-	    "HWPerf Counter config finishes here.");
+	PDUMPCOMMENTWITHFLAGS(psDeviceNode, PDUMP_FLAGS_CONTINUOUS,
+	                      "HWPerf Counter config finishes here.");
 }
 
 /*!
@@ -1127,7 +1192,7 @@ static PVRSRV_ERROR InitialiseAllCounters(PVRSRV_DEVICE_NODE *psDeviceNode)
 	eError = DevmemAcquireCpuVirtAddr(psDevInfo->psRGXFWIfHWPerfCountersMemDesc, (void **)&psHWPerfInitData);
 	PVR_LOG_GOTO_IF_ERROR(eError, "DevmemAcquireCpuVirtAddr", failHWPerfCountersMemDescAqCpuVirt);
 
-	InitialiseHWPerfCounters(psDevInfo, psDevInfo->psRGXFWIfHWPerfCountersMemDesc, psHWPerfInitData);
+	InitialiseHWPerfCounters(psDeviceNode, psDevInfo, psDevInfo->psRGXFWIfHWPerfCountersMemDesc, psHWPerfInitData);
 
 failHWPerfCountersMemDescAqCpuVirt:
 	DevmemReleaseCpuVirtAddr(psDevInfo->psRGXFWIfHWPerfCountersMemDesc);
@@ -1159,10 +1224,10 @@ _ParseHTBAppHints(PVRSRV_DEVICE_NODE *psDeviceNode)
 	if (pvParamState == NULL)
 		return;
 
-	SrvInitParamGetUINT32BitField(pvParamState, EnableHTBLogGroup, ui32LogType);
+	SrvInitParamGetUINT32BitField(INITPARAM_NO_DEVICE,  pvParamState,    EnableHTBLogGroup,    ui32LogType);
 	bAnyLogGroupConfigured = ui32LogType ? IMG_TRUE : IMG_FALSE;
-	SrvInitParamGetUINT32List(pvParamState, HTBOperationMode, ui32OpMode);
-	SrvInitParamGetUINT32(pvParamState, HTBufferSizeInKB, ui32BufferSize);
+	SrvInitParamGetUINT32List(INITPARAM_NO_DEVICE,      pvParamState,    HTBOperationMode,      ui32OpMode);
+	SrvInitParamGetUINT32(INITPARAM_NO_DEVICE,          pvParamState,    HTBufferSizeInKB,  ui32BufferSize);
 
 	SrvInitParamClose(pvParamState);
 }
@@ -1229,7 +1294,7 @@ PVRSRV_ERROR RGXInit(PVRSRV_DEVICE_NODE *psDeviceNode)
 	RGX_SRVINIT_APPHINTS sApphints = {0};
 	IMG_UINT32 ui32FWConfigFlags, ui32FWConfigFlagsExt, ui32FwOsCfgFlags;
 	IMG_UINT32 ui32DeviceFlags;
-	IMG_UINT32 ui32AvailablePowUnitsMask;
+	IMG_UINT32 ui32AvailablePowUnitsMask, ui32AvailableRACMask;
 
 	PVRSRV_RGXDEV_INFO *psDevInfo = (PVRSRV_RGXDEV_INFO *)psDeviceNode->pvDevice;
 
@@ -1239,6 +1304,53 @@ PVRSRV_ERROR RGXInit(PVRSRV_DEVICE_NODE *psDeviceNode)
 	/* Size of the RGXFWIF_HWPERF_CTL_BLK structure - varies by BVNC */
 	IMG_UINT32 ui32HWPerfBlkSize;
 	RGX_LAYER_PARAMS sLayerParams;
+
+	PDUMPCOMMENT(psDeviceNode, "RGX Initialisation Part 1");
+
+	PDUMPCOMMENT(psDeviceNode, "Device Name: %s",
+	             psDeviceNode->psDevConfig->pszName);
+	PDUMPCOMMENT(psDeviceNode, "Device ID: %u (%d)",
+	             psDeviceNode->sDevId.ui32InternalID,
+	             psDeviceNode->sDevId.i32OsDeviceID);
+
+	if (psDeviceNode->psDevConfig->pszVersion)
+	{
+		PDUMPCOMMENT(psDeviceNode, "Device Version: %s",
+		             psDeviceNode->psDevConfig->pszVersion);
+	}
+
+	/* pdump info about the core */
+	PDUMPCOMMENT(psDeviceNode,
+	             "RGX Version Information (KM): %d.%d.%d.%d",
+	             psDevInfo->sDevFeatureCfg.ui32B,
+	             psDevInfo->sDevFeatureCfg.ui32V,
+	             psDevInfo->sDevFeatureCfg.ui32N,
+	             psDevInfo->sDevFeatureCfg.ui32C);
+
+	RGXInitMultiCoreInfo(psDeviceNode);
+
+#if defined(PDUMP)
+	eError = DevmemIntAllocDefBackingPage(psDeviceNode,
+	                                      &psDeviceNode->sDummyPage,
+	                                      PVR_DUMMY_PAGE_INIT_VALUE,
+	                                      DUMMY_PAGE,
+	                                      IMG_TRUE);
+	if (eError != PVRSRV_OK)
+	{
+		PVR_DPF((PVR_DBG_ERROR, "%s: Failed to allocate dummy page.", __func__));
+		goto cleanup;
+	}
+	eError = DevmemIntAllocDefBackingPage(psDeviceNode,
+	                                      &psDeviceNode->sDevZeroPage,
+	                                      PVR_ZERO_PAGE_INIT_VALUE,
+	                                      DEV_ZERO_PAGE,
+	                                      IMG_TRUE);
+	if (eError != PVRSRV_OK)
+	{
+		PVR_DPF((PVR_DBG_ERROR, "%s: Failed to allocate Zero page.", __func__));
+		goto cleanup;
+	}
+#endif
 
 	sLayerParams.psDevInfo = psDevInfo;
 
@@ -1284,7 +1396,8 @@ PVRSRV_ERROR RGXInit(PVRSRV_DEVICE_NODE *psDeviceNode)
 										  RGX_CR_EVENT_STATUS_FAULT_FW_EN : 0;
 
 #if defined(PDUMP)
-	PDUMPCOMMENTWITHFLAGS(PDUMP_FLAGS_CONTINUOUS, "Register defs revision: %d", RGX_CR_DEFS_KM_REVISION);
+	PDUMPCOMMENTWITHFLAGS(psDeviceNode, PDUMP_FLAGS_CONTINUOUS,
+	                      "Register defs revision: %d", RGX_CR_DEFS_KM_REVISION);
 #endif
 
 	ui32NumHWPerfBlocks = RGXHWPerfMaxDefinedBlks((void *)psDevInfo);
@@ -1337,8 +1450,10 @@ PVRSRV_ERROR RGXInit(PVRSRV_DEVICE_NODE *psDeviceNode)
 
 #if defined(SUPPORT_VALIDATION)
 	ui32AvailablePowUnitsMask = sApphints.ui32AvailablePowUnitsMask;
+	ui32AvailableRACMask = sApphints.ui32AvailableRACMask;
 #else
 	ui32AvailablePowUnitsMask = AVAIL_POW_UNITS_MASK_DEFAULT;
+	ui32AvailableRACMask = AVAIL_RAC_MASK_DEFAULT;
 #endif
 
 	eError = RGXInitFirmware(psDeviceNode,
@@ -1364,9 +1479,12 @@ PVRSRV_ERROR RGXInit(PVRSRV_DEVICE_NODE *psDeviceNode)
 #endif
 	                         ui32HWPerfBlkSize,
 	                         sApphints.eRGXRDPowerIslandConf,
+							 sApphints.bSPUClockGating,
 	                         sApphints.eFirmwarePerf,
+	                         sApphints.ui32KCCBSizeLog2,
 	                         ui32FWConfigFlagsExt,
 	                         ui32AvailablePowUnitsMask,
+							 ui32AvailableRACMask,
 	                         ui32FwOsCfgFlags);
 
 	if (eError != PVRSRV_OK)
@@ -1395,10 +1513,10 @@ PVRSRV_ERROR RGXInit(PVRSRV_DEVICE_NODE *psDeviceNode)
 	 */
 	eError = RGXInitDevPart2(psDeviceNode,
 	                         ui32DeviceFlags,
-	                         sApphints.ui32HWPerfHostBufSize,
 	                         sApphints.ui32HWPerfHostFilter,
 	                         sApphints.eRGXActivePMConf,
-	                         ui32AvailablePowUnitsMask);
+	                         ui32AvailablePowUnitsMask,
+							 ui32AvailableRACMask);
 	if (eError != PVRSRV_OK)
 	{
 		PVR_DPF((PVR_DBG_ERROR,
@@ -1409,7 +1527,7 @@ PVRSRV_ERROR RGXInit(PVRSRV_DEVICE_NODE *psDeviceNode)
 	}
 
 #if defined(SUPPORT_VALIDATION)
-	PVRSRVAppHintDumpState();
+	PVRSRVAppHintDumpState(psDeviceNode);
 #endif
 
 	eError = PVRSRV_OK;

@@ -72,6 +72,9 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define PHY_HEAP_SEC_FW_DATA 3
 #define PHY_HEAP_SEC_MEM 4
 #define PHY_HEAP_SYSTEM   5
+#elif (RGX_NUM_OS_SUPPORTED > 1)
+#define PHY_HEAP_CARD_FW 2
+#define PHY_HEAP_SYSTEM 3
 #else
 #define PHY_HEAP_SYSTEM 2
 #endif
@@ -79,9 +82,16 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #if defined(SUPPORT_SECURITY_VALIDATION)
 #define PHY_HEAP_LMA_NUM  5
 #define PHY_HEAP_HYBRID_NUM 6
+#elif (RGX_NUM_OS_SUPPORTED > 1)
+#define PHY_HEAP_LMA_NUM  3
+#define PHY_HEAP_HYBRID_NUM 4
 #else
 #define PHY_HEAP_LMA_NUM  2
 #define PHY_HEAP_HYBRID_NUM 3
+#endif
+
+#if defined(SUPPORT_SECURITY_VALIDATION) && (RGX_NUM_OS_SUPPORTED > 1)
+#error "Security support and virtualization are currently mutually exclusive."
 #endif
 
 #define SYS_RGX_ACTIVE_POWER_LATENCY_MS (10)
@@ -350,6 +360,7 @@ CreateCardGPUHeaps(const SYS_DATA *psSysData,
 				   PHYS_HEAP_CONFIG *pasPhysHeaps,
 				   PHYS_HEAP_FUNCTIONS *psHeapFuncs)
 {
+	PVRSRV_ERROR eError;
 	IMG_UINT64 ui64CardAddr = 0;
 	IMG_UINT64 ui64StartAddr = psSysData->pdata->rogue_heap_memory_base;
 	IMG_UINT64 ui64RogueHeapSize = psSysData->pdata->rogue_heap_memory_size;
@@ -357,8 +368,22 @@ CreateCardGPUHeaps(const SYS_DATA *psSysData,
 	IMG_UINT64 uiTDFWCodeSize = SECURE_FW_CODE_MEM_SIZE;
 	IMG_UINT64 uiTDFWDataSize = SECURE_FW_DATA_MEM_SIZE;
 	IMG_UINT64 uiTDSecBufSize = SECURE_MEM_SIZE;
+#elif (RGX_NUM_OS_SUPPORTED > 1)
+	IMG_UINT64 uiFwCarveoutSize;
+#if defined(SUPPORT_AUTOVZ)
+	/* Carveout out enough LMA memory to hold the heaps of
+	 * all supported OSIDs and the FW page tables */
+	uiFwCarveoutSize = (RGX_NUM_OS_SUPPORTED * RGX_FIRMWARE_RAW_HEAP_SIZE) +
+						RGX_FIRMWARE_MAX_PAGETABLE_SIZE;
+#elif defined(RGX_VZ_STATIC_CARVEOUT_FW_HEAPS)
+	/* Carveout out enough LMA memory to hold the heaps of all supported OSIDs */
+	uiFwCarveoutSize = (RGX_NUM_OS_SUPPORTED * RGX_FIRMWARE_RAW_HEAP_SIZE);
+#else
+	/* Create a memory carveout just for the Host's Firmware heap.
+	 * Guests will allocate their own physical memory. */
+	uiFwCarveoutSize = RGX_FIRMWARE_RAW_HEAP_SIZE;
 #endif
-	PVRSRV_ERROR eError;
+#endif
 
 	if (psSysData->pdata->mem_mode == TC_MEMORY_HYBRID)
 	{
@@ -368,12 +393,15 @@ CreateCardGPUHeaps(const SYS_DATA *psSysData,
 #if defined(SUPPORT_SECURITY_VALIDATION)
 	/* Take some space from the main heap region */
 	ui64RogueHeapSize -= uiTDFWCodeSize + uiTDFWDataSize + uiTDSecBufSize;
+#elif (RGX_NUM_OS_SUPPORTED > 1)
+	ui64RogueHeapSize -= uiFwCarveoutSize;
 #endif
 
 	eError = InitLocalHeap(&pasPhysHeaps[PHY_HEAP_CARD_GPU],
 						   ui64CardAddr,
 						   IMG_CAST_TO_CPUPHYADDR_UINT(ui64StartAddr),
-						   ui64RogueHeapSize, psHeapFuncs,
+						   ui64RogueHeapSize,
+						   psHeapFuncs,
 						   PHYS_HEAP_USAGE_GPU_LOCAL);
 	if (eError != PVRSRV_OK)
 	{
@@ -403,7 +431,7 @@ CreateCardGPUHeaps(const SYS_DATA *psSysData,
 						   ui64CardAddr,
 						   IMG_CAST_TO_CPUPHYADDR_UINT(ui64StartAddr),
 						   uiTDFWDataSize, psHeapFuncs,
-						   PHYS_HEAP_USAGE_FW_DATA);
+						   PHYS_HEAP_USAGE_FW_PRIV_DATA);
 	if (eError != PVRSRV_OK)
 	{
 		return eError;
@@ -425,6 +453,19 @@ CreateCardGPUHeaps(const SYS_DATA *psSysData,
 
 	ui64CardAddr  += uiTDSecBufSize;
 	ui64StartAddr += uiTDSecBufSize;
+#elif (RGX_NUM_OS_SUPPORTED > 1)
+	/* allocate the Host Driver's Firmware Heap from the reserved carveout */
+	eError = InitLocalHeap(&pasPhysHeaps[PHY_HEAP_CARD_FW],
+						   ui64CardAddr,
+						   IMG_CAST_TO_CPUPHYADDR_UINT(ui64StartAddr),
+						   RGX_FIRMWARE_RAW_HEAP_SIZE,
+						   psHeapFuncs,
+						   PHYS_HEAP_USAGE_FW_MAIN);
+	if (eError != PVRSRV_OK)
+	{
+		return eError;
+	}
+
 #endif
 
 	return PVRSRV_OK;
@@ -497,6 +538,10 @@ InitHostHeaps(const SYS_DATA *psSysData, PHYS_HEAP_CONFIG *pasPhysHeaps)
 	pasPhysHeaps[PHY_HEAP_SYSTEM].pszPDumpMemspaceName = "SYSMEM";
 	pasPhysHeaps[PHY_HEAP_SYSTEM].psMemFuncs = &gsHostPhysHeapFuncs;
 	pasPhysHeaps[PHY_HEAP_SYSTEM].ui32UsageFlags = PHYS_HEAP_USAGE_CPU_LOCAL;
+
+	PVR_DPF((PVR_DBG_WARNING,
+	         "Initialising CPU_LOCAL UMA Host PhysHeaps with memory mode: %d",
+	         psSysData->pdata->mem_mode));
 
 	return PVRSRV_OK;
 }
@@ -662,8 +707,8 @@ static PVRSRV_ERROR DeviceConfigCreate(SYS_DATA *psSysData,
 	}
 
 	/* Setup RGX specific timing data */
-	/* Volcanic FPGA 94MHz with divisor 16 = ~6MHz real clock */
-	psRGXTimingInfo->ui32CoreClockSpeed = (94 * 1000 * 1000) / 16;
+	psRGXTimingInfo->ui32CoreClockSpeed = tc_core_clock_speed(&psSysData->pdev->dev) /
+											tc_core_clock_multiplex(&psSysData->pdev->dev);
 	psRGXTimingInfo->bEnableActivePM = IMG_FALSE;
 	psRGXTimingInfo->bEnableRDPowIsland = IMG_FALSE;
 	psRGXTimingInfo->ui32ActivePMLatencyms = SYS_RGX_ACTIVE_POWER_LATENCY_MS;
@@ -683,6 +728,7 @@ static PVRSRV_ERROR DeviceConfigCreate(SYS_DATA *psSysData,
 
 	psDevConfig->pasPhysHeaps = pasPhysHeaps;
 	psDevConfig->ui32PhysHeapCount = uiPhysHeapCount;
+	psDevConfig->eDefaultHeap = PVRSRV_PHYS_HEAP_GPU_LOCAL;
 
 	/* Only required for LMA but having this always set shouldn't be a problem */
 	psDevConfig->bDevicePA0IsValid = IMG_TRUE;
@@ -746,8 +792,6 @@ PVRSRV_ERROR SysDevInit(void *pvOSDevice, PVRSRV_DEVICE_CONFIG **ppsDevConfig)
 
 	psSysData->pdev = to_platform_device((struct device *)pvOSDevice);
 	psSysData->pdata = psSysData->pdev->dev.platform_data;
-
-	PVR_ASSERT(TC_MEMORY_CONFIG == psSysData->pdata->mem_mode);
 
 	/*
 	 * The device cannot address system memory, so there is no DMA

@@ -172,6 +172,27 @@ PVRSRVBridgeRGXFWDebugSetOSNewOnlineState(IMG_UINT32 ui32DispatchTableEntry,
 }
 
 static IMG_INT
+PVRSRVBridgeRGXFWDebugMapGuestHeap(IMG_UINT32 ui32DispatchTableEntry,
+				   IMG_UINT8 * psRGXFWDebugMapGuestHeapIN_UI8,
+				   IMG_UINT8 * psRGXFWDebugMapGuestHeapOUT_UI8,
+				   CONNECTION_DATA * psConnection)
+{
+	PVRSRV_BRIDGE_IN_RGXFWDEBUGMAPGUESTHEAP *psRGXFWDebugMapGuestHeapIN =
+	    (PVRSRV_BRIDGE_IN_RGXFWDEBUGMAPGUESTHEAP *)
+	    IMG_OFFSET_ADDR(psRGXFWDebugMapGuestHeapIN_UI8, 0);
+	PVRSRV_BRIDGE_OUT_RGXFWDEBUGMAPGUESTHEAP *psRGXFWDebugMapGuestHeapOUT =
+	    (PVRSRV_BRIDGE_OUT_RGXFWDEBUGMAPGUESTHEAP *)
+	    IMG_OFFSET_ADDR(psRGXFWDebugMapGuestHeapOUT_UI8, 0);
+
+	psRGXFWDebugMapGuestHeapOUT->eError =
+	    PVRSRVRGXFWDebugMapGuestHeapKM(psConnection, OSGetDevNode(psConnection),
+					   psRGXFWDebugMapGuestHeapIN->ui32OSid,
+					   psRGXFWDebugMapGuestHeapIN->ui64ui64GuestHeapBase);
+
+	return 0;
+}
+
+static IMG_INT
 PVRSRVBridgeRGXFWDebugPHRConfigure(IMG_UINT32 ui32DispatchTableEntry,
 				   IMG_UINT8 * psRGXFWDebugPHRConfigureIN_UI8,
 				   IMG_UINT8 * psRGXFWDebugPHRConfigureOUT_UI8,
@@ -230,12 +251,39 @@ PVRSRVBridgeRGXCurrentTime(IMG_UINT32 ui32DispatchTableEntry,
 	return 0;
 }
 
+#if defined(SUPPORT_VALIDATION)
+
+static IMG_INT
+PVRSRVBridgeRGXFWDebugInjectFault(IMG_UINT32 ui32DispatchTableEntry,
+				  IMG_UINT8 * psRGXFWDebugInjectFaultIN_UI8,
+				  IMG_UINT8 * psRGXFWDebugInjectFaultOUT_UI8,
+				  CONNECTION_DATA * psConnection)
+{
+	PVRSRV_BRIDGE_IN_RGXFWDEBUGINJECTFAULT *psRGXFWDebugInjectFaultIN =
+	    (PVRSRV_BRIDGE_IN_RGXFWDEBUGINJECTFAULT *)
+	    IMG_OFFSET_ADDR(psRGXFWDebugInjectFaultIN_UI8, 0);
+	PVRSRV_BRIDGE_OUT_RGXFWDEBUGINJECTFAULT *psRGXFWDebugInjectFaultOUT =
+	    (PVRSRV_BRIDGE_OUT_RGXFWDEBUGINJECTFAULT *)
+	    IMG_OFFSET_ADDR(psRGXFWDebugInjectFaultOUT_UI8, 0);
+
+	PVR_UNREFERENCED_PARAMETER(psRGXFWDebugInjectFaultIN);
+
+	psRGXFWDebugInjectFaultOUT->eError =
+	    PVRSRVRGXFWDebugInjectFaultKM(psConnection, OSGetDevNode(psConnection));
+
+	return 0;
+}
+
+#else
+#define PVRSRVBridgeRGXFWDebugInjectFault NULL
+#endif
+
 /* ***************************************************************************
  * Server bridge dispatch related glue
  */
 
 PVRSRV_ERROR InitRGXFWDBGBridge(void);
-PVRSRV_ERROR DeinitRGXFWDBGBridge(void);
+void DeinitRGXFWDBGBridge(void);
 
 /*
  * Register all RGXFWDBG functions with services
@@ -262,6 +310,9 @@ PVRSRV_ERROR InitRGXFWDBGBridge(void)
 			      PVRSRV_BRIDGE_RGXFWDBG_RGXFWDEBUGSETOSNEWONLINESTATE,
 			      PVRSRVBridgeRGXFWDebugSetOSNewOnlineState, NULL);
 
+	SetDispatchTableEntry(PVRSRV_BRIDGE_RGXFWDBG, PVRSRV_BRIDGE_RGXFWDBG_RGXFWDEBUGMAPGUESTHEAP,
+			      PVRSRVBridgeRGXFWDebugMapGuestHeap, NULL);
+
 	SetDispatchTableEntry(PVRSRV_BRIDGE_RGXFWDBG, PVRSRV_BRIDGE_RGXFWDBG_RGXFWDEBUGPHRCONFIGURE,
 			      PVRSRVBridgeRGXFWDebugPHRConfigure, NULL);
 
@@ -271,13 +322,16 @@ PVRSRV_ERROR InitRGXFWDBGBridge(void)
 	SetDispatchTableEntry(PVRSRV_BRIDGE_RGXFWDBG, PVRSRV_BRIDGE_RGXFWDBG_RGXCURRENTTIME,
 			      PVRSRVBridgeRGXCurrentTime, NULL);
 
+	SetDispatchTableEntry(PVRSRV_BRIDGE_RGXFWDBG, PVRSRV_BRIDGE_RGXFWDBG_RGXFWDEBUGINJECTFAULT,
+			      PVRSRVBridgeRGXFWDebugInjectFault, NULL);
+
 	return PVRSRV_OK;
 }
 
 /*
  * Unregister all rgxfwdbg functions with services
  */
-PVRSRV_ERROR DeinitRGXFWDBGBridge(void)
+void DeinitRGXFWDBGBridge(void)
 {
 
 	UnsetDispatchTableEntry(PVRSRV_BRIDGE_RGXFWDBG, PVRSRV_BRIDGE_RGXFWDBG_RGXFWDEBUGSETFWLOG);
@@ -295,6 +349,9 @@ PVRSRV_ERROR DeinitRGXFWDBGBridge(void)
 				PVRSRV_BRIDGE_RGXFWDBG_RGXFWDEBUGSETOSNEWONLINESTATE);
 
 	UnsetDispatchTableEntry(PVRSRV_BRIDGE_RGXFWDBG,
+				PVRSRV_BRIDGE_RGXFWDBG_RGXFWDEBUGMAPGUESTHEAP);
+
+	UnsetDispatchTableEntry(PVRSRV_BRIDGE_RGXFWDBG,
 				PVRSRV_BRIDGE_RGXFWDBG_RGXFWDEBUGPHRCONFIGURE);
 
 	UnsetDispatchTableEntry(PVRSRV_BRIDGE_RGXFWDBG,
@@ -302,5 +359,7 @@ PVRSRV_ERROR DeinitRGXFWDBGBridge(void)
 
 	UnsetDispatchTableEntry(PVRSRV_BRIDGE_RGXFWDBG, PVRSRV_BRIDGE_RGXFWDBG_RGXCURRENTTIME);
 
-	return PVRSRV_OK;
+	UnsetDispatchTableEntry(PVRSRV_BRIDGE_RGXFWDBG,
+				PVRSRV_BRIDGE_RGXFWDBG_RGXFWDEBUGINJECTFAULT);
+
 }

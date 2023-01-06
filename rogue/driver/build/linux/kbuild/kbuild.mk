@@ -76,9 +76,11 @@ kbuild: kbuild_check $(TARGET_PRIMARY_OUT)/kbuild/Makefile bridges
 		CROSS_COMPILE="$(CCACHE) $(KERNEL_CROSS_COMPILE)" \
 		EXTRA_CFLAGS="$(ALL_KBUILD_CFLAGS)" \
 		CC=$(if $(KERNEL_CC),$(KERNEL_CC),$(KERNEL_CROSS_COMPILE)gcc) \
+		AR=$(if $(KERNEL_AR),$(KERNEL_AR),$(KERNEL_CROSS_COMPILE)ar) \
 		LD=$(if $(KERNEL_LD),$(KERNEL_LD),$(KERNEL_CROSS_COMPILE)ld) \
 		NM=$(if $(KERNEL_NM),$(KERNEL_NM),$(KERNEL_CROSS_COMPILE)nm) \
 		OBJCOPY=$(if $(KERNEL_OBJCOPY),$(KERNEL_OBJCOPY),$(KERNEL_CROSS_COMPILE)objcopy) \
+		OBJDUMP=$(if $(KERNEL_OBJDUMP),$(KERNEL_OBJDUMP),$(KERNEL_CROSS_COMPILE)objdump) \
 		CHECK="$(patsubst @%,%,$(CHECK))" $(if $(CHECK),C=1,) \
 		V=$(V) W=$(W) TOP=$(TOP)
 	@for kernel_module in $(addprefix $(TARGET_PRIMARY_OUT)/kbuild/,$(INTERNAL_KBUILD_OBJECTS:.o=.ko)); do \

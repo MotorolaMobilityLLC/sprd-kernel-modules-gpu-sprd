@@ -64,6 +64,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 typedef int (*PFN_SYS_DEV_DVFS_SET_FREQ_VOLT)(IMG_UINT32 ui32Freq, IMG_UINT32 ui32Volt);
 
+
 typedef struct _IMG_OPP_
 {
 	IMG_UINT32			ui32Volt;
@@ -111,6 +112,8 @@ typedef struct _IMG_DVFS_DEVICE_
 	struct dev_pm_opp		*psOPP;
 #endif
 	struct devfreq			*psDevFreq;
+	IMG_BOOL			bInitPending;
+	IMG_BOOL			bReady;
 	IMG_BOOL			bEnabled;
 	IMG_HANDLE			hGpuUtilUserDVFS;
 	struct devfreq_simple_ondemand_data data;

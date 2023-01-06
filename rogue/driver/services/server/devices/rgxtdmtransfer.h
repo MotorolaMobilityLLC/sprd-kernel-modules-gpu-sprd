@@ -61,12 +61,13 @@ typedef struct _RGX_SERVER_TQ_TDM_CONTEXT_ RGX_SERVER_TQ_TDM_CONTEXT;
 PVRSRV_ERROR PVRSRVRGXTDMCreateTransferContextKM(
 	CONNECTION_DATA           * psConnection,
 	PVRSRV_DEVICE_NODE        * psDeviceNode,
-	IMG_UINT32                  ui32Priority,
+	IMG_INT32                   i32Priority,
 	IMG_UINT32                  ui32FrameworkCommandSize,
 	IMG_PBYTE                   pabyFrameworkCommand,
 	IMG_HANDLE                  hMemCtxPrivData,
 	IMG_UINT32					ui32PackedCCBSizeU88,
 	IMG_UINT32                  ui32ContextFlags,
+	IMG_UINT64					ui64RobustnessAddress,
 	RGX_SERVER_TQ_TDM_CONTEXT **ppsTransferContext);
 
 
@@ -86,7 +87,6 @@ PVRSRV_ERROR PVRSRVRGXTDMDestroyTransferContextKM(RGX_SERVER_TQ_TDM_CONTEXT *psT
 PVRSRV_ERROR PVRSRVRGXTDMSubmitTransferKM(
 	RGX_SERVER_TQ_TDM_CONTEXT * psTransferContext,
 	IMG_UINT32                  ui32PDumpFlags,
-	IMG_UINT32                  ui32ClientCacheOpSeqNum,
 	IMG_UINT32                  ui32ClientUpdateCount,
 	SYNC_PRIMITIVE_BLOCK     ** pauiClientUpdateUFODevVarBlock,
 	IMG_UINT32                * paui32ClientUpdateSyncOffset,
@@ -112,7 +112,7 @@ PVRSRV_ERROR PVRSRVRGXTDMNotifyWriteOffsetUpdateKM(
 PVRSRV_ERROR PVRSRVRGXTDMSetTransferContextPriorityKM(CONNECTION_DATA *psConnection,
                                                    PVRSRV_DEVICE_NODE * psDeviceNode,
 												   RGX_SERVER_TQ_TDM_CONTEXT *psTransferContext,
-												   IMG_UINT32 ui32Priority);
+												   IMG_INT32 i32Priority);
 
 PVRSRV_ERROR PVRSRVRGXTDMSetTransferContextPropertyKM(RGX_SERVER_TQ_TDM_CONTEXT *psTransferContext,
 													 RGX_CONTEXT_PROPERTY eContextProperty,

@@ -96,6 +96,7 @@ int tc_sys_strings(struct device *dev,
 	size_t size_tcf_core_target_build_id, char *str_pci_ver,
 	size_t size_pci_ver, char *str_macro_ver, size_t size_macro_ver);
 int tc_core_clock_speed(struct device *dev);
+int tc_core_clock_multiplex(struct device *dev);
 
 unsigned int tc_odin_subvers(struct device *dev);
 

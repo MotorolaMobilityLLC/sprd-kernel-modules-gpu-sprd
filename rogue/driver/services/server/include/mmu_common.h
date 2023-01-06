@@ -504,41 +504,6 @@ MMU_UnmapPMRFast(MMU_CONTEXT *psMMUContext,
                  IMG_UINT32 uiLog2PageSize);
 
 /*************************************************************************/ /*!
-@Function       MMU_ChangeValidity
-
-@Description    Sets or unsets the valid bit of page table entries for a given
-                address range.
-
-@Input          psMMUContext            MMU context to operate on
-
-@Input          sDevVAddr               The device virtual base address of
-                                        the range we want to modify
-
-@Input          uiSizeBytes             The size of the range in bytes
-
-@Input          uiLog2PageSize          Log2 of the used page size
-
-@Input          bMakeValid              Choose to set or unset the valid bit.
-                                        (bMakeValid == IMG_TRUE ) -> SET
-                                        (bMakeValid == IMG_FALSE) -> UNSET
-
-@Input          psPMR                   The PMR backing the allocation.
-                                        Needed in case we have sparse memory
-                                        where we have to check whether a physical
-                                        address actually backs the virtual.
-
-@Return         PVRSRV_OK if successful
-*/
-/*****************************************************************************/
-PVRSRV_ERROR
-MMU_ChangeValidity(MMU_CONTEXT *psMMUContext,
-                   IMG_DEV_VIRTADDR sDevVAddr,
-                   IMG_DEVMEM_SIZE_T uiSizeBytes,
-                   IMG_UINT32 uiLog2PageSize,
-                   IMG_BOOL bMakeValid,
-                   PMR *psPMR);
-
-/*************************************************************************/ /*!
 @Function       MMU_AcquireBaseAddr
 
 @Description    Acquire the device physical address of the base level MMU object
@@ -553,6 +518,22 @@ MMU_ChangeValidity(MMU_CONTEXT *psMMUContext,
 /*****************************************************************************/
 PVRSRV_ERROR
 MMU_AcquireBaseAddr(MMU_CONTEXT *psMMUContext, IMG_DEV_PHYADDR *psPhysAddr);
+
+/*************************************************************************/ /*!
+@Function       MMU_AcquireCPUBaseAddr
+
+@Description    Acquire the CPU Virtual Address of the base level MMU object
+
+@Input          psMMUContext            MMU context to operate on
+
+@Output         ppvCPUVAddr             CPU Virtual Address of the base level
+                                        MMU object
+
+@Return         PVRSRV_OK if successful
+*/
+/*****************************************************************************/
+PVRSRV_ERROR
+MMU_AcquireCPUBaseAddr(MMU_CONTEXT *psMMUContext, void **ppvCPUVAddr);
 
 /*************************************************************************/ /*!
 @Function       MMU_ReleaseBaseAddr

@@ -209,7 +209,7 @@ TLOpenStream_exit:
 			/* Lock over handle creation cleanup. */
 			LockHandle(psConnection->psHandleBase);
 
-			eError = PVRSRVReleaseHandleUnlocked(psConnection->psHandleBase,
+			eError = PVRSRVDestroyHandleUnlocked(psConnection->psHandleBase,
 							     (IMG_HANDLE) psTLOpenStreamOUT->hSD,
 							     PVRSRV_HANDLE_TYPE_PVR_TL_SD);
 			if (unlikely((eError != PVRSRV_OK) && (eError != PVRSRV_ERROR_RETRY)))
@@ -264,9 +264,9 @@ PVRSRVBridgeTLCloseStream(IMG_UINT32 ui32DispatchTableEntry,
 	LockHandle(psConnection->psHandleBase);
 
 	psTLCloseStreamOUT->eError =
-	    PVRSRVReleaseHandleStagedUnlock(psConnection->psHandleBase,
-					    (IMG_HANDLE) psTLCloseStreamIN->hSD,
-					    PVRSRV_HANDLE_TYPE_PVR_TL_SD);
+	    PVRSRVDestroyHandleStagedUnlocked(psConnection->psHandleBase,
+					      (IMG_HANDLE) psTLCloseStreamIN->hSD,
+					      PVRSRV_HANDLE_TYPE_PVR_TL_SD);
 	if (unlikely((psTLCloseStreamOUT->eError != PVRSRV_OK) &&
 		     (psTLCloseStreamOUT->eError != PVRSRV_ERROR_KERNEL_CCB_FULL) &&
 		     (psTLCloseStreamOUT->eError != PVRSRV_ERROR_RETRY)))
@@ -389,6 +389,8 @@ TLReleaseData_exit:
 
 static_assert(PRVSRVTL_MAX_STREAM_NAME_SIZE <= IMG_UINT32_MAX,
 	      "PRVSRVTL_MAX_STREAM_NAME_SIZE must not be larger than IMG_UINT32_MAX");
+static_assert(PVRSRVTL_MAX_DISCOVERABLE_STREAMS_BUFFER <= IMG_UINT32_MAX,
+	      "PVRSRVTL_MAX_DISCOVERABLE_STREAMS_BUFFER must not be larger than IMG_UINT32_MAX");
 
 static IMG_INT
 PVRSRVBridgeTLDiscoverStreams(IMG_UINT32 ui32DispatchTableEntry,
@@ -776,7 +778,7 @@ TLWriteData_exit:
  */
 
 PVRSRV_ERROR InitPVRTLBridge(void);
-PVRSRV_ERROR DeinitPVRTLBridge(void);
+void DeinitPVRTLBridge(void);
 
 /*
  * Register all PVRTL functions with services
@@ -814,7 +816,7 @@ PVRSRV_ERROR InitPVRTLBridge(void)
 /*
  * Unregister all pvrtl functions with services
  */
-PVRSRV_ERROR DeinitPVRTLBridge(void)
+void DeinitPVRTLBridge(void)
 {
 
 	UnsetDispatchTableEntry(PVRSRV_BRIDGE_PVRTL, PVRSRV_BRIDGE_PVRTL_TLOPENSTREAM);
@@ -833,5 +835,4 @@ PVRSRV_ERROR DeinitPVRTLBridge(void)
 
 	UnsetDispatchTableEntry(PVRSRV_BRIDGE_PVRTL, PVRSRV_BRIDGE_PVRTL_TLWRITEDATA);
 
-	return PVRSRV_OK;
 }

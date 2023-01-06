@@ -74,6 +74,13 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define PHYS_HEAP_IDX_FW_MEMORY   2
 #endif
 
+/* Change to test CPU_LOCAL sys layers*/
+#define UMA_HEAP_USAGE_FLAG PHYS_HEAP_USAGE_GPU_LOCAL
+//#define UMA_HEAP_USAGE_FLAG PHYS_HEAP_USAGE_CPU_LOCAL
+
+#define UMA_DEFAULT_HEAP PVRSRV_PHYS_HEAP_GPU_LOCAL
+//#define UMA_DEFAULT_HEAP PVRSRV_PHYS_HEAP_CPU_LOCAL
+
 /*
 	CPU to Device physical address translation
 */
@@ -154,7 +161,7 @@ static PVRSRV_ERROR PhysHeapsCreate(PHYS_HEAP_CONFIG **ppasPhysHeapsOut,
 	pasPhysHeaps[PHYS_HEAP_IDX_GENERAL].pszPDumpMemspaceName = "SYSMEM";
 	pasPhysHeaps[PHYS_HEAP_IDX_GENERAL].eType = PHYS_HEAP_TYPE_UMA;
 	pasPhysHeaps[PHYS_HEAP_IDX_GENERAL].psMemFuncs = &gsPhysHeapFuncs;
-	pasPhysHeaps[PHYS_HEAP_IDX_GENERAL].ui32UsageFlags = PHYS_HEAP_USAGE_GPU_LOCAL;
+	pasPhysHeaps[PHYS_HEAP_IDX_GENERAL].ui32UsageFlags = UMA_HEAP_USAGE_FLAG;
 
 	pasPhysHeaps[PHYS_HEAP_IDX_FW].pszPDumpMemspaceName = "SYSMEM_FW";
 	pasPhysHeaps[PHYS_HEAP_IDX_FW].eType = PHYS_HEAP_TYPE_UMA;
@@ -258,6 +265,7 @@ PVRSRV_ERROR SysDevInit(void *pvOSDevice, PVRSRV_DEVICE_CONFIG **ppsDevConfig)
 
 	psDevConfig->pasPhysHeaps			= pasPhysHeaps;
 	psDevConfig->ui32PhysHeapCount		= uiPhysHeapCount;
+	psDevConfig->eDefaultHeap = UMA_DEFAULT_HEAP;
 
 	/* No power management on no HW system */
 	psDevConfig->pfnPrePowerState       = NULL;

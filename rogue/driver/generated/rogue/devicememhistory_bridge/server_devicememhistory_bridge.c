@@ -45,6 +45,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include "img_defs.h"
 
+#include "pmr.h"
 #include "devicemem_history_server.h"
 
 #include "common_devicememhistory_bridge.h"
@@ -378,8 +379,6 @@ PVRSRVBridgeDevicememHistoryMapVRange(IMG_UINT32 ui32DispatchTableEntry,
 	IMG_UINT32 ui32BufferSize = 0;
 	IMG_UINT64 ui64BufferSize = ((IMG_UINT64) DEVMEM_ANNOTATION_MAX_LEN * sizeof(IMG_CHAR)) + 0;
 
-	PVR_UNREFERENCED_PARAMETER(psConnection);
-
 	if (ui64BufferSize > IMG_UINT32_MAX)
 	{
 		psDevicememHistoryMapVRangeOUT->eError = PVRSRV_ERROR_BRIDGE_BUFFER_TOO_SMALL;
@@ -438,7 +437,8 @@ PVRSRVBridgeDevicememHistoryMapVRange(IMG_UINT32 ui32DispatchTableEntry,
 	}
 
 	psDevicememHistoryMapVRangeOUT->eError =
-	    DevicememHistoryMapVRangeKM(psDevicememHistoryMapVRangeIN->sBaseDevVAddr,
+	    DevicememHistoryMapVRangeKM(psConnection, OSGetDevNode(psConnection),
+					psDevicememHistoryMapVRangeIN->sBaseDevVAddr,
 					psDevicememHistoryMapVRangeIN->ui32ui32StartPage,
 					psDevicememHistoryMapVRangeIN->ui32NumPages,
 					psDevicememHistoryMapVRangeIN->uiAllocSize,
@@ -491,8 +491,6 @@ PVRSRVBridgeDevicememHistoryUnmapVRange(IMG_UINT32 ui32DispatchTableEntry,
 
 	IMG_UINT32 ui32BufferSize = 0;
 	IMG_UINT64 ui64BufferSize = ((IMG_UINT64) DEVMEM_ANNOTATION_MAX_LEN * sizeof(IMG_CHAR)) + 0;
-
-	PVR_UNREFERENCED_PARAMETER(psConnection);
 
 	if (ui64BufferSize > IMG_UINT32_MAX)
 	{
@@ -554,7 +552,8 @@ PVRSRVBridgeDevicememHistoryUnmapVRange(IMG_UINT32 ui32DispatchTableEntry,
 	}
 
 	psDevicememHistoryUnmapVRangeOUT->eError =
-	    DevicememHistoryUnmapVRangeKM(psDevicememHistoryUnmapVRangeIN->sBaseDevVAddr,
+	    DevicememHistoryUnmapVRangeKM(psConnection, OSGetDevNode(psConnection),
+					  psDevicememHistoryUnmapVRangeIN->sBaseDevVAddr,
 					  psDevicememHistoryUnmapVRangeIN->ui32ui32StartPage,
 					  psDevicememHistoryUnmapVRangeIN->ui32NumPages,
 					  psDevicememHistoryUnmapVRangeIN->uiAllocSize,
@@ -584,6 +583,10 @@ DevicememHistoryUnmapVRange_exit:
 
 static_assert(DEVMEM_ANNOTATION_MAX_LEN <= IMG_UINT32_MAX,
 	      "DEVMEM_ANNOTATION_MAX_LEN must not be larger than IMG_UINT32_MAX");
+static_assert(PMR_MAX_SUPPORTED_PAGE_COUNT <= IMG_UINT32_MAX,
+	      "PMR_MAX_SUPPORTED_PAGE_COUNT must not be larger than IMG_UINT32_MAX");
+static_assert(PMR_MAX_SUPPORTED_PAGE_COUNT <= IMG_UINT32_MAX,
+	      "PMR_MAX_SUPPORTED_PAGE_COUNT must not be larger than IMG_UINT32_MAX");
 
 static IMG_INT
 PVRSRVBridgeDevicememHistorySparseChange(IMG_UINT32 ui32DispatchTableEntry,
@@ -617,6 +620,20 @@ PVRSRVBridgeDevicememHistorySparseChange(IMG_UINT32 ui32DispatchTableEntry,
 	     sizeof(IMG_UINT32)) +
 	    ((IMG_UINT64) psDevicememHistorySparseChangeIN->ui32FreePageCount *
 	     sizeof(IMG_UINT32)) + 0;
+
+	if (unlikely
+	    (psDevicememHistorySparseChangeIN->ui32AllocPageCount > PMR_MAX_SUPPORTED_PAGE_COUNT))
+	{
+		psDevicememHistorySparseChangeOUT->eError = PVRSRV_ERROR_BRIDGE_ARRAY_SIZE_TOO_BIG;
+		goto DevicememHistorySparseChange_exit;
+	}
+
+	if (unlikely
+	    (psDevicememHistorySparseChangeIN->ui32FreePageCount > PMR_MAX_SUPPORTED_PAGE_COUNT))
+	{
+		psDevicememHistorySparseChangeOUT->eError = PVRSRV_ERROR_BRIDGE_ARRAY_SIZE_TOO_BIG;
+		goto DevicememHistorySparseChange_exit;
+	}
 
 	if (ui64BufferSize > IMG_UINT32_MAX)
 	{
@@ -790,7 +807,7 @@ DevicememHistorySparseChange_exit:
 static POS_LOCK pDEVICEMEMHISTORYBridgeLock;
 
 PVRSRV_ERROR InitDEVICEMEMHISTORYBridge(void);
-PVRSRV_ERROR DeinitDEVICEMEMHISTORYBridge(void);
+void DeinitDEVICEMEMHISTORYBridge(void);
 
 /*
  * Register all DEVICEMEMHISTORY functions with services
@@ -826,9 +843,9 @@ PVRSRV_ERROR InitDEVICEMEMHISTORYBridge(void)
 /*
  * Unregister all devicememhistory functions with services
  */
-PVRSRV_ERROR DeinitDEVICEMEMHISTORYBridge(void)
+void DeinitDEVICEMEMHISTORYBridge(void)
 {
-	PVR_LOG_RETURN_IF_ERROR(OSLockDestroy(pDEVICEMEMHISTORYBridgeLock), "OSLockDestroy");
+	OSLockDestroy(pDEVICEMEMHISTORYBridgeLock);
 
 	UnsetDispatchTableEntry(PVRSRV_BRIDGE_DEVICEMEMHISTORY,
 				PVRSRV_BRIDGE_DEVICEMEMHISTORY_DEVICEMEMHISTORYMAP);
@@ -845,5 +862,4 @@ PVRSRV_ERROR DeinitDEVICEMEMHISTORYBridge(void)
 	UnsetDispatchTableEntry(PVRSRV_BRIDGE_DEVICEMEMHISTORY,
 				PVRSRV_BRIDGE_DEVICEMEMHISTORY_DEVICEMEMHISTORYSPARSECHANGE);
 
-	return PVRSRV_OK;
 }

@@ -203,8 +203,6 @@ void BridgeDispatchTableStartOffsetsInit(void)
 	g_BridgeDispatchTableStartOffsets[PVRSRV_BRIDGE_RGXREGCONFIG][PVR_DISPATCH_OFFSET_LAST_FUNC] = PVRSRV_BRIDGE_RGXREGCONFIG_DISPATCH_LAST;
 	g_BridgeDispatchTableStartOffsets[PVRSRV_BRIDGE_RGXKICKSYNC][PVR_DISPATCH_OFFSET_FIRST_FUNC] = PVRSRV_BRIDGE_RGXKICKSYNC_DISPATCH_FIRST;
 	g_BridgeDispatchTableStartOffsets[PVRSRV_BRIDGE_RGXKICKSYNC][PVR_DISPATCH_OFFSET_LAST_FUNC] = PVRSRV_BRIDGE_RGXKICKSYNC_DISPATCH_LAST;
-	g_BridgeDispatchTableStartOffsets[PVRSRV_BRIDGE_RGXSIGNALS][PVR_DISPATCH_OFFSET_FIRST_FUNC] = PVRSRV_BRIDGE_RGXSIGNALS_DISPATCH_FIRST;
-	g_BridgeDispatchTableStartOffsets[PVRSRV_BRIDGE_RGXSIGNALS][PVR_DISPATCH_OFFSET_LAST_FUNC] = PVRSRV_BRIDGE_RGXSIGNALS_DISPATCH_LAST;
 	g_BridgeDispatchTableStartOffsets[PVRSRV_BRIDGE_RGXTQ2][PVR_DISPATCH_OFFSET_FIRST_FUNC] = PVRSRV_BRIDGE_RGXTQ2_DISPATCH_FIRST;
 	g_BridgeDispatchTableStartOffsets[PVRSRV_BRIDGE_RGXTQ2][PVR_DISPATCH_OFFSET_LAST_FUNC] = PVRSRV_BRIDGE_RGXTQ2_DISPATCH_LAST;
 	g_BridgeDispatchTableStartOffsets[PVRSRV_BRIDGE_RGXTIMERQUERY][PVR_DISPATCH_OFFSET_FIRST_FUNC] = PVRSRV_BRIDGE_RGXTIMERQUERY_DISPATCH_FIRST;
@@ -222,11 +220,13 @@ PVRSRV_ERROR PVRSRVPrintBridgeStats()
 	IMG_UINT32 ui32Index;
 	IMG_UINT32 ui32Remainder;
 
+	BridgeGlobalStatsLock();
+
 	printf("Total Bridge call count = %u\n"
 		   "Total number of bytes copied via copy_from_user = %u\n"
 		   "Total number of bytes copied via copy_to_user = %u\n"
 		   "Total number of bytes copied via copy_*_user = %u\n\n"
-		   "%3s: %-60s | %-48s | %10s | %20s | %20s | %20s | %20s \n",
+		   "%3s: %-60s | %-48s | %10s | %20s | %20s | %20s | %20s\n",
 		   g_BridgeGlobalStats.ui32IOCTLCount,
 		   g_BridgeGlobalStats.ui32TotalCopyFromUserBytes,
 		   g_BridgeGlobalStats.ui32TotalCopyToUserBytes,
@@ -256,6 +256,8 @@ PVRSRV_ERROR PVRSRVPrintBridgeStats()
 
 
 	}
+
+	BridgeGlobalStatsUnlock();
 }
 #endif
 
@@ -266,8 +268,11 @@ CopyFromUserWrapper(CONNECTION_DATA *psConnection,
 					void __user *pvSrc,
 					IMG_UINT32 ui32Size)
 {
+	BridgeGlobalStatsLock();
 	g_BridgeDispatchTable[ui32DispatchTableEntry].ui32CopyFromUserTotalBytes+=ui32Size;
 	g_BridgeGlobalStats.ui32TotalCopyFromUserBytes+=ui32Size;
+	BridgeGlobalStatsUnlock();
+
 	return OSBridgeCopyFromUser(psConnection, pvDest, pvSrc, ui32Size);
 }
 PVRSRV_ERROR
@@ -277,8 +282,11 @@ CopyToUserWrapper(CONNECTION_DATA *psConnection,
 				  void *pvSrc,
 				  IMG_UINT32 ui32Size)
 {
+	BridgeGlobalStatsLock();
 	g_BridgeDispatchTable[ui32DispatchTableEntry].ui32CopyToUserTotalBytes+=ui32Size;
 	g_BridgeGlobalStats.ui32TotalCopyToUserBytes+=ui32Size;
+	BridgeGlobalStatsUnlock();
+
 	return OSBridgeCopyToUser(psConnection, pvDest, pvSrc, ui32Size);
 }
 #else
@@ -399,6 +407,17 @@ PVRSRVConnectKM(CONNECTION_DATA *psConnection,
 	{
 		*pui32CapabilityFlags |= PVRSRV_SYSTEM_DMA_USED;
 	}
+
+#if defined(SUPPORT_RGX) && defined(RGX_FEATURE_TFBC_LOSSY_37_PERCENT_BIT_MASK)
+	/* For GPUs with lossy TFBC support, is system using lossy control group 1? */
+	if (RGX_IS_FEATURE_SUPPORTED(psDevInfo, TFBC_LOSSY_37_PERCENT))
+	{
+		if (psDeviceNode->pfnGetTFBCLossyGroup(psDeviceNode) == 1)
+		{
+			*pui32CapabilityFlags |= PVRSRV_TFBC_LOSSY_GROUP_1;
+		}
+	}
+#endif
 
 #if defined(SUPPORT_GPUVIRT_VALIDATION)
 {
@@ -657,11 +676,32 @@ PVRSRVConnectKM(CONNECTION_DATA *psConnection,
 				__func__, ui32DDKBuild, ui32ClientDDKBuild));
 	}
 
+#if defined(PDUMP)
 	/* Success so far so is it the PDump client that is connecting? */
 	if (ui32Flags & SRV_FLAGS_PDUMPCTRL)
 	{
-		PDumpConnectionNotify();
+		if (psDeviceNode->sDevId.ui32InternalID == psSRVData->ui32PDumpBoundDevice)
+		{
+			PDumpConnectionNotify(psDeviceNode);
+		}
+		else
+		{
+			eError = PVRSRV_ERROR_PDUMP_CAPTURE_BOUND_TO_ANOTHER_DEVICE;
+			PVR_DPF((PVR_DBG_ERROR, "%s: PDump requested for device %u but only permitted for device %u",
+					__func__, psDeviceNode->sDevId.ui32InternalID, psSRVData->ui32PDumpBoundDevice));
+			goto chk_exit;
+		}
 	}
+	else
+	{
+		/* Warn if the app is connecting to a device PDump won't be able to capture */
+		if (psDeviceNode->sDevId.ui32InternalID != psSRVData->ui32PDumpBoundDevice)
+		{
+			PVR_DPF((PVR_DBG_WARNING, "%s: NB. App running on device %d won't be captured by PDump (must be on device %u)",
+					__func__, psDeviceNode->sDevId.ui32InternalID, psSRVData->ui32PDumpBoundDevice));
+		}
+	}
+#endif
 
 	PVR_ASSERT(pui8KernelArch != NULL);
 
@@ -903,6 +943,14 @@ PVRSRV_ERROR PVRSRVGetMultiCoreInfoKM(CONNECTION_DATA *psConnection,
 	PVRSRV_ERROR eError = PVRSRV_ERROR_NOT_SUPPORTED;
 	PVR_UNREFERENCED_PARAMETER(psConnection);
 
+	if (ui32CapsSize > 0)
+	{
+		/* Clear the buffer to ensure no uninitialised data is returned to UM
+		 * if the pfn call below does not write to the whole array, or is null.
+		 */
+		memset(pui64Caps, 0x00, (ui32CapsSize * sizeof(IMG_UINT64)));
+	}
+
 	if (psDeviceNode->pfnGetMultiCoreInfo != NULL)
 	{
 		eError = psDeviceNode->pfnGetMultiCoreInfo(psDeviceNode, ui32CapsSize, pui32NumCores, pui64Caps);
@@ -1060,7 +1108,7 @@ _SetDispatchTableEntry(IMG_UINT32 ui32BridgeGroup,
 #if defined(DEBUG_BRIDGE_KM_DISPATCH_TABLE)
 			PVR_DPF((PVR_DBG_ERROR,
 				 "%s: Adding dispatch table entry for %s clobbers an existing entry for %s (current pfn=<%p>, new pfn=<%p>)",
-				 __func__, pszIOCName, g_BridgeDispatchTable[ui32Index].pszIOCName),
+				 __func__, pszIOCName, g_BridgeDispatchTable[ui32Index].pszIOCName,
 				 (void*)g_BridgeDispatchTable[ui32Index].pfFunction, (void*)pfFunction));
 #else
 			PVR_DPF((PVR_DBG_ERROR,
@@ -1162,7 +1210,9 @@ PVRSRV_ERROR BridgedDispatchKM(CONNECTION_DATA * psConnection,
 	BridgeWrapperFunction pfBridgeHandler;
 	IMG_UINT32   ui32DispatchTableEntry, ui32GroupBoundary;
 	PVRSRV_ERROR err = PVRSRV_OK;
+#if !defined(INTEGRITY_OS)
 	PVRSRV_POOL_TOKEN hBridgeBufferPoolToken = NULL;
+#endif
 	IMG_UINT32 ui32Timestamp = OSClockus();
 #if defined(DEBUG_BRIDGE_KM)
 	IMG_UINT64	ui64TimeStart;
@@ -1226,15 +1276,20 @@ PVRSRV_ERROR BridgedDispatchKM(CONNECTION_DATA * psConnection,
 		        psBridgePackageKM->ui32FunctionID));
 		PVR_GOTO_WITH_ERROR(err, PVRSRV_ERROR_BRIDGE_EINVAL, return_error);
 	}
+
 #if defined(DEBUG_BRIDGE_KM)
+	BridgeGlobalStatsLock();
+
 	PVR_DPF((PVR_DBG_MESSAGE, "%s: Dispatch table entry index=%d, (bridge module %d, function %d)",
 			__func__,
 			ui32DispatchTableEntryIndex, psBridgePackageKM->ui32BridgeID, psBridgePackageKM->ui32FunctionID));
 	PVR_DPF((PVR_DBG_MESSAGE, "%s: %s",
 			 __func__,
 			 g_BridgeDispatchTable[ui32DispatchTableEntryIndex].pszIOCName));
+
 	g_BridgeDispatchTable[ui32DispatchTableEntryIndex].ui32CallCount++;
 	g_BridgeGlobalStats.ui32IOCTLCount++;
+	BridgeGlobalStatsUnlock();
 #endif
 
 	if (g_BridgeDispatchTable[ui32DispatchTableEntryIndex].hBridgeLock != NULL)
@@ -1343,13 +1398,7 @@ PVRSRV_ERROR BridgedDispatchKM(CONNECTION_DATA * psConnection,
 
 	ui64TimeDiff = ui64TimeEnd - ui64TimeStart;
 
-	/* if there is no lock held then acquire the stats lock to
-	 * ensure the calculations are done safely
-	 */
-	if (g_BridgeDispatchTable[ui32DispatchTableEntryIndex].hBridgeLock == NULL)
-	{
-		BridgeGlobalStatsLock();
-	}
+	BridgeGlobalStatsLock();
 
 	g_BridgeDispatchTable[ui32DispatchTableEntryIndex].ui64TotalTimeNS += ui64TimeDiff;
 
@@ -1358,10 +1407,7 @@ PVRSRV_ERROR BridgedDispatchKM(CONNECTION_DATA * psConnection,
 		g_BridgeDispatchTable[ui32DispatchTableEntryIndex].ui64MaxTimeNS = ui64TimeDiff;
 	}
 
-	if (g_BridgeDispatchTable[ui32DispatchTableEntryIndex].hBridgeLock == NULL)
-	{
-		BridgeGlobalStatsUnlock();
-	}
+	BridgeGlobalStatsUnlock();
 #endif
 
 unlock_and_return_error:

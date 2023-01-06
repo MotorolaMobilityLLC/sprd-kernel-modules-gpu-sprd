@@ -175,7 +175,6 @@ typedef struct _PMR_PAGELIST_ PMR_PAGELIST;
 PVRSRV_ERROR
 PMRCreatePMR(PHYS_HEAP *psPhysHeap,
              PMR_SIZE_T uiLogicalSize,
-             PMR_SIZE_T uiChunkSize,
              IMG_UINT32 ui32NumPhysChunks,
              IMG_UINT32 ui32NumVirtChunks,
              IMG_UINT32 *pui32MappingTable,
@@ -234,46 +233,6 @@ PMRUnlockSysPhysAddresses(PMR *psPMR);
 
 PVRSRV_ERROR
 PMRUnlockSysPhysAddressesNested(PMR *psPMR, IMG_UINT32 ui32NestingLevel);
-
-
-/*************************************************************************/ /*!
-@Function       PMRUnpinPMR
-@Description    This is the counterpart to PMRPinPMR(). It is meant to be
-                called before repinning an allocation.
-
-                For a detailed description see client API documentation.
-
-@Input          psPMR           The physical memory to unpin.
-
-@Input          bDevMapped      A flag that indicates if this PMR has been
-                                mapped to device virtual space.
-                                Needed to check if this PMR is allowed to be
-                                unpinned or not.
-
-@Return         PVRSRV_ERROR:   PVRSRV_OK on success and the memory is
-                                registered to be reclaimed. Error otherwise.
-*/ /**************************************************************************/
-PVRSRV_ERROR PMRUnpinPMR(PMR *psPMR, IMG_BOOL bDevMapped);
-
-/*************************************************************************/ /*!
-@Function       PMRPinPMR
-@Description    This is the counterpart to PMRUnpinPMR(). It is meant to be
-                called after unpinning an allocation.
-
-                For a detailed description see client API documentation.
-
-@Input          psPMR           The physical memory to pin.
-
-@Return         PVRSRV_ERROR:   PVRSRV_OK on success and the allocation content
-                                was successfully restored.
-
-                                PVRSRV_ERROR_PMR_NEW_MEMORY when the content
-                                could not be restored and new physical memory
-                                was allocated.
-
-                                A different error otherwise.
-*/ /**************************************************************************/
-PVRSRV_ERROR PMRPinPMR(PMR *psPMR);
 
 /*
  * PhysmemPMRExport()
@@ -423,17 +382,6 @@ PVRSRV_ERROR
 PMRReleaseKernelMappingData(PMR *psPMR,
                             IMG_HANDLE hPriv);
 
-#if defined(INTEGRITY_OS)
-PVRSRV_ERROR
-PMRMapMemoryObject(PMR *psPMR,
-                   IMG_HANDLE *phMemObj,
-                   void **pvClientAddr,
-                   IMG_HANDLE *phPrivOut);
-PVRSRV_ERROR
-PMRUnmapMemoryObject(PMR *psPMR,
-                     IMG_HANDLE hPriv);
-#endif
-
 /*
  * PMR_ReadBytes()
  *
@@ -480,14 +428,19 @@ PMR_WriteBytes(PMR *psPMR,
                 address space. The caller does not need to call
                 PMRLockSysPhysAddresses before calling this function.
 
-@Input          psPMR           PMR to map.
+@Input          psPMR            PMR to map.
 
-@Input          pOSMMapData     OS specific data needed to create a mapping.
+@Input          pOSMMapData      OS specific data needed to create a mapping.
+
+@Input          uiCpuAccessFlags Flags to indicate if the mapping request
+                                 requires read, write or both access.
 
 @Return         PVRSRV_ERROR:   PVRSRV_OK on success or an error otherwise.
 */ /**************************************************************************/
 PVRSRV_ERROR
-PMRMMapPMR(PMR *psPMR, PMR_MMAP_DATA pOSMMapData);
+PMRMMapPMR(PMR *psPMR,
+           PMR_MMAP_DATA pOSMMapData,
+           PVRSRV_MEMALLOCFLAGS_T uiCpuAccessFlags);
 
 /*
  * PMRRefPMR()
@@ -545,10 +498,7 @@ PMR_Flags(const PMR *psPMR);
 IMG_BOOL
 PMR_IsSparse(const PMR *psPMR);
 
-IMG_BOOL
-PMR_IsUnpinned(const PMR *psPMR);
-
-PVRSRV_ERROR
+void
 PMR_LogicalSize(const PMR *psPMR,
 				IMG_DEVMEM_SIZE_T *puiLogicalSize);
 
@@ -666,38 +616,6 @@ PVRSRV_ERROR PMR_ChangeSparseMemCPUMap(PMR *psPMR,
                                        IMG_UINT32 *pai32FreeIndices);
 
 #if defined(PDUMP)
-
-void
-PDumpPMRMallocPMR(PMR *psPMR,
-                  IMG_DEVMEM_SIZE_T uiSize,
-                  IMG_DEVMEM_ALIGN_T uiBlockSize,
-                  IMG_UINT32 ui32ChunkSize,
-                  IMG_UINT32 ui32NumPhysChunks,
-                  IMG_UINT32 ui32NumVirtChunks,
-                  IMG_UINT32 *puiMappingTable,
-                  IMG_UINT32 uiLog2Contiguity,
-                  IMG_BOOL bInitialise,
-                  IMG_UINT32 ui32InitValue,
-                  IMG_HANDLE *phPDumpAllocInfoPtr,
-                  IMG_UINT32 ui32PDumpFlags);
-
-void
-PDumpPMRFreePMR(PMR *psPMR,
-                IMG_DEVMEM_SIZE_T uiSize,
-                IMG_DEVMEM_ALIGN_T uiBlockSize,
-                IMG_UINT32 uiLog2Contiguity,
-                IMG_HANDLE hPDumpAllocationInfoHandle);
-
-void
-PDumpPMRChangeSparsePMR(PMR *psPMR,
-                        IMG_UINT32 uiBlockSize,
-                        IMG_UINT32 ui32AllocPageCount,
-                        IMG_UINT32 *pai32AllocIndices,
-                        IMG_UINT32 ui32FreePageCount,
-                        IMG_UINT32 *pai32FreeIndices,
-                        IMG_BOOL bInitialise,
-                        IMG_UINT32 ui32InitValue,
-                        IMG_HANDLE *phPDumpAllocInfoOut);
 
 /*
  * PMR_PDumpSymbolicAddr()
@@ -818,77 +736,6 @@ PMRPDumpSaveToFile(const PMR *psPMR,
                    const IMG_CHAR *pszFilename,
                    IMG_UINT32 uiFileOffset);
 #else /* PDUMP */
-
-#ifdef INLINE_IS_PRAGMA
-#pragma inline(PDumpPMRMallocPMR)
-#endif
-static INLINE void
-PDumpPMRMallocPMR(PMR *psPMR,
-                  IMG_DEVMEM_SIZE_T uiSize,
-                  IMG_DEVMEM_ALIGN_T uiBlockSize,
-                  IMG_UINT32 ui32NumPhysChunks,
-                  IMG_UINT32 ui32NumVirtChunks,
-                  IMG_UINT32 *puiMappingTable,
-                  IMG_UINT32 uiLog2Contiguity,
-                  IMG_BOOL bInitialise,
-                  IMG_UINT32 ui32InitValue,
-                  IMG_HANDLE *phPDumpAllocInfoPtr,
-                  IMG_UINT32 ui32PDumpFlags)
-{
-	PVR_UNREFERENCED_PARAMETER(psPMR);
-	PVR_UNREFERENCED_PARAMETER(uiSize);
-	PVR_UNREFERENCED_PARAMETER(uiBlockSize);
-	PVR_UNREFERENCED_PARAMETER(ui32NumPhysChunks);
-	PVR_UNREFERENCED_PARAMETER(ui32NumVirtChunks);
-	PVR_UNREFERENCED_PARAMETER(puiMappingTable);
-	PVR_UNREFERENCED_PARAMETER(uiLog2Contiguity);
-	PVR_UNREFERENCED_PARAMETER(bInitialise);
-	PVR_UNREFERENCED_PARAMETER(ui32InitValue);
-	PVR_UNREFERENCED_PARAMETER(phPDumpAllocInfoPtr);
-	PVR_UNREFERENCED_PARAMETER(ui32PDumpFlags);
-}
-
-#ifdef INLINE_IS_PRAGMA
-#pragma inline(PDumpPMRFreePMR)
-#endif
-static INLINE void
-PDumpPMRFreePMR(PMR *psPMR,
-                IMG_DEVMEM_SIZE_T uiSize,
-                IMG_DEVMEM_ALIGN_T uiBlockSize,
-                IMG_UINT32 uiLog2Contiguity,
-                IMG_HANDLE hPDumpAllocationInfoHandle)
-{
-	PVR_UNREFERENCED_PARAMETER(psPMR);
-	PVR_UNREFERENCED_PARAMETER(uiSize);
-	PVR_UNREFERENCED_PARAMETER(uiBlockSize);
-	PVR_UNREFERENCED_PARAMETER(uiLog2Contiguity);
-	PVR_UNREFERENCED_PARAMETER(hPDumpAllocationInfoHandle);
-}
-
-#ifdef INLINE_IS_PRAGMA
-#pragma inline(PDumpPMRChangeSparsePMR)
-#endif
-static INLINE void
-PDumpPMRChangeSparsePMR(PMR *psPMR,
-                        IMG_UINT32 uiBlockSize,
-                        IMG_UINT32 ui32AllocPageCount,
-                        IMG_UINT32 *pai32AllocIndices,
-                        IMG_UINT32 ui32FreePageCount,
-                        IMG_UINT32 *pai32FreeIndices,
-                        IMG_BOOL bInitialise,
-                        IMG_UINT32 ui32InitValue,
-                        IMG_HANDLE *phPDumpAllocInfoOut)
-{
-	PVR_UNREFERENCED_PARAMETER(psPMR);
-	PVR_UNREFERENCED_PARAMETER(uiBlockSize);
-	PVR_UNREFERENCED_PARAMETER(ui32AllocPageCount);
-	PVR_UNREFERENCED_PARAMETER(pai32AllocIndices);
-	PVR_UNREFERENCED_PARAMETER(ui32FreePageCount);
-	PVR_UNREFERENCED_PARAMETER(pai32FreeIndices);
-	PVR_UNREFERENCED_PARAMETER(bInitialise);
-	PVR_UNREFERENCED_PARAMETER(ui32InitValue);
-	PVR_UNREFERENCED_PARAMETER(phPDumpAllocInfoOut);
-}
 
 #ifdef INLINE_IS_PRAGMA
 #pragma inline(PMR_PDumpSymbolicAddr)

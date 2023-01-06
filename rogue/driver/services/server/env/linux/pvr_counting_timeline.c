@@ -131,12 +131,11 @@ pvr_counting_fence_timeline_debug_request(void *data, u32 verbosity,
 }
 
 struct pvr_counting_fence_timeline *pvr_counting_fence_timeline_create(
-	void *dev_cookie,
 	const char *name)
 {
 	PVRSRV_ERROR srv_err;
 	struct pvr_counting_fence_timeline *timeline =
-		kmalloc(sizeof(*timeline), GFP_KERNEL);
+		kzalloc(sizeof(*timeline), GFP_KERNEL);
 
 	if (!timeline)
 		goto err_out;
@@ -146,14 +145,14 @@ struct pvr_counting_fence_timeline *pvr_counting_fence_timeline_create(
 	if (!timeline->context)
 		goto err_free_timeline;
 
-	srv_err = PVRSRVRegisterDbgRequestNotify(&timeline->dbg_request_handle,
-				dev_cookie,
+	srv_err = PVRSRVRegisterDriverDbgRequestNotify(
+				&timeline->dbg_request_handle,
 				pvr_counting_fence_timeline_debug_request,
 				DEBUG_REQUEST_LINUXFENCE,
 				timeline);
 	if (srv_err != PVRSRV_OK) {
 		pr_err("%s: failed to register debug request callback (%s)\n",
-		       __func__, PVRSRVGetErrorString(srv_err));
+			   __func__, PVRSRVGetErrorString(srv_err));
 		goto err_free_timeline_ctx;
 	}
 
@@ -211,7 +210,7 @@ static void pvr_counting_fence_timeline_destroy(
 
 	WARN_ON(!list_empty(&timeline->active_fences));
 
-	PVRSRVUnregisterDbgRequestNotify(timeline->dbg_request_handle);
+	PVRSRVUnregisterDriverDbgRequestNotify(timeline->dbg_request_handle);
 
 	pvr_sw_fence_context_destroy(timeline->context);
 	kfree(timeline);

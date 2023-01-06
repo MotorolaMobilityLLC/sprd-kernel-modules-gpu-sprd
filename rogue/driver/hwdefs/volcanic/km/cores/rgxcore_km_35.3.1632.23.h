@@ -42,8 +42,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #ifndef RGXCORE_KM_35_3_1632_23_H
 #define RGXCORE_KM_35_3_1632_23_H
 
-/* Automatically generated file (18/11/2020 09:01:27): Do not edit manually */
-/* CS: @5867915 */
+/* Automatically generated file (23/03/2022 09:02:26): Do not edit manually */
+/* CS: @5906056 */
 
 /******************************************************************************
  * BVNC = 35.3.1632.23
@@ -57,12 +57,15 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * Errata
  *****************************************************************************/
 
+#define FIX_HW_BRN_71960
 
 
 
 /******************************************************************************
  * Enhancements
  *****************************************************************************/
+#define HW_ERN_65104
+#define HW_ERN_69700
 
 
 

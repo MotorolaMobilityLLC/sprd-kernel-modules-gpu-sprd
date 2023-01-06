@@ -101,6 +101,13 @@ MODULE_PARM_DESC(display_enable, "Enable all displays (default: Y)");
 module_param(output_device, uint, 0444);
 MODULE_PARM_DESC(output_device, "PDP output device (default: PDP1)");
 
+struct pdp_gem_private *pdp_gem_get_private(struct drm_device *dev)
+{
+	struct pdp_drm_private *dev_priv = dev->dev_private;
+
+	return dev_priv->gem_priv;
+}
+
 static void pdp_irq_handler(void *data)
 {
 	struct drm_device *dev = data;
@@ -185,7 +192,7 @@ static int pdp_early_load(struct drm_device *dev)
 	}
 #endif
 
-	dev_priv->gem_priv = pdp_gem_init(dev);
+	dev_priv->gem_priv = pdp_gem_init(dev, 0);
 	if (!dev_priv->gem_priv) {
 		DRM_ERROR("gem initialisation failed\n");
 		err = -ENOMEM;
@@ -248,7 +255,9 @@ static int pdp_early_load(struct drm_device *dev)
 	}
 #endif
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0))
 	dev->irq_enabled = true;
+#endif
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 7, 0))
 	dev->vblank_disable_allowed = 1;
@@ -551,29 +560,12 @@ static int pdp_gem_dumb_create(struct drm_file *file,
 					args);
 }
 
-static void pdp_gem_object_free(struct drm_gem_object *obj)
+void pdp_gem_object_free(struct drm_gem_object *obj)
 {
 	struct pdp_drm_private *dev_priv = obj->dev->dev_private;
 
 	pdp_gem_object_free_priv(dev_priv->gem_priv, obj);
 }
-
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0))
-static void pdp_gem_object_free_unlocked(struct drm_gem_object *obj)
-{
-	struct drm_device *dev = obj->dev;
-
-	mutex_lock(&dev->struct_mutex);
-	pdp_gem_object_free(obj);
-	mutex_unlock(&dev->struct_mutex);
-}
-#endif
-
-static const struct vm_operations_struct pdp_gem_vm_ops = {
-	.fault	= pdp_gem_object_vm_fault,
-	.open	= drm_gem_vm_open,
-	.close	= drm_gem_vm_close,
-};
 
 static const struct drm_ioctl_desc pdp_ioctls[] = {
 	DRM_IOCTL_DEF_DRV(PDP_GEM_CREATE, pdp_gem_object_create_ioctl,
@@ -617,13 +609,12 @@ static struct drm_driver pdp_drm_driver = {
 	.set_busid			= drm_platform_set_busid,
 #endif
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0))
-	.get_vblank_counter		= NULL,
-#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0))
-	.get_vblank_counter		= drm_vblank_no_hw_counter,
-#else
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 4, 0))
 	.get_vblank_counter		= drm_vblank_count,
-#endif
+#elif (LINUX_VERSION_CODE < KERNEL_VERSION(4, 12, 0))
+	.get_vblank_counter		= drm_vblank_no_hw_counter,
+#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(4, 4, 0) */
+
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 7, 0))
 	.enable_vblank			= pdp_enable_vblank,
 	.disable_vblank			= pdp_disable_vblank,
@@ -635,15 +626,14 @@ static struct drm_driver pdp_drm_driver = {
 #endif
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 9, 0))
+	.gem_prime_export		= pdp_gem_prime_export,
 	.gem_free_object		= pdp_gem_object_free,
-#else
-	.gem_free_object_unlocked	= pdp_gem_object_free_unlocked,
+	.gem_vm_ops			= &pdp_gem_vm_ops,
 #endif
 
+	.gem_prime_import		= pdp_gem_prime_import,
 	.prime_handle_to_fd		= drm_gem_prime_handle_to_fd,
 	.prime_fd_to_handle		= drm_gem_prime_fd_to_handle,
-	.gem_prime_export		= pdp_gem_prime_export,
-	.gem_prime_import		= pdp_gem_prime_import,
 	.gem_prime_import_sg_table	= pdp_gem_prime_import_sg_table,
 
     // Set dumb_create to NULL to avoid xorg owning the display (if xorg is running).
@@ -652,8 +642,6 @@ static struct drm_driver pdp_drm_driver = {
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0))
 	.dumb_destroy			= drm_gem_dumb_destroy,
 #endif
-
-	.gem_vm_ops			= &pdp_gem_vm_ops,
 
 	.name				= DRIVER_NAME,
 	.desc				= DRIVER_DESC,

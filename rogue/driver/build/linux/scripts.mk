@@ -58,8 +58,7 @@ M4DEFS_K := \
  -DPVR_SYSTEM=$(PVR_SYSTEM) \
  -DPVRTC_MODNAME=tc \
  -DPVRFENRIR_MODNAME=loki \
- -DSUPPORT_NATIVE_FENCE_SYNC=$(SUPPORT_NATIVE_FENCE_SYNC) \
- -DPVRSYNC_MODNAME=$(PVRSYNC_MODNAME)
+ -DSUPPORT_NATIVE_FENCE_SYNC=$(SUPPORT_NATIVE_FENCE_SYNC)
 
 # passing the BVNC value via init script is required
 # only in the case of a Guest OS running on a VZ setup
@@ -101,6 +100,10 @@ else ifeq ($(WINDOW_SYSTEM),wayland)
  M4DEFS += -DSUPPORT_XWAYLAND=$(SUPPORT_XWAYLAND)
 endif
 
+ifeq ($(DTB_OVERLAY),1)
+ M4DEFS += -DDTB_FILE=$(DTB_FILE_NAME)
+endif
+
 init_script_install_path := $${RC_DESTDIR}
 
 $(TARGET_NEUTRAL_OUT)/rc.pvr: $(PVRVERSION_H) $(CONFIG_MK) \
@@ -122,26 +125,6 @@ $(GENERATED_CODE_OUT)/init_script/.install: init_script_install_path := $(init_s
 $(GENERATED_CODE_OUT)/init_script/.install: | $(GENERATED_CODE_OUT)/init_script
 	@echo 'install_file rc.pvr $(init_script_install_path)/rc.pvr "boot script" 0755 0:0' >$@
 
-# Generate udev rules file
-udev_rules_install_path := $${UDEV_DESTDIR}
-
-$(TARGET_NEUTRAL_OUT)/udev.pvr: $(CONFIG_MK) \
- $(MAKE_TOP)/scripts/udev.pvr.m4 \
- | $(TARGET_NEUTRAL_OUT)
-	$(if $(V),,@echo "  GEN     " $(call relative-to-top,$@))
-	$(M4) $(M4FLAGS) $(M4DEFS) $(M4DEFS_K) $(MAKE_TOP)/scripts/udev.pvr.m4 > $@
-	$(CHMOD) +x $@
-
-.PHONY: udev_rules
-udev_rules: $(TARGET_NEUTRAL_OUT)/udev.pvr
-
-$(GENERATED_CODE_OUT)/udev_rules:
-	$(make-directory)
-
-$(GENERATED_CODE_OUT)/udev_rules/.install: udev_rules_install_path := $(udev_rules_install_path)
-$(GENERATED_CODE_OUT)/udev_rules/.install: | $(GENERATED_CODE_OUT)/udev_rules
-	@echo 'install_file udev.pvr $(udev_rules_install_path)/99-pvr.rules "udev rules" 0644 0:0' >$@
-
 endif # ifeq ($(SUPPORT_ANDROID_PLATFORM),)
 
 # This code mimics the way Make processes our implicit/explicit goal list.
@@ -153,7 +136,7 @@ BUILT_UM := $(MAKECMDGOALS)
 ifneq ($(filter build services_all components uninstall,$(MAKECMDGOALS)),)
 BUILT_UM += $(COMPONENTS)
 endif
-BUILT_UM := $(sort $(filter $(ALL_MODULES) init_script udev_rules,$(BUILT_UM)))
+BUILT_UM := $(sort $(filter $(ALL_MODULES) init_script,$(BUILT_UM)))
 else
 BUILT_UM := $(sort $(COMPONENTS))
 endif
@@ -245,10 +228,6 @@ ifneq ($(filter init_script, $(INSTALL_UM_MODULES)),)
  INSTALL_UM_FRAGMENTS_target_neutral += $(GENERATED_CODE_OUT)/init_script/.install
 endif
 
-ifneq ($(filter udev_rules, $(INSTALL_UM_MODULES)),)
- INSTALL_UM_FRAGMENTS_target_neutral += $(GENERATED_CODE_OUT)/udev_rules/.install
-endif
-
 INSTALL_KM_FRAGMENTS := \
  $(strip $(foreach _m,$(BUILT_KM),\
   $(if $(filter-out kernel_module,$($(_m)_type)),,\
@@ -299,6 +278,8 @@ install_sh_template := $(MAKE_TOP)/scripts/install.sh.tpl
 else
 install_sh_template := $(MAKE_TOP)/common/android/install.sh.tpl
 endif
+else ifneq ($(SUPPORT_NEUTRINO_PLATFORM),)
+install_sh_template := $(MAKE_TOP)/common/neutrino/install.sh.tpl
 else
 install_sh_template := $(MAKE_TOP)/scripts/install.sh.tpl
 endif
@@ -318,6 +299,7 @@ $(RELATIVE_OUT)/install.sh: $(install_sh_template)
 	$(ECHO) 's/\[BIN_DESTDIR\]/$(subst /,\/,$(BIN_DESTDIR))/g;'         >> $(RELATIVE_OUT)/install.sh.sed
 	$(ECHO) 's/\[SHARE_DESTDIR\]/$(subst /,\/,$(SHARE_DESTDIR))/g;'     >> $(RELATIVE_OUT)/install.sh.sed
 	$(ECHO) 's/\[FW_DESTDIR\]/$(subst /,\/,$(FW_DESTDIR))/g;'           >> $(RELATIVE_OUT)/install.sh.sed
+	$(ECHO) 's/\[DTB_DESTDIR\]/$(subst /,\/,$(DTB_DESTDIR))/g;'         >> $(RELATIVE_OUT)/install.sh.sed
 	$(ECHO) 's/\[SHADER_DESTDIR\]/$(subst /,\/,$(SHADER_DESTDIR))/g;'   >> $(RELATIVE_OUT)/install.sh.sed
 	$(ECHO) 's/\[SHLIB_DESTDIR\]/$(subst /,\/,$(SHLIB_DESTDIR))/g;'     >> $(RELATIVE_OUT)/install.sh.sed
 	$(ECHO) 's/\[INCLUDE_DESTDIR\]/$(subst /,\/,$(INCLUDE_DESTDIR))/g;' >> $(RELATIVE_OUT)/install.sh.sed

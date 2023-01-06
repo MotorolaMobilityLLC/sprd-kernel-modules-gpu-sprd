@@ -49,49 +49,34 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "vz_vm.h"
 #include "rgxfwutils.h"
 
-bool IsVmOnline(IMG_UINT32 ui32OSID)
+bool IsVmOnline(IMG_UINT32 ui32OSID, IMG_UINT32 ui32DevID)
 {
-	PVRSRV_DATA *psPVRSRVData = PVRSRVGetPVRSRVData();
+	PVRSRV_DEVICE_NODE *psDevNode = PVRSRVGetDeviceInstanceByOSId(ui32DevID);
 
-	return (ui32OSID >= RGX_NUM_OS_SUPPORTED) ? (false) : (psPVRSRVData->abVmOnline[ui32OSID]);
+	return BIT_ISSET(psDevNode->ui32VmState, ui32OSID);
 }
 
-PVRSRV_ERROR PvzOnVmOnline(IMG_UINT32 ui32OSid)
+PVRSRV_ERROR PvzOnVmOnline(IMG_UINT32 ui32OSID, IMG_UINT32 ui32DevID)
 {
 #if defined(RGX_NUM_OS_SUPPORTED) && (RGX_NUM_OS_SUPPORTED == 1)
 	PVRSRV_ERROR       eError          = PVRSRV_ERROR_INVALID_PARAMS;
 #else
 	PVRSRV_ERROR       eError          = PVRSRV_OK;
-	PVRSRV_DATA        *psPVRSRVData   = PVRSRVGetPVRSRVData();
 	PVRSRV_DEVICE_NODE *psDevNode;
-	PVRSRV_RGXDEV_INFO *psDevInfo;
 
-	if (ui32OSid == 0 || ui32OSid >= RGX_NUM_OS_SUPPORTED)
+	psDevNode = PVRSRVGetDeviceInstanceByOSId(ui32DevID);
+
+	if (BIT_ISSET(psDevNode->ui32VmState, ui32OSID))
 	{
 		PVR_DPF((PVR_DBG_ERROR,
-				 "%s: invalid OSID (%d)",
-				 __func__, ui32OSid));
-
+				 "%s: OSID %u on Device %u is already enabled.",
+				 __func__, ui32OSID, ui32DevID));
 		eError = PVRSRV_ERROR_INVALID_PARAMS;
 		goto e0;
 	}
-
-	if (psPVRSRVData->abVmOnline[ui32OSid])
-	{
-		PVR_DPF((PVR_DBG_ERROR,
-				 "%s: OSID %d is already enabled.",
-				 __func__, ui32OSid));
-		eError = PVRSRV_ERROR_INVALID_PARAMS;
-		goto e0;
-	}
-
-	/* For now, limit support to single device setups */
-	psDevNode = psPVRSRVData->psDeviceNodeList;
-	psDevInfo = psDevNode->pvDevice;
 
 	if (psDevNode->eDevState == PVRSRV_DEVICE_STATE_INIT)
 	{
-
 		/* Firmware not initialized yet, do it here */
 		eError = PVRSRVCommonDeviceInitialise(psDevNode);
 		if (eError != PVRSRV_OK)
@@ -109,11 +94,11 @@ PVRSRV_ERROR PvzOnVmOnline(IMG_UINT32 ui32OSid)
 		goto e0;
 	}
 
-	psPVRSRVData->abVmOnline[ui32OSid] = IMG_TRUE;
+	BIT_SET(psDevNode->ui32VmState, ui32OSID);
 
 #if defined(RGX_VZ_STATIC_CARVEOUT_FW_HEAPS)
 	/* Everything is ready for the firmware to start interacting with this OS */
-	eError = RGXFWSetFwOsState(psDevNode->pvDevice, ui32OSid, RGXFWIF_OS_ONLINE);
+	eError = RGXFWSetFwOsState(psDevNode->pvDevice, ui32OSID, RGXFWIF_OS_ONLINE);
 #endif
 
 e0:
@@ -121,42 +106,32 @@ e0:
 	return eError;
 }
 
-PVRSRV_ERROR PvzOnVmOffline(IMG_UINT32 ui32OSid)
+PVRSRV_ERROR PvzOnVmOffline(IMG_UINT32 ui32OSID, IMG_UINT32 ui32DevID)
 {
 #if defined(RGX_NUM_OS_SUPPORTED) && (RGX_NUM_OS_SUPPORTED == 1)
 	PVRSRV_ERROR       eError          = PVRSRV_ERROR_INVALID_PARAMS;
 #else
 	PVRSRV_ERROR      eError          = PVRSRV_OK;
-	PVRSRV_DATA       *psPVRSRVData   = PVRSRVGetPVRSRVData();
 	PVRSRV_DEVICE_NODE *psDevNode;
 	PVRSRV_RGXDEV_INFO *psDevInfo;
 
-	if (ui32OSid == 0 || ui32OSid >= RGX_NUM_OS_SUPPORTED)
+	psDevNode = PVRSRVGetDeviceInstanceByOSId(ui32DevID);
+
+	if (!BIT_ISSET(psDevNode->ui32VmState, ui32OSID))
 	{
 		PVR_DPF((PVR_DBG_ERROR,
-				 "%s: invalid OSID (%d)",
-				 __func__, ui32OSid));
+				 "%s: OSID %u on Device %u is already disabled.",
+				 __func__, ui32OSID, ui32DevID));
 		eError = PVRSRV_ERROR_INVALID_PARAMS;
 		goto e0;
 	}
 
-	if (!psPVRSRVData->abVmOnline[ui32OSid])
-	{
-		PVR_DPF((PVR_DBG_ERROR,
-				 "%s: OSID %d is already disabled.",
-				 __func__, ui32OSid));
-		eError = PVRSRV_ERROR_INVALID_PARAMS;
-		goto e0;
-	}
-
-	/* For now, limit support to single device setups */
-	psDevNode = psPVRSRVData->psDeviceNodeList;
 	psDevInfo = psDevNode->pvDevice;
 
-	eError = RGXFWSetFwOsState(psDevInfo, ui32OSid, RGXFWIF_OS_OFFLINE);
+	eError = RGXFWSetFwOsState(psDevInfo, ui32OSID, RGXFWIF_OS_OFFLINE);
 	if (eError == PVRSRV_OK)
 	{
-		psPVRSRVData->abVmOnline[ui32OSid] = IMG_FALSE;
+		BIT_UNSET(psDevNode->ui32VmState, ui32OSID);
 	}
 
 e0:
@@ -164,20 +139,17 @@ e0:
 	return eError;
 }
 
-PVRSRV_ERROR PvzVMMConfigure(VMM_CONF_PARAM eVMMParamType, IMG_UINT32 ui32ParamValue)
+PVRSRV_ERROR PvzVMMConfigure(VMM_CONF_PARAM eVMMParamType,
+							 IMG_UINT32 ui32ParamValue,
+							 IMG_UINT32 ui32DevID)
 {
-	PVRSRV_ERROR eError = PVRSRV_OK;
-
-	PVRSRV_DATA *psPVRSRVData = PVRSRVGetPVRSRVData();
-	PVRSRV_DEVICE_NODE *psDeviceNode;
-	PVRSRV_RGXDEV_INFO *psDevInfo;
-
-	psDeviceNode = psPVRSRVData->psDeviceNodeList;
-	psDevInfo = psDeviceNode->pvDevice;
+#if defined(SUPPORT_RGX)
+	PVRSRV_DEVICE_NODE *psDevNode = PVRSRVGetDeviceInstanceByOSId(ui32DevID);
+	PVRSRV_RGXDEV_INFO *psDevInfo = psDevNode->pvDevice;
+	PVRSRV_ERROR eError;
 
 	switch (eVMMParamType)
 	{
-#if defined(SUPPORT_RGX)
 		case VMM_CONF_PRIO_OSID0:
 		case VMM_CONF_PRIO_OSID1:
 		case VMM_CONF_PRIO_OSID2:
@@ -187,12 +159,12 @@ PVRSRV_ERROR PvzVMMConfigure(VMM_CONF_PARAM eVMMParamType, IMG_UINT32 ui32ParamV
 		case VMM_CONF_PRIO_OSID6:
 		case VMM_CONF_PRIO_OSID7:
 		{
-			IMG_UINT32 ui32OSid = eVMMParamType;
+			IMG_UINT32 ui32OSID = eVMMParamType;
 			IMG_UINT32 ui32Prio = ui32ParamValue;
 
-			if (ui32OSid < RGX_NUM_OS_SUPPORTED)
+			if (ui32OSID < RGX_NUM_OS_SUPPORTED)
 			{
-				eError = RGXFWChangeOSidPriority(psDevInfo, ui32OSid, ui32Prio);
+				eError = RGXFWChangeOSidPriority(psDevInfo, ui32OSID, ui32Prio);
 			}
 			else
 			{
@@ -206,9 +178,6 @@ PVRSRV_ERROR PvzVMMConfigure(VMM_CONF_PARAM eVMMParamType, IMG_UINT32 ui32ParamV
 			eError = RGXFWSetHCSDeadline(psDevInfo, ui32HCSDeadline);
 			break;
 		}
-#else
-	PVR_UNREFERENCED_PARAMETER(ui32ParamValue);
-#endif
 		default:
 		{
 			eError = PVRSRV_ERROR_INVALID_PARAMS;
@@ -216,6 +185,13 @@ PVRSRV_ERROR PvzVMMConfigure(VMM_CONF_PARAM eVMMParamType, IMG_UINT32 ui32ParamV
 	}
 
 	return eError;
+#else
+	PVR_UNREFERENCED_PARAMETER(eVMMParamType);
+	PVR_UNREFERENCED_PARAMETER(ui32ParamValue);
+	PVR_UNREFERENCED_PARAMETER(ui32DevID);
+
+	return PVRSRV_ERROR_INVALID_PARAMS;
+#endif
 }
 
 /******************************************************************************

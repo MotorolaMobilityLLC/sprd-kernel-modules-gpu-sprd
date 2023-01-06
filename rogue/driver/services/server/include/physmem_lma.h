@@ -54,10 +54,18 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pmr.h"
 #include "pmr_impl.h"
 
+typedef IMG_UINT32 PHYSMEM_LMA_POLICY;
+
+#define PHYSMEM_LMA_POLICY_DEFAULT (0U)
+
+#define PHYSMEM_LMA_POLICY_ALLOC_ALLOW_NONCONTIG      (1U)
+#define PHYSMEM_LMA_POLOCY_ALLOC_ALLOW_NONCONTIG_MASK (1U)
+
 /*************************************************************************/ /*!
 @Function       PhysmemCreateHeapLMA
 @Description    Create and register new LMA heap with LMA specific details.
 @Input          psDevNode    Pointer to device node struct.
+@Input          uiLMAPolicy  LMA allocation policy flags
 @Input          psConfig     Heap configuration.
 @Input          pszLabel     Debug identifier label
 @Output         ppsPhysHeap  Pointer to the created heap.
@@ -65,13 +73,10 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */ /**************************************************************************/
 PVRSRV_ERROR
 PhysmemCreateHeapLMA(PVRSRV_DEVICE_NODE *psDevNode,
-					 PHYS_HEAP_CONFIG *psConfig,
-					 IMG_CHAR *pszLabel,
-					 PHYS_HEAP **ppsPhysHeap);
-
-PVRSRV_ERROR
-PhysmemGetArenaLMA(PHYS_HEAP *psPhysHeap,
-				   RA_ARENA **ppsArena);
+                     PHYSMEM_LMA_POLICY uiLMAPolicy,
+                     PHYS_HEAP_CONFIG *psConfig,
+                     IMG_CHAR *pszLabel,
+                     PHYS_HEAP **ppsPhysHeap);
 
 /*
  * PhysmemNewLocalRamBackedPMR
@@ -83,7 +88,6 @@ PVRSRV_ERROR
 PhysmemNewLocalRamBackedPMR(PHYS_HEAP *psPhysHeap,
 							CONNECTION_DATA *psConnection,
                             IMG_DEVMEM_SIZE_T uiSize,
-                            IMG_DEVMEM_SIZE_T uiChunkSize,
                             IMG_UINT32 ui32NumPhysChunks,
                             IMG_UINT32 ui32NumVirtChunks,
                             IMG_UINT32 *pui32MappingTable,

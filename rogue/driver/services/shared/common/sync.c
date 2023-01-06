@@ -60,6 +60,9 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "log2.h"
 #if defined(__KERNEL__)
 #include "pvrsrv.h"
+#include "srvcore.h"
+#else
+#include "srvcore_intern.h"
 #endif
 
 
@@ -184,7 +187,9 @@ FreeSyncPrimitiveBlock(SYNC_PRIM_BLOCK *psSyncBlk)
 
 	DevmemReleaseCpuVirtAddr(psSyncBlk->hMemDesc);
 	DevmemFree(psSyncBlk->hMemDesc);
-	BridgeFreeSyncPrimitiveBlock(GetBridgeHandle(psContext->hDevConnection),
+	(void) DestroyServerResource(psContext->hDevConnection,
+	                             NULL,
+	                             BridgeFreeSyncPrimitiveBlock,
 	                             psSyncBlk->hServerSyncPrimBlock);
 	OSFreeMem(psSyncBlk);
 }
@@ -193,6 +198,7 @@ static PVRSRV_ERROR
 SyncPrimBlockImport(RA_PERARENA_HANDLE hArena,
                     RA_LENGTH_T uSize,
                     RA_FLAGS_T uFlags,
+                    RA_LENGTH_T uBaseAlignment,
                     const IMG_CHAR *pszAnnotation,
                     RA_BASE_T *puiBase,
                     RA_LENGTH_T *puiActualSize,
@@ -203,6 +209,7 @@ SyncPrimBlockImport(RA_PERARENA_HANDLE hArena,
 	RA_LENGTH_T uiSpanSize;
 	PVRSRV_ERROR eError;
 	PVR_UNREFERENCED_PARAMETER(uFlags);
+	PVR_UNREFERENCED_PARAMETER(uBaseAlignment);
 
 	/* Check we've not been called with an unexpected size */
 	PVR_LOG_GOTO_IF_INVALID_PARAM(hArena, eError, e0);
@@ -304,20 +311,23 @@ static void SyncPrimLocalFree(SYNC_PRIM *psSyncInt, IMG_BOOL bFreeFirstSyncPrim)
 	PVR_UNREFERENCED_PARAMETER(bFreeFirstSyncPrim);
 #else
 	/* Defer freeing the first allocated sync prim in the sync context */
-	if (psSyncInt != psContext->hFirstSyncPrim || (psSyncInt == psContext->hFirstSyncPrim && bFreeFirstSyncPrim))
+	if (psSyncInt != psContext->hFirstSyncPrim || bFreeFirstSyncPrim)
 #endif
 	{
 		PVRSRV_ERROR eError;
-		IMG_HANDLE hBridge =
-				GetBridgeHandle(psSyncInt->u.sLocal.psSyncBlock->psContext->hDevConnection);
+		SHARED_DEV_CONNECTION hDevConnection =
+			psSyncInt->u.sLocal.psSyncBlock->psContext->hDevConnection;
 
-		if (GetInfoPageDebugFlags(psSyncInt->u.sLocal.psSyncBlock->psContext->hDevConnection) & DEBUG_FEATURE_FULL_SYNC_TRACKING_ENABLED)
+		if (GetInfoPageDebugFlags(hDevConnection) & DEBUG_FEATURE_FULL_SYNC_TRACKING_ENABLED)
 		{
 			if (psSyncInt->u.sLocal.hRecord)
 			{
 				/* remove this sync record */
-				eError = BridgeSyncRecordRemoveByHandle(hBridge,
-				                                        psSyncInt->u.sLocal.hRecord);
+				eError = DestroyServerResource(hDevConnection,
+				                               NULL,
+				                               BridgeSyncRecordRemoveByHandle,
+				                               psSyncInt->u.sLocal.hRecord);
+				PVR_LOG_IF_ERROR(eError, "BridgeSyncRecordRemoveByHandle");
 			}
 		}
 		else
@@ -325,7 +335,7 @@ static void SyncPrimLocalFree(SYNC_PRIM *psSyncInt, IMG_BOOL bFreeFirstSyncPrim)
 			IMG_UINT32 ui32FWAddr = psSyncBlock->ui32FirmwareAddr +
 					SyncPrimGetOffset(psSyncInt);
 
-			eError = BridgeSyncFreeEvent(hBridge, ui32FWAddr);
+			eError = BridgeSyncFreeEvent(GetBridgeHandle(hDevConnection), ui32FWAddr);
 			PVR_LOG_IF_ERROR(eError, "BridgeSyncFreeEvent");
 		}
 #if defined(PVRSRV_ENABLE_SYNC_POISONING)

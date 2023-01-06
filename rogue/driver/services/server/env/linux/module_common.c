@@ -41,6 +41,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */ /**************************************************************************/
 
 #include <linux/module.h>
+//#include <drm/drm_print.h>
 
 #if defined(CONFIG_DEBUG_FS)
 #include "pvr_debugfs.h"
@@ -68,6 +69,9 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #if defined(SUPPORT_NATIVE_FENCE_SYNC)
 #include "pvr_sync.h"
+#if !defined(USE_PVRSYNC_DEVNODE)
+#include "pvr_sync_ioctl_drm.h"
+#endif
 #endif
 
 #include "ospvr_gputrace.h"
@@ -87,7 +91,19 @@ EXPORT_SYMBOL(DCDisplayHasPendingCommand);
 EXPORT_SYMBOL(DCImportBufferAcquire);
 EXPORT_SYMBOL(DCImportBufferRelease);
 
-/* Physmem interface (required by LMA DC drivers) */
+EXPORT_SYMBOL(PVRSRVGetDriverStatus);
+EXPORT_SYMBOL(PVRSRVSystemInstallDeviceLISR);
+EXPORT_SYMBOL(PVRSRVSystemUninstallDeviceLISR);
+
+#include "pvr_notifier.h"
+EXPORT_SYMBOL(PVRSRVCheckStatus);
+#endif /* defined(SUPPORT_DISPLAY_CLASS) */
+
+#if defined(SUPPORT_EXTERNAL_PHYSHEAP_INTERFACE)
+/*
+ * Physmem interface.
+ * Required by LMA DC drivers, and some non-DC LMA display drivers.
+ */
 #include "physheap.h"
 EXPORT_SYMBOL(PhysHeapAcquireByUsage);
 EXPORT_SYMBOL(PhysHeapRelease);
@@ -96,16 +112,10 @@ EXPORT_SYMBOL(PhysHeapGetCpuPAddr);
 EXPORT_SYMBOL(PhysHeapGetSize);
 EXPORT_SYMBOL(PhysHeapCpuPAddrToDevPAddr);
 
-EXPORT_SYMBOL(PVRSRVGetDriverStatus);
-EXPORT_SYMBOL(PVRSRVSystemInstallDeviceLISR);
-EXPORT_SYMBOL(PVRSRVSystemUninstallDeviceLISR);
-
-#include "pvr_notifier.h"
-EXPORT_SYMBOL(PVRSRVCheckStatus);
-
 #include "pvr_debug.h"
 EXPORT_SYMBOL(PVRSRVGetErrorString);
-#endif /* defined(SUPPORT_DISPLAY_CLASS) */
+EXPORT_SYMBOL(PVRSRVGetDeviceInstance);
+#endif
 
 #if defined(SUPPORT_RGX)
 #include "rgxapi_km.h"
@@ -115,10 +125,10 @@ EXPORT_SYMBOL(RGXInitSLC);
 EXPORT_SYMBOL(RGXHWPerfConnect);
 EXPORT_SYMBOL(RGXHWPerfDisconnect);
 EXPORT_SYMBOL(RGXHWPerfControl);
-#if defined(HWPERF_PACKET_V2C_SIG)
+#if defined(RGX_FEATURE_HWPERF_VOLCANIC)
 EXPORT_SYMBOL(RGXHWPerfConfigureCounters);
 #else
-EXPORT_SYMBOL(RGXHWPerfConfigureAndEnableCounters);
+EXPORT_SYMBOL(RGXHWPerfConfigMuxCounters);
 EXPORT_SYMBOL(RGXHWPerfConfigureAndEnableCustomCounters);
 #endif
 EXPORT_SYMBOL(RGXHWPerfDisableCounters);
@@ -133,26 +143,37 @@ EXPORT_SYMBOL(OSRemoveTimer);
 #endif
 #endif
 
-CONNECTION_DATA *LinuxConnectionFromFile(struct file *pFile)
+static int PVRSRVDeviceSyncOpen(struct _PVRSRV_DEVICE_NODE_ *psDeviceNode,
+                                struct drm_file *psDRMFile);
+
+CONNECTION_DATA *LinuxServicesConnectionFromFile(struct file *pFile)
 {
 	if (pFile)
 	{
 		struct drm_file *psDRMFile = pFile->private_data;
+		PVRSRV_CONNECTION_PRIV *psConnectionPriv = (PVRSRV_CONNECTION_PRIV*)psDRMFile->driver_priv;
 
-		return psDRMFile->driver_priv;
+		return (CONNECTION_DATA*)psConnectionPriv->pvConnectionData;
 	}
 
 	return NULL;
 }
 
-struct file *LinuxFileFromConnection(CONNECTION_DATA *psConnection)
+CONNECTION_DATA *LinuxSyncConnectionFromFile(struct file *pFile)
 {
-	ENV_CONNECTION_DATA *psEnvConnection;
+	if (pFile)
+	{
+		struct drm_file *psDRMFile = pFile->private_data;
+		PVRSRV_CONNECTION_PRIV *psConnectionPriv = (PVRSRV_CONNECTION_PRIV*)psDRMFile->driver_priv;
 
-	psEnvConnection = PVRSRVConnectionPrivateData(psConnection);
-	PVR_ASSERT(psEnvConnection != NULL);
+#if (PVRSRV_DEVICE_INIT_MODE == PVRSRV_LINUX_DEV_INIT_ON_CONNECT)
+		return (CONNECTION_DATA*)psConnectionPriv->pvConnectionData;
+#else
+		return (CONNECTION_DATA*)psConnectionPriv->pvSyncConnectionData;
+#endif
+	}
 
-	return psEnvConnection->psFile;
+	return NULL;
 }
 
 /**************************************************************************/ /*!
@@ -165,35 +186,50 @@ int PVRSRVDriverInit(void)
 	PVRSRV_ERROR error;
 	int os_err;
 
+//	DRM_ERROR("%s %d: ericyin enter\n", __func__, __LINE__);
+
 	error = PVROSFuncInit();
 	if (error != PVRSRV_OK)
 	{
+//		DRM_ERROR("%s %d: ericyin failed\n", __func__, __LINE__);
 		return -ENOMEM;
 	}
+//	else
+//	{
+//		DRM_ERROR("%s %d: ericyin OK???\n", __func__, __LINE__);
+//	}
+
+	error = PVRSRVCommonDriverInit();
+	if (error != PVRSRV_OK)
+	{
+//		DRM_ERROR("%s %d: ericyin failed\n", __func__, __LINE__);
+		return -ENODEV;
+	}
+//	else
+//	{
+//		DRM_ERROR("%s %d: ericyin OK???\n", __func__, __LINE__);
+//	}
 
 #if defined(SUPPORT_NATIVE_FENCE_SYNC)
 	error = pvr_sync_register_functions();
 	if (error != PVRSRV_OK)
 	{
+//		DRM_ERROR("%s %d: ericyin failed\n", __func__, __LINE__);
 		return -EPERM;
 	}
 
 	os_err = pvr_sync_init();
 	if (os_err != 0)
 	{
+//		DRM_ERROR("%s %d: ericyin failed\n", __func__, __LINE__);
 		return os_err;
 	}
 #endif
 
-	error = PVRSRVCommonDriverInit();
-	if (error != PVRSRV_OK)
-	{
-		return -ENODEV;
-	}
-
 	os_err = pvr_apphint_init();
 	if (os_err != 0)
 	{
+//		DRM_ERROR("%s %d: ericyin failed AppHint setup(%d)\n", __func__, __LINE__, os_err);
 		PVR_DPF((PVR_DBG_WARNING, "%s: failed AppHint setup(%d)", __func__,
 			     os_err));
 	}
@@ -202,29 +238,55 @@ int PVRSRVDriverInit(void)
 	error = PVRGpuTraceSupportInit();
 	if (error != PVRSRV_OK)
 	{
+//		DRM_ERROR("%s %d: ericyin failed\n", __func__, __LINE__);
 		return -ENOMEM;
 	}
 #endif
 
+#if defined(ANDROID)
+#if defined(CONFIG_PROC_FS)
+	error = PVRProcFsRegister();
+	if (error != PVRSRV_OK)
+	{
+//		DRM_ERROR("%s %d: ericyin failed\n", __func__, __LINE__);
+		return -ENOMEM;
+	}
+#elif defined(CONFIG_DEBUG_FS)
+	error = PVRDebugFsRegister();
+	if (error != PVRSRV_OK)
+	{
+//		DRM_ERROR("%s %d: ericyin failed\n", __func__, __LINE__);
+		return -ENOMEM;
+	}
+#endif /* defined(CONFIG_PROC_FS) || defined(CONFIG_DEBUG_FS) */
+#else
 #if defined(CONFIG_DEBUG_FS)
 	error = PVRDebugFsRegister();
 	if (error != PVRSRV_OK)
 	{
+//		DRM_ERROR("%s %d: ericyin failed\n", __func__, __LINE__);
 		return -ENOMEM;
 	}
 #elif defined(CONFIG_PROC_FS)
 	error = PVRProcFsRegister();
 	if (error != PVRSRV_OK)
 	{
+//		DRM_ERROR("%s %d: ericyin failed\n", __func__, __LINE__);
 		return -ENOMEM;
 	}
 #endif /* defined(CONFIG_DEBUG_FS) || defined(CONFIG_PROC_FS) */
+#endif /* defined(ANDROID) */
 
 	error = PVRSRVIonStatsInitialise();
 	if (error != PVRSRV_OK)
 	{
+//		DRM_ERROR("%s %d: ericyin failed\n", __func__, __LINE__);
 		return -ENODEV;
 	}
+//	else
+//	{
+//		DRM_ERROR("%s %d: ericyin OK???\n", __func__, __LINE__);
+//	}
 
 #if defined(SUPPORT_RGX)
 	/* calling here because we need to handle input from the file even
@@ -234,6 +296,7 @@ int PVRSRVDriverInit(void)
 	PVRGpuTraceInitAppHintCallbacks(NULL);
 #endif
 
+//	DRM_ERROR("%s %d: ericyin exit OK\n", __func__, __LINE__);
 	return 0;
 }
 
@@ -244,9 +307,14 @@ int PVRSRVDriverInit(void)
 */ /***************************************************************************/
 void PVRSRVDriverDeinit(void)
 {
+//	DRM_ERROR("%s %d: ericyin enter\n", __func__, __LINE__);
 	pvr_apphint_deinit();
 
 	PVRSRVIonStatsDestroy();
+
+#if defined(SUPPORT_NATIVE_FENCE_SYNC)
+	pvr_sync_deinit();
+#endif
 
 	PVRSRVCommonDriverDeInit();
 
@@ -254,11 +322,8 @@ void PVRSRVDriverDeinit(void)
 	PVRGpuTraceSupportDeInit();
 #endif
 
-#if defined(SUPPORT_NATIVE_FENCE_SYNC)
-	pvr_sync_deinit();
-#endif
-
 	PVROSFuncDeInit();
+//	DRM_ERROR("%s %d: ericyin exit OK\n", __func__, __LINE__);
 }
 
 /**************************************************************************/ /*!
@@ -270,8 +335,6 @@ void PVRSRVDriverDeinit(void)
 */ /***************************************************************************/
 int PVRSRVDeviceInit(PVRSRV_DEVICE_NODE *psDeviceNode)
 {
-	int error = 0;
-
 #if defined(SUPPORT_NATIVE_FENCE_SYNC)
 	{
 		PVRSRV_ERROR eError = pvr_sync_device_init(psDeviceNode->psDevConfig->pvOSDevice);
@@ -285,25 +348,16 @@ int PVRSRVDeviceInit(PVRSRV_DEVICE_NODE *psDeviceNode)
 #endif
 
 #if defined(SUPPORT_RGX)
-	error = PVRGpuTraceInitDevice(psDeviceNode);
-	if (error != 0)
 	{
-		PVR_DPF((PVR_DBG_WARNING,
-			 "%s: failed to initialise PVR GPU Tracing on device%d (%d)",
-			 __func__, psDeviceNode->sDevId.i32OsDeviceID, error));
+		int error = PVRGpuTraceInitDevice(psDeviceNode);
+		if (error != 0)
+		{
+			PVR_DPF((PVR_DBG_WARNING,
+				 "%s: failed to initialise PVR GPU Tracing on device%d (%d)",
+				 __func__, psDeviceNode->sDevId.i32OsDeviceID, error));
+		}
 	}
 #endif
-
-	/* register the AppHint device control before device initialisation
-	 * so individual AppHints can be configured during the init phase
-	 */
-	error = pvr_apphint_device_register(psDeviceNode);
-	if (error != 0)
-	{
-		PVR_DPF((PVR_DBG_WARNING,
-			 "%s: failed to initialise device AppHints (%d)",
-			 __func__, error));
-	}
 
 	return 0;
 }
@@ -317,8 +371,6 @@ int PVRSRVDeviceInit(PVRSRV_DEVICE_NODE *psDeviceNode)
 */ /***************************************************************************/
 void PVRSRVDeviceDeinit(PVRSRV_DEVICE_NODE *psDeviceNode)
 {
-	pvr_apphint_device_unregister(psDeviceNode);
-
 #if defined(SUPPORT_RGX)
 	PVRGpuTraceDeInitDevice(psDeviceNode);
 #endif
@@ -337,49 +389,47 @@ void PVRSRVDeviceDeinit(PVRSRV_DEVICE_NODE *psDeviceNode)
 /**************************************************************************/ /*!
 @Function     PVRSRVDeviceShutdown
 @Description  Common device shutdown.
-@Input        psDeviceNode  The device node representing the device that should
-                            be shutdown
+@Input        psDev  The device node representing the device that should
+                     be shutdown
 @Return       void
 */ /***************************************************************************/
 
-void PVRSRVDeviceShutdown(PVRSRV_DEVICE_NODE *psDeviceNode)
+void PVRSRVDeviceShutdown(struct drm_device *psDev)
 {
-	PVRSRV_ERROR eError;
+	struct pvr_drm_private *psDevPriv = psDev->dev_private;
+	PVRSRV_DEVICE_NODE *psDeviceNode = psDevPriv->dev_node;
 
-	/*
-	 * Disable the bridge to stop processes trying to use the driver
-	 * after it has been shut down.
-	 */
-	eError = LinuxBridgeBlockClientsAccess(IMG_TRUE);
+	/* Since this is a shutdown request ignore the returned error and try to
+	 * to power off the device. This is done because there is no way of
+	 * signalling the OS that this call failed. */
+	(void) LinuxBridgeBlockClientsAccess(psDevPriv, IMG_TRUE);
 
-	if (eError != PVRSRV_OK)
-	{
-		PVR_DPF((PVR_DBG_ERROR,
-			"%s: Failed to suspend driver (%d)",
-			__func__, eError));
-		return;
-	}
-
+	/* Passing PVRSRV_POWER_FLAGS_NONE as there are no special actions required
+	 * from the shutdown call beside the regular device power off. */
 	(void) PVRSRVSetDeviceSystemPowerState(psDeviceNode,
 	                                       PVRSRV_SYS_POWER_STATE_OFF,
-	                                       IMG_FALSE);
+	                                       PVRSRV_POWER_FLAGS_NONE);
 }
 
 /**************************************************************************/ /*!
 @Function     PVRSRVDeviceSuspend
 @Description  Common device suspend.
-@Input        psDeviceNode  The device node representing the device that should
-                            be suspended
-@Return       int           0 on success and a Linux error code otherwise
+@Input        psDev  The device node representing the device that should
+                     be suspended
+@Return       int    0 on success and a Linux error code otherwise
 */ /***************************************************************************/
-int PVRSRVDeviceSuspend(PVRSRV_DEVICE_NODE *psDeviceNode)
+int PVRSRVDeviceSuspend(struct drm_device *psDev)
 {
-	/*
-	 * LinuxBridgeBlockClientsAccess prevents processes from using the driver
-	 * while it's suspended (this is needed for Android). Acquire the bridge
-	 * lock first to ensure the driver isn't currently in use.
-	 */
-	LinuxBridgeBlockClientsAccess(IMG_FALSE);
+	struct pvr_drm_private *psDevPriv = psDev->dev_private;
+	PVRSRV_DEVICE_NODE *psDeviceNode = psDevPriv->dev_node;
+	PVRSRV_ERROR eError;
+
+	/* LinuxBridgeBlockClientsAccess prevents processes from using the driver
+	 * while it's suspended (this is needed for Android). */
+	eError = LinuxBridgeBlockClientsAccess(psDevPriv, IMG_FALSE);
+	PVR_LOG_RETURN_IF_FALSE_VA(eError == PVRSRV_OK, -EFAULT,
+	                           "LinuxBridgeBlockClientsAccess() failed with error %u",
+	                           eError);
 
 #if defined(SUPPORT_AUTOVZ)
 	/* To allow the driver to power down the GPU under AutoVz, the firmware must
@@ -389,9 +439,10 @@ int PVRSRVDeviceSuspend(PVRSRV_DEVICE_NODE *psDeviceNode)
 
 	if (PVRSRVSetDeviceSystemPowerState(psDeviceNode,
 										PVRSRV_SYS_POWER_STATE_OFF,
-										IMG_TRUE) != PVRSRV_OK)
+										PVRSRV_POWER_FLAGS_SUSPEND_REQ) != PVRSRV_OK)
 	{
-		LinuxBridgeUnblockClientsAccess();
+		/* Ignore return error as we're already returning an error here. */
+		(void) LinuxBridgeUnblockClientsAccess(psDevPriv);
 		return -EINVAL;
 	}
 
@@ -401,20 +452,24 @@ int PVRSRVDeviceSuspend(PVRSRV_DEVICE_NODE *psDeviceNode)
 /**************************************************************************/ /*!
 @Function     PVRSRVDeviceResume
 @Description  Common device resume.
-@Input        psDeviceNode  The device node representing the device that should
-                            be resumed
-@Return       int           0 on success and a Linux error code otherwise
+@Input        psDev  The device node representing the device that should
+                     be resumed
+@Return       int    0 on success and a Linux error code otherwise
 */ /***************************************************************************/
-int PVRSRVDeviceResume(PVRSRV_DEVICE_NODE *psDeviceNode)
+int PVRSRVDeviceResume(struct drm_device *psDev)
 {
+	struct pvr_drm_private *psDevPriv = psDev->dev_private;
+	PVRSRV_DEVICE_NODE *psDeviceNode = psDevPriv->dev_node;
+
 	if (PVRSRVSetDeviceSystemPowerState(psDeviceNode,
 										PVRSRV_SYS_POWER_STATE_ON,
-										IMG_TRUE) != PVRSRV_OK)
+										PVRSRV_POWER_FLAGS_RESUME_REQ) != PVRSRV_OK)
 	{
 		return -EINVAL;
 	}
 
-	LinuxBridgeUnblockClientsAccess();
+	/* Ignore return error. We should proceed even if this fails. */
+	(void) LinuxBridgeUnblockClientsAccess(psDevPriv);
 
 	/*
 	 * Reprocess the device queues in case commands were blocked during
@@ -429,21 +484,21 @@ int PVRSRVDeviceResume(PVRSRV_DEVICE_NODE *psDeviceNode)
 }
 
 /**************************************************************************/ /*!
-@Function     PVRSRVDeviceOpen
-@Description  Common device open.
+@Function     PVRSRVDeviceServicesOpen
+@Description  Services device open.
 @Input        psDeviceNode  The device node representing the device being
                             opened by a user mode process
 @Input        psDRMFile     The DRM file data that backs the file handle
                             returned to the user mode process
 @Return       int           0 on success and a Linux error code otherwise
 */ /***************************************************************************/
-int PVRSRVDeviceOpen(PVRSRV_DEVICE_NODE *psDeviceNode,
-						   struct drm_file *psDRMFile)
+int PVRSRVDeviceServicesOpen(PVRSRV_DEVICE_NODE *psDeviceNode,
+                             struct drm_file *psDRMFile)
 {
 	static DEFINE_MUTEX(sDeviceInitMutex);
 	PVRSRV_DATA *psPVRSRVData = PVRSRVGetPVRSRVData();
 	ENV_CONNECTION_PRIVATE_DATA sPrivData;
-	void *pvConnectionData;
+	PVRSRV_CONNECTION_PRIV *psConnectionPriv;
 	PVRSRV_ERROR eError;
 	int iErr = 0;
 
@@ -468,6 +523,23 @@ int PVRSRVDeviceOpen(PVRSRV_DEVICE_NODE *psDeviceNode,
 		goto out;
 	}
 
+	if (psDRMFile->driver_priv == NULL)
+	{
+		/* Allocate psConnectionPriv (stores private data and release pfn under driver_priv) */
+		psConnectionPriv = kzalloc(sizeof(*psConnectionPriv), GFP_KERNEL);
+		if (!psConnectionPriv)
+		{
+			PVR_DPF((PVR_DBG_ERROR, "%s: No memory to allocate driver_priv data", __func__));
+			iErr = -ENOMEM;
+			mutex_unlock(&sDeviceInitMutex);
+			goto fail_alloc_connection_priv;
+		}
+	}
+	else
+	{
+		psConnectionPriv = (PVRSRV_CONNECTION_PRIV*)psDRMFile->driver_priv;
+	}
+
 	if (psDeviceNode->eDevState == PVRSRV_DEVICE_STATE_INIT)
 	{
 		eError = PVRSRVCommonDeviceInitialise(psDeviceNode);
@@ -477,7 +549,7 @@ int PVRSRVDeviceOpen(PVRSRV_DEVICE_NODE *psDeviceNode,
 					 __func__, PVRSRVGetErrorString(eError)));
 			iErr = -ENODEV;
 			mutex_unlock(&sDeviceInitMutex);
-			goto out;
+			goto fail_device_init;
 		}
 
 #if defined(SUPPORT_RGX)
@@ -487,22 +559,141 @@ int PVRSRVDeviceOpen(PVRSRV_DEVICE_NODE *psDeviceNode,
 	mutex_unlock(&sDeviceInitMutex);
 
 	sPrivData.psDevNode = psDeviceNode;
-	sPrivData.psFile = psDRMFile->filp;
 
 	/*
 	 * Here we pass the file pointer which will passed through to our
 	 * OSConnectionPrivateDataInit function where we can save it so
 	 * we can back reference the file structure from its connection
 	 */
-	eError = PVRSRVCommonConnectionConnect(&pvConnectionData, (void *) &sPrivData);
+	eError = PVRSRVCommonConnectionConnect(&psConnectionPriv->pvConnectionData,
+	                                       (void *)&sPrivData);
 	if (eError != PVRSRV_OK)
 	{
 		iErr = -ENOMEM;
+		goto fail_connect;
+	}
+
+#if (PVRSRV_DEVICE_INIT_MODE == PVRSRV_LINUX_DEV_INIT_ON_CONNECT)
+	psConnectionPriv->pfDeviceRelease = PVRSRVCommonConnectionDisconnect;
+#endif
+	psDRMFile->driver_priv = (void*)psConnectionPriv;
+
+#if defined(PVRSRV_ANDROID_TRACE_GPU_WORK_PERIOD)
+	eError = PVRSRVGpuTraceWorkPeriodEventStatsRegister(
+			&psConnectionPriv->pvGpuWorkPeriodEventStats);
+	if (eError != PVRSRV_OK)
+	{
+		iErr = -ENOMEM;
+		goto fail_connect;
+	}
+#endif /* defined(PVRSRV_ANDROID_TRACE_GPU_WORK_PERIOD) */
+	goto out;
+
+fail_connect:
+fail_device_init:
+	kfree(psConnectionPriv);
+fail_alloc_connection_priv:
+out:
+	return iErr;
+}
+
+/**************************************************************************/ /*!
+@Function     PVRSRVDeviceSyncOpen
+@Description  Sync device open.
+@Input        psDeviceNode  The device node representing the device being
+                            opened by a user mode process
+@Input        psDRMFile     The DRM file data that backs the file handle
+                            returned to the user mode process
+@Return       int           0 on success and a Linux error code otherwise
+*/ /***************************************************************************/
+static int PVRSRVDeviceSyncOpen(PVRSRV_DEVICE_NODE *psDeviceNode,
+                                struct drm_file *psDRMFile)
+{
+	PVRSRV_DATA *psPVRSRVData = PVRSRVGetPVRSRVData();
+	CONNECTION_DATA *psConnection = NULL;
+	ENV_CONNECTION_PRIVATE_DATA sPrivData;
+	PVRSRV_CONNECTION_PRIV *psConnectionPriv;
+	PVRSRV_ERROR eError;
+	int iErr = 0;
+
+	if (!psPVRSRVData)
+	{
+		PVR_DPF((PVR_DBG_ERROR, "%s: No device data", __func__));
+		iErr = -ENODEV;
 		goto out;
 	}
 
-	psDRMFile->driver_priv = pvConnectionData;
+	if (psDRMFile->driver_priv == NULL)
+	{
+		/* Allocate psConnectionPriv (stores private data and release pfn under driver_priv) */
+		psConnectionPriv = kzalloc(sizeof(*psConnectionPriv), GFP_KERNEL);
+		if (!psConnectionPriv)
+		{
+			PVR_DPF((PVR_DBG_ERROR, "%s: No memory to allocate driver_priv data", __func__));
+			iErr = -ENOMEM;
+			goto out;
+		}
+	}
+	else
+	{
+		psConnectionPriv = (PVRSRV_CONNECTION_PRIV*)psDRMFile->driver_priv;
+	}
 
+	/* Allocate connection data area, no stats since process not registered yet */
+	psConnection = kzalloc(sizeof(*psConnection), GFP_KERNEL);
+	if (!psConnection)
+	{
+		PVR_DPF((PVR_DBG_ERROR, "%s: No memory to allocate connection data", __func__));
+		iErr = -ENOMEM;
+		goto fail_alloc_connection;
+	}
+#if (PVRSRV_DEVICE_INIT_MODE == PVRSRV_LINUX_DEV_INIT_ON_CONNECT)
+	psConnectionPriv->pvConnectionData = (void*)psConnection;
+#else
+	psConnectionPriv->pvSyncConnectionData = (void*)psConnection;
+#endif
+
+	sPrivData.psDevNode = psDeviceNode;
+
+	/* Call environment specific connection data init function */
+	eError = OSConnectionPrivateDataInit(&psConnection->hOsPrivateData, &sPrivData);
+	if (eError != PVRSRV_OK)
+	{
+		PVR_DPF((PVR_DBG_ERROR, "%s: OSConnectionPrivateDataInit() failed (%s)",
+		        __func__, PVRSRVGetErrorString(eError)));
+		goto fail_private_data_init;
+	}
+
+#if defined(SUPPORT_NATIVE_FENCE_SYNC) && !defined(USE_PVRSYNC_DEVNODE)
+#if (PVRSRV_DEVICE_INIT_MODE == PVRSRV_LINUX_DEV_INIT_ON_CONNECT)
+	iErr = pvr_sync_open(psConnectionPriv->pvConnectionData, psDRMFile);
+#else
+	iErr = pvr_sync_open(psConnectionPriv->pvSyncConnectionData, psDRMFile);
+#endif
+	if (iErr)
+	{
+		PVR_DPF((PVR_DBG_ERROR, "%s: pvr_sync_open() failed(%d)",
+				__func__, iErr));
+		goto fail_pvr_sync_open;
+	}
+#endif
+
+#if defined(SUPPORT_NATIVE_FENCE_SYNC) && !defined(USE_PVRSYNC_DEVNODE)
+#if (PVRSRV_DEVICE_INIT_MODE == PVRSRV_LINUX_DEV_INIT_ON_CONNECT)
+	psConnectionPriv->pfDeviceRelease = pvr_sync_close;
+#endif
+#endif
+	psDRMFile->driver_priv = psConnectionPriv;
+	goto out;
+
+#if defined(SUPPORT_NATIVE_FENCE_SYNC) && !defined(USE_PVRSYNC_DEVNODE)
+fail_pvr_sync_open:
+	OSConnectionPrivateDataDeInit(psConnection->hOsPrivateData);
+#endif
+fail_private_data_init:
+	kfree(psConnection);
+fail_alloc_connection:
+	kfree(psConnectionPriv);
 out:
 	return iErr;
 }
@@ -516,15 +707,72 @@ out:
 @Return       void
 */ /***************************************************************************/
 void PVRSRVDeviceRelease(PVRSRV_DEVICE_NODE *psDeviceNode,
-							   struct drm_file *psDRMFile)
+                         struct drm_file *psDRMFile)
 {
-	void *pvConnectionData = psDRMFile->driver_priv;
-
 	PVR_UNREFERENCED_PARAMETER(psDeviceNode);
 
-	psDRMFile->driver_priv = NULL;
-	if (pvConnectionData)
+	if (psDRMFile->driver_priv)
 	{
-		PVRSRVCommonConnectionDisconnect(pvConnectionData);
+		PVRSRV_CONNECTION_PRIV *psConnectionPriv = (PVRSRV_CONNECTION_PRIV*)psDRMFile->driver_priv;
+
+		if (psConnectionPriv->pvConnectionData)
+		{
+#if defined(PVRSRV_ANDROID_TRACE_GPU_WORK_PERIOD)
+			if (psConnectionPriv->pvGpuWorkPeriodEventStats)
+			{
+				PVRSRVGpuTraceWorkPeriodEventStatsUnregister(
+						psConnectionPriv->pvGpuWorkPeriodEventStats);
+				psConnectionPriv->pvGpuWorkPeriodEventStats = NULL;
+			}
+#endif /* defined(PVRSRV_ANDROID_TRACE_GPU_WORK_PERIOD) */
+
+#if (PVRSRV_DEVICE_INIT_MODE == PVRSRV_LINUX_DEV_INIT_ON_CONNECT)
+			if (psConnectionPriv->pfDeviceRelease)
+			{
+				psConnectionPriv->pfDeviceRelease(psConnectionPriv->pvConnectionData);
+			}
+#else
+			if (psConnectionPriv->pvConnectionData)
+				PVRSRVCommonConnectionDisconnect(psConnectionPriv->pvConnectionData);
+
+#if defined(SUPPORT_NATIVE_FENCE_SYNC) && !defined(USE_PVRSYNC_DEVNODE)
+			if (psConnectionPriv->pvSyncConnectionData)
+				pvr_sync_close(psConnectionPriv->pvSyncConnectionData);
+#endif
+#endif
+		}
+
+		kfree(psDRMFile->driver_priv);
+		psDRMFile->driver_priv = NULL;
 	}
+}
+
+int
+drm_pvr_srvkm_init(struct drm_device *dev, void *arg, struct drm_file *psDRMFile)
+{
+	struct drm_pvr_srvkm_init_data *data = arg;
+	struct pvr_drm_private *priv = dev->dev_private;
+	int iErr = 0;
+
+	switch (data->init_module)
+	{
+		case PVR_SRVKM_SYNC_INIT:
+		{
+			iErr = PVRSRVDeviceSyncOpen(priv->dev_node, psDRMFile);
+			break;
+		}
+		case PVR_SRVKM_SERVICES_INIT:
+		{
+			iErr = PVRSRVDeviceServicesOpen(priv->dev_node, psDRMFile);
+			break;
+		}
+		default:
+		{
+			PVR_DPF((PVR_DBG_ERROR, "%s: invalid init_module (%d)",
+			        __func__, data->init_module));
+			iErr = -EINVAL;
+		}
+	}
+
+	return iErr;
 }

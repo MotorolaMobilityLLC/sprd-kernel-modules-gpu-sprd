@@ -156,12 +156,12 @@ static PVRSRV_ERROR MTKSysDevPrePowerState(
 		IMG_HANDLE hSysData,
 		PVRSRV_SYS_POWER_STATE eNewPowerState,
 		PVRSRV_SYS_POWER_STATE eCurrentPowerState,
-		IMG_BOOL bForced)
+		PVRSRV_POWER_FLAGS ePwrFlags)
 {
 	struct mtk_mfg *mfg = hSysData;
 
-	mtk_mfg_debug("MTKSysDevPrePowerState (%d->%d), bForced = %d\n",
-		      eCurrentPowerState, eNewPowerState, bForced);
+	mtk_mfg_debug("MTKSysDevPrePowerState (%d->%d), bPwrFlags = 0x%08x\n",
+		      eCurrentPowerState, eNewPowerState, ePwrFlags);
 
 	mutex_lock(&mfg->set_power_state);
 
@@ -177,7 +177,7 @@ static PVRSRV_ERROR MTKSysDevPostPowerState(
 		IMG_HANDLE hSysData,
 		PVRSRV_SYS_POWER_STATE eNewPowerState,
 		PVRSRV_SYS_POWER_STATE eCurrentPowerState,
-		IMG_BOOL bForced)
+		PVRSRV_POWER_FLAGS ePwrFlags)
 {
 	struct mtk_mfg *mfg = hSysData;
 	PVRSRV_ERROR ret;
@@ -440,6 +440,7 @@ PVRSRV_ERROR SysDevInit(void *pvOSDevice, PVRSRV_DEVICE_CONFIG **ppsDevConfig)
 	/* Device's physical heaps */
 	gsDevice.pasPhysHeaps = &gsPhysHeapConfig;
 	gsDevice.ui32PhysHeapCount = 1;
+	gsDevice.eDefaultHeap = PVRSRV_PHYS_HEAP_GPU_LOCAL;
 
 	gsDevice.ui32IRQ = mfg->rgx_irq;
 

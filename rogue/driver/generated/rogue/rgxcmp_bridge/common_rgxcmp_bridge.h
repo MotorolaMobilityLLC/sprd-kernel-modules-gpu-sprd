@@ -76,11 +76,11 @@ typedef struct PVRSRV_BRIDGE_IN_RGXCREATECOMPUTECONTEXT_TAG
 	IMG_HANDLE hPrivData;
 	IMG_BYTE *pui8FrameworkCmd;
 	IMG_BYTE *pui8StaticComputeContextState;
+	IMG_INT32 i32Priority;
 	IMG_UINT32 ui32ContextFlags;
-	IMG_UINT32 ui32FrameworkCmdize;
+	IMG_UINT32 ui32FrameworkCmdSize;
 	IMG_UINT32 ui32MaxDeadlineMS;
 	IMG_UINT32 ui32PackedCCBSizeU88;
-	IMG_UINT32 ui32Priority;
 	IMG_UINT32 ui32StaticComputeContextStateSize;
 } __packed PVRSRV_BRIDGE_IN_RGXCREATECOMPUTECONTEXT;
 
@@ -131,7 +131,7 @@ typedef struct PVRSRV_BRIDGE_OUT_RGXFLUSHCOMPUTEDATA_TAG
 typedef struct PVRSRV_BRIDGE_IN_RGXSETCOMPUTECONTEXTPRIORITY_TAG
 {
 	IMG_HANDLE hComputeContext;
-	IMG_UINT32 ui32Priority;
+	IMG_INT32 i32Priority;
 } __packed PVRSRV_BRIDGE_IN_RGXSETCOMPUTECONTEXTPRIORITY;
 
 /* Bridge out structure for RGXSetComputeContextPriority */
@@ -174,7 +174,6 @@ typedef struct PVRSRV_BRIDGE_IN_RGXKICKCDM2_TAG
 	IMG_HANDLE *phSyncPMRs;
 	PVRSRV_FENCE hCheckFenceFd;
 	PVRSRV_TIMELINE hUpdateTimeline;
-	IMG_UINT32 ui32ClientCacheOpSeqNum;
 	IMG_UINT32 ui32ClientUpdateCount;
 	IMG_UINT32 ui32CmdSize;
 	IMG_UINT32 ui32ExtJobRef;

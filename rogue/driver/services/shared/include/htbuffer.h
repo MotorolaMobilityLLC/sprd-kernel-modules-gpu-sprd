@@ -89,7 +89,7 @@ extern "C" {
  @Input         TID             The TID (Thread ID) of the thread the event is
                                 associated with.
 
- @Input         TimeStampus     The timestamp in us for this event
+ @Input         ui64TimeStamp   The timestamp for this event
 
  @Input         SF              The log event ID
 
@@ -99,7 +99,7 @@ extern "C" {
 
 */ /**************************************************************************/
 IMG_INTERNAL PVRSRV_ERROR
-HTBLog(IMG_HANDLE hSrvHandle, IMG_UINT32 PID, IMG_UINT32 TID, IMG_UINT64 ui64TimeStampns, IMG_UINT32 SF, ...);
+HTBLog(IMG_HANDLE hSrvHandle, IMG_UINT32 PID, IMG_UINT32 TID, IMG_UINT64 ui64TimeStamp, IMG_UINT32 SF, ...);
 
 
 /*************************************************************************/ /*!

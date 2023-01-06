@@ -72,6 +72,9 @@ static PVRSRV_ERROR _DICreateContextpsContextIntRelease(void *pvData)
 	return eError;
 }
 
+static_assert(PRVSRVTL_MAX_STREAM_NAME_SIZE <= IMG_UINT32_MAX,
+	      "PRVSRVTL_MAX_STREAM_NAME_SIZE must not be larger than IMG_UINT32_MAX");
+
 static IMG_INT
 PVRSRVBridgeDICreateContext(IMG_UINT32 ui32DispatchTableEntry,
 			    IMG_UINT8 * psDICreateContextIN_UI8,
@@ -223,9 +226,9 @@ PVRSRVBridgeDIDestroyContext(IMG_UINT32 ui32DispatchTableEntry,
 	LockHandle(psConnection->psHandleBase);
 
 	psDIDestroyContextOUT->eError =
-	    PVRSRVReleaseHandleStagedUnlock(psConnection->psHandleBase,
-					    (IMG_HANDLE) psDIDestroyContextIN->hContext,
-					    PVRSRV_HANDLE_TYPE_DI_CONTEXT);
+	    PVRSRVDestroyHandleStagedUnlocked(psConnection->psHandleBase,
+					      (IMG_HANDLE) psDIDestroyContextIN->hContext,
+					      PVRSRV_HANDLE_TYPE_DI_CONTEXT);
 	if (unlikely((psDIDestroyContextOUT->eError != PVRSRV_OK) &&
 		     (psDIDestroyContextOUT->eError != PVRSRV_ERROR_KERNEL_CCB_FULL) &&
 		     (psDIDestroyContextOUT->eError != PVRSRV_ERROR_RETRY)))
@@ -406,9 +409,9 @@ PVRSRVBridgeDIWriteEntry(IMG_UINT32 ui32DispatchTableEntry,
 	IMG_UINT32 ui32BufferSize = 0;
 	IMG_UINT64 ui64BufferSize =
 	    ((IMG_UINT64) DI_IMPL_BRG_PATH_LEN * sizeof(IMG_CHAR)) +
-	    ((IMG_UINT64) psDIWriteEntryIN->ui64ValueSize * sizeof(IMG_CHAR)) + 0;
+	    ((IMG_UINT64) psDIWriteEntryIN->ui32ValueSize * sizeof(IMG_CHAR)) + 0;
 
-	if (unlikely(psDIWriteEntryIN->ui64ValueSize > DI_IMPL_BRG_PATH_LEN))
+	if (unlikely(psDIWriteEntryIN->ui32ValueSize > DI_IMPL_BRG_PATH_LEN))
 	{
 		psDIWriteEntryOUT->eError = PVRSRV_ERROR_BRIDGE_ARRAY_SIZE_TOO_BIG;
 		goto DIWriteEntry_exit;
@@ -470,24 +473,24 @@ PVRSRVBridgeDIWriteEntry(IMG_UINT32 ui32DispatchTableEntry,
 		}
 		((IMG_CHAR *) uiEntryPathInt)[(DI_IMPL_BRG_PATH_LEN * sizeof(IMG_CHAR)) - 1] = '\0';
 	}
-	if (psDIWriteEntryIN->ui64ValueSize != 0)
+	if (psDIWriteEntryIN->ui32ValueSize != 0)
 	{
 		uiValueInt = (IMG_CHAR *) IMG_OFFSET_ADDR(pArrayArgsBuffer, ui32NextOffset);
-		ui32NextOffset += psDIWriteEntryIN->ui64ValueSize * sizeof(IMG_CHAR);
+		ui32NextOffset += psDIWriteEntryIN->ui32ValueSize * sizeof(IMG_CHAR);
 	}
 
 	/* Copy the data over */
-	if (psDIWriteEntryIN->ui64ValueSize * sizeof(IMG_CHAR) > 0)
+	if (psDIWriteEntryIN->ui32ValueSize * sizeof(IMG_CHAR) > 0)
 	{
 		if (OSCopyFromUser
 		    (NULL, uiValueInt, (const void __user *)psDIWriteEntryIN->puiValue,
-		     psDIWriteEntryIN->ui64ValueSize * sizeof(IMG_CHAR)) != PVRSRV_OK)
+		     psDIWriteEntryIN->ui32ValueSize * sizeof(IMG_CHAR)) != PVRSRV_OK)
 		{
 			psDIWriteEntryOUT->eError = PVRSRV_ERROR_INVALID_PARAMS;
 
 			goto DIWriteEntry_exit;
 		}
-		((IMG_CHAR *) uiValueInt)[(psDIWriteEntryIN->ui64ValueSize * sizeof(IMG_CHAR)) -
+		((IMG_CHAR *) uiValueInt)[(psDIWriteEntryIN->ui32ValueSize * sizeof(IMG_CHAR)) -
 					  1] = '\0';
 	}
 
@@ -509,7 +512,7 @@ PVRSRVBridgeDIWriteEntry(IMG_UINT32 ui32DispatchTableEntry,
 
 	psDIWriteEntryOUT->eError =
 	    DIWriteEntryKM(psContextInt,
-			   uiEntryPathInt, psDIWriteEntryIN->ui64ValueSize, uiValueInt);
+			   uiEntryPathInt, psDIWriteEntryIN->ui32ValueSize, uiValueInt);
 
 DIWriteEntry_exit:
 
@@ -594,7 +597,7 @@ DIListAllEntries_exit:
  */
 
 PVRSRV_ERROR InitDIBridge(void);
-PVRSRV_ERROR DeinitDIBridge(void);
+void DeinitDIBridge(void);
 
 /*
  * Register all DI functions with services
@@ -623,7 +626,7 @@ PVRSRV_ERROR InitDIBridge(void)
 /*
  * Unregister all di functions with services
  */
-PVRSRV_ERROR DeinitDIBridge(void)
+void DeinitDIBridge(void)
 {
 
 	UnsetDispatchTableEntry(PVRSRV_BRIDGE_DI, PVRSRV_BRIDGE_DI_DICREATECONTEXT);
@@ -636,5 +639,4 @@ PVRSRV_ERROR DeinitDIBridge(void)
 
 	UnsetDispatchTableEntry(PVRSRV_BRIDGE_DI, PVRSRV_BRIDGE_DI_DILISTALLENTRIES);
 
-	return PVRSRV_OK;
 }

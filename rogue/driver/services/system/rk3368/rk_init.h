@@ -224,9 +224,9 @@ void IonDeinit(void);
 PVRSRV_ERROR RkPrePowerState(IMG_HANDLE hSysData,
 							 PVRSRV_SYS_POWER_STATE eNewPowerState,
 							 PVRSRV_SYS_POWER_STATE eCurrentPowerState,
-							 IMG_BOOL bForced);
+							 PVRSRV_POWER_FLAGS ePwrFlags);
 PVRSRV_ERROR RkPostPowerState(IMG_HANDLE hSysData,
 							  PVRSRV_SYS_POWER_STATE eNewPowerState,
 							  PVRSRV_SYS_POWER_STATE eCurrentPowerState,
-							  IMG_BOOL bForced);
+							  PVRSRV_POWER_FLAGS ePwrFlags);
 #endif /* __RK_INIT__ */

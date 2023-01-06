@@ -98,6 +98,14 @@ void PVRGpuTraceDisableUfoCallback(void);
 void PVRGpuTraceEnableFirmwareActivityCallback(void);
 void PVRGpuTraceDisableFirmwareActivityCallback(void);
 
+#if defined(PVRSRV_ANDROID_TRACE_GPU_WORK_PERIOD)
+PVRSRV_ERROR
+PVRSRVGpuTraceWorkPeriodEventStatsRegister(IMG_HANDLE*
+		phGpuWorkPeriodEventStats);
+void PVRSRVGpuTraceWorkPeriodEventStatsUnregister(
+		IMG_HANDLE hGpuWorkPeriodEventStats);
+#endif /* defined(PVRSRV_ANDROID_TRACE_GPU_WORK_PERIOD) */
+
 #else /* defined(__linux__) */
 
 static inline void PVRGpuTraceEnqueueEvent(

@@ -374,22 +374,33 @@ ifneq ($(CROSS_COMPILE_SECONDARY),)
   ifeq ($(__clang_target),mips64el-linux-android)
    __clang_target := mipsel-linux-android
   endif
+#$(warning __gcc_bindir: $(__gcc_bindir))
+#$(warning CROSS_COMPILE_SECONDARY: $(CROSS_COMPILE_SECONDARY))
+#$(warning CROSS_COMPILE_SECONDARY gcc: $(CROSS_COMPILE_SECONDARY)gcc)
   __gcc_bindir  := $(dir $(shell which $(CROSS_COMPILE_SECONDARY)gcc))
+$(warning BSP_ROOT_DIR:$(BSP_ROOT_DIR))
+  __gcc_bindir  := $(BSP_ROOT_DIR)/toolchain/prebuilts/gcc/linux-x86/aarch64/gcc-linaro-aarch64-linux-gnu-7.4/bin/
+$(warning __gcc_bindir: $(__gcc_bindir))
   ifeq ($(wildcard $(__gcc_bindir)),)
+$(warning __gcc_bindir: $(__gcc_bindir))
    __gcc_bindir := $(dir $(CROSS_COMPILE_SECONDARY)gcc)
+$(warning __gcc_bindir: $(__gcc_bindir))
   endif
+$(warning __gcc_bindir: $(__gcc_bindir))
   override CC_SECONDARY   := \
    $(CC_SECONDARY) \
    -target $(__clang_target) \
    -B$(__gcc_bindir) \
    -B$(__gcc_bindir)/../$(CROSS_TRIPLE_SECONDARY)/bin \
    --gcc-toolchain=$(__gcc_bindir)/..
+$(warning __gcc_bindir: $(__gcc_bindir))
   override CXX_SECONDARY  := \
    $(CXX_SECONDARY) \
    -target $(__clang_target) \
    -B$(__gcc_bindir) \
    -B$(__gcc_bindir)/../$(CROSS_TRIPLE_SECONDARY)/bin \
    --gcc-toolchain=$(__gcc_bindir)/..
+$(warning __gcc_bindir: $(__gcc_bindir))
  else
   ifeq ($(origin CC_SECONDARY),file)
    override CC_SECONDARY  := $(CROSS_COMPILE_SECONDARY)$(CC_SECONDARY)
@@ -398,20 +409,29 @@ ifneq ($(CROSS_COMPILE_SECONDARY),)
    override CXX_SECONDARY := $(CROSS_COMPILE_SECONDARY)$(CXX_SECONDARY)
   endif
  endif
+
+ # To determine secondary toolchain prefix.
+ __secondary_toolchain_prefix := $(CROSS_COMPILE_SECONDARY)
+ ifeq ($(SUPPORT_NEUTRINO_PLATFORM),)
+  ifeq ($(LIBGCC),)
+   __secondary_toolchain_prefix := llvm-
+  endif
+ endif
+
  ifeq ($(origin AR_SECONDARY),file)
-  override AR_SECONDARY  := $(CROSS_COMPILE_SECONDARY)$(AR_SECONDARY)
+  override AR_SECONDARY  := $(__secondary_toolchain_prefix)$(AR_SECONDARY)
  endif
  ifeq ($(origin NM_SECONDARY),file)
-  override NM_SECONDARY  := $(CROSS_COMPILE_SECONDARY)$(NM_SECONDARY)
+  override NM_SECONDARY  := $(__secondary_toolchain_prefix)$(NM_SECONDARY)
  endif
  ifeq ($(origin OBJCOPY_SECONDARY),file)
-  override OBJCOPY_SECONDARY  := $(CROSS_COMPILE_SECONDARY)$(OBJCOPY_SECONDARY)
+  override OBJCOPY_SECONDARY  := $(__secondary_toolchain_prefix)$(OBJCOPY_SECONDARY)
  endif
  ifeq ($(origin RANLIB_SECONDARY),file)
-  override RANLIB_SECONDARY  := $(CROSS_COMPILE_SECONDARY)$(RANLIB_SECONDARY)
+  override RANLIB_SECONDARY  := $(__secondary_toolchain_prefix)$(RANLIB_SECONDARY)
  endif
  ifeq ($(origin STRIP_SECONDARY),file)
-  override STRIP_SECONDARY  := $(CROSS_COMPILE_SECONDARY)$(STRIP_SECONDARY)
+  override STRIP_SECONDARY  := $(__secondary_toolchain_prefix)$(STRIP_SECONDARY)
  endif
 endif
 
@@ -437,22 +457,33 @@ override RANLIB_SECONDARY  := $(if $(V),,@)$(RANLIB_SECONDARY)
 
 ifneq ($(CROSS_COMPILE),)
  ifeq ($(cc-is-clang),true)
+$(warning __gcc_bindir: $(__gcc_bindir))
+$(warning CROSS_COMPILE gcc: $(CROSS_COMPILE)gcc)
   __gcc_bindir  := $(dir $(shell which $(CROSS_COMPILE)gcc))
+$(warning BSP_ROOT_DIR:$(BSP_ROOT_DIR))
+  __gcc_bindir  := $(BSP_ROOT_DIR)/toolchain/prebuilts/gcc/linux-x86/aarch64/gcc-linaro-aarch64-linux-gnu-7.4/bin/
+$(warning __gcc_bindir: $(__gcc_bindir))
   ifeq ($(wildcard $(__gcc_bindir)),)
+$(warning __gcc_bindir: $(__gcc_bindir))
+$(warning CROSS_COMPILE gcc: $(CROSS_COMPILE)gcc)
    __gcc_bindir := $(dir $(CROSS_COMPILE)gcc)
+$(warning __gcc_bindir: $(__gcc_bindir))
   endif
+$(warning __gcc_bindir: $(__gcc_bindir))
   override CC   := \
    $(CC) \
    -target $(CROSS_TRIPLE) \
    -B$(__gcc_bindir) \
    -B$(__gcc_bindir)/../$(CROSS_TRIPLE)/bin \
    --gcc-toolchain=$(__gcc_bindir)/..
+$(warning __gcc_bindir: $(__gcc_bindir))
   override CXX  := \
    $(CXX) \
    -target $(CROSS_TRIPLE) \
    -B$(__gcc_bindir) \
    -B$(__gcc_bindir)/../$(CROSS_TRIPLE)/bin \
    --gcc-toolchain=$(__gcc_bindir)/..
+$(warning __gcc_bindir: $(__gcc_bindir))
  else
   ifeq ($(origin CC),file)
    override CC  := $(CROSS_COMPILE)$(CC)
@@ -461,20 +492,29 @@ ifneq ($(CROSS_COMPILE),)
    override CXX := $(CROSS_COMPILE)$(CXX)
   endif
  endif
+
+ # To determine toolchain prefix.
+ __toolchain_prefix := $(CROSS_COMPILE)
+ ifeq ($(SUPPORT_NEUTRINO_PLATFORM),)
+  ifeq ($(LIBGCC),)
+   __toolchain_prefix := llvm-
+  endif
+ endif
+
  ifeq ($(origin AR),file)
-  override AR  := $(CROSS_COMPILE)$(AR)
+  override AR  := $(__toolchain_prefix)$(AR)
  endif
  ifeq ($(origin NM),file)
-  override NM  := $(CROSS_COMPILE)$(NM)
+  override NM  := $(__toolchain_prefix)$(NM)
  endif
  ifeq ($(origin OBJCOPY),file)
-  override OBJCOPY  := $(CROSS_COMPILE)$(OBJCOPY)
+  override OBJCOPY  := $(__toolchain_prefix)$(OBJCOPY)
  endif
  ifeq ($(origin RANLIB),file)
-  override RANLIB  := $(CROSS_COMPILE)$(RANLIB)
+  override RANLIB  := $(__toolchain_prefix)$(RANLIB)
  endif
  ifeq ($(origin STRIP),file)
-  override STRIP  := $(CROSS_COMPILE)$(STRIP)
+  override STRIP  := $(__toolchain_prefix)$(STRIP)
  endif
 else
  $(if $(CROSS_COMPILE_SECONDARY),$(warning CROSS_COMPILE_SECONDARY is set but CROSS_COMPILE is empty))
@@ -508,8 +548,10 @@ override ECHO              := $(if $(V),,@)$(shell which echo) -e
 override FLEX              := $(if $(V),,@)flex
 override FLEXXX            := $(if $(V),,@)flex++
 override FWINFO            := $(if $(V),,@)$(HOST_OUT)/fwinfo
+override FWINFO_64K        := $(if $(V),,@)$(HOST_OUT)/fwinfo_64k
 override GLSLC             := $(if $(V),,@)$(GLSLC)
 override GREP              := $(if $(V),,@)grep
+override GUNZIP            := $(if $(V),,@)gunzip
 override HOST_AR           := $(if $(V),,@)$(HOST_AR)
 override HOST_AS           := $(if $(V),,@)$(HOST_AS)
 override HOST_CC           := $(if $(V),,@)$(strip $(CCACHE) $(HOST_CC))

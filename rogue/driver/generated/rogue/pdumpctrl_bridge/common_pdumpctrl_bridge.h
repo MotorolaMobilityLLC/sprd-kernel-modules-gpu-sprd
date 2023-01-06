@@ -126,8 +126,8 @@ typedef struct PVRSRV_BRIDGE_IN_PVRSRVPDUMPISLASTCAPTUREFRAME_TAG
 /* Bridge out structure for PVRSRVPDumpIsLastCaptureFrame */
 typedef struct PVRSRV_BRIDGE_OUT_PVRSRVPDUMPISLASTCAPTUREFRAME_TAG
 {
-	IMG_BOOL bpbIsLastCaptureFrame;
 	PVRSRV_ERROR eError;
+	IMG_BOOL bpbIsLastCaptureFrame;
 } __packed PVRSRV_BRIDGE_OUT_PVRSRVPDUMPISLASTCAPTUREFRAME;
 
 /*******************************************

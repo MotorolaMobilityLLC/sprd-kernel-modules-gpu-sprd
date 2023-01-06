@@ -44,8 +44,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #if !defined(NO_HARDWARE)
 
 #include <linux/devfreq.h>
-#ifdef CONFIG_UNISOC_GPU_COOLING_DEVICE
-#include <linux/unisoc_gpu_cooling.h>
+#ifdef CONFIG_SPRD_GPU_COOLING_DEVICE
+#include <linux/sprd_gpu_device.h>
 #else
 #if defined(CONFIG_DEVFREQ_THERMAL)
 #include <linux/devfreq_cooling.h>
@@ -53,6 +53,15 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #endif
 #include <linux/version.h>
 #include <linux/device.h>
+#include <linux/smp.h>
+#include <trace/events/power.h>
+#include <drm/drm.h>
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 5, 0))
+#include <drm/drm_device.h>
+#include <drm/drm_file.h>
+#else
+#include <drm/drmP.h>
+#endif
 
 #include "power.h"
 #include "pvrsrv.h"
@@ -69,13 +78,34 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "kernel_compatibility.h"
 #include <sprd_init.h>
 
-static PVRSRV_DEVICE_NODE *gpsDeviceNode;
+static int _device_get_devid(struct device *dev)
+{
+	struct drm_device *ddev = dev_get_drvdata(dev);
+	int deviceId;
+
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 12, 0))
+	/*
+	 * Older kernels do not have render drm_minor member in drm_device,
+	 * so we fallback to primary node for device identification
+	 */
+	deviceId = ddev->primary->index;
+#else
+	if (ddev->render)
+		deviceId = ddev->render->index;
+	else /* when render node is NULL, fallback to primary node */
+		deviceId = ddev->primary->index;
+#endif
+
+	return deviceId;
+}
 
 static IMG_INT32 devfreq_target(struct device *dev, unsigned long *requested_freq, IMG_UINT32 flags)
 {
-	RGX_DATA		*psRGXData = (RGX_DATA*) gpsDeviceNode->psDevConfig->hDevData;
-	IMG_DVFS_DEVICE		*psDVFSDevice = &gpsDeviceNode->psDevConfig->sDVFS.sDVFSDevice;
-	IMG_DVFS_DEVICE_CFG	*psDVFSDeviceCfg = &gpsDeviceNode->psDevConfig->sDVFS.sDVFSDeviceCfg;
+	int deviceId = _device_get_devid(dev);
+	PVRSRV_DEVICE_NODE *psDeviceNode = PVRSRVGetDeviceInstanceByOSId(deviceId);
+	RGX_DATA		*psRGXData = NULL;
+	IMG_DVFS_DEVICE		*psDVFSDevice = NULL;
+	IMG_DVFS_DEVICE_CFG	*psDVFSDeviceCfg = NULL;
 	RGX_TIMING_INFORMATION	*psRGXTimingInfo = NULL;
 	IMG_UINT32		ui32Freq, ui32CurFreq, ui32Volt;
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 13, 0))
@@ -84,16 +114,26 @@ static IMG_INT32 devfreq_target(struct device *dev, unsigned long *requested_fre
 	struct dev_pm_opp *opp;
 #endif
 
-	/* Check the RGX device is initialised */
-	if (!psRGXData)
+	/* Check the device is registered */
+	if (!psDeviceNode)
 	{
-		return -ENODATA;
+		return -ENODEV;
 	}
 
 #if defined(PVR_BOOST)
 	//boost gpu frequency
 	RgxModifyTargetFreq(dev, requested_freq);
 #endif
+
+	psRGXData = (RGX_DATA*) psDeviceNode->psDevConfig->hDevData;
+	psDVFSDevice = &psDeviceNode->psDevConfig->sDVFS.sDVFSDevice;
+	psDVFSDeviceCfg = &psDeviceNode->psDevConfig->sDVFS.sDVFSDeviceCfg;
+
+	/* Check the RGX device is initialised */
+	if (!psRGXData)
+	{
+		return -ENODATA;
+	}
 
 	psRGXTimingInfo = psRGXData->psRGXTimingInfo;
 	if (!psDVFSDevice->bEnabled)
@@ -126,12 +166,14 @@ static IMG_INT32 devfreq_target(struct device *dev, unsigned long *requested_fre
 
 	ui32CurFreq = psRGXTimingInfo->ui32CoreClockSpeed;
 
+	trace_clock_set_rate("unisoc-gpu-freq", ui32CurFreq, raw_smp_processor_id());
+
 	if (ui32CurFreq == ui32Freq)
 	{
 		return 0;
 	}
 
-	if (PVRSRV_OK != PVRSRVDevicePreClockSpeedChange(gpsDeviceNode,
+	if (PVRSRV_OK != PVRSRVDevicePreClockSpeedChange(psDeviceNode,
 													 psDVFSDeviceCfg->bIdleReq,
 													 NULL))
 	{
@@ -144,7 +186,7 @@ static IMG_INT32 devfreq_target(struct device *dev, unsigned long *requested_fre
 		psRGXTimingInfo->ui32CoreClockSpeed = ui32Freq;
 	}
 
-	PVRSRVDevicePostClockSpeedChange(gpsDeviceNode, psDVFSDeviceCfg->bIdleReq,
+	PVRSRVDevicePostClockSpeedChange(psDeviceNode, psDVFSDeviceCfg->bIdleReq,
 									 NULL);
 
 	return 0;
@@ -152,12 +194,24 @@ static IMG_INT32 devfreq_target(struct device *dev, unsigned long *requested_fre
 
 static int devfreq_get_dev_status(struct device *dev, struct devfreq_dev_status *stat)
 {
-	PVRSRV_RGXDEV_INFO      *psDevInfo = gpsDeviceNode->pvDevice;
-	IMG_DVFS_DEVICE         *psDVFSDevice = &gpsDeviceNode->psDevConfig->sDVFS.sDVFSDevice;
-	RGX_DATA                *psRGXData = (RGX_DATA*) gpsDeviceNode->psDevConfig->hDevData;
+	int                      deviceId = _device_get_devid(dev);
+	PVRSRV_DEVICE_NODE      *psDeviceNode = PVRSRVGetDeviceInstanceByOSId(deviceId);
+	PVRSRV_RGXDEV_INFO      *psDevInfo = NULL;
+	IMG_DVFS_DEVICE         *psDVFSDevice = NULL;
+	RGX_DATA                *psRGXData = NULL;
 	RGX_TIMING_INFORMATION  *psRGXTimingInfo = NULL;
 	RGXFWIF_GPU_UTIL_STATS   sGpuUtilStats;
 	PVRSRV_ERROR             eError;
+
+	/* Check the device is registered */
+	if (!psDeviceNode)
+	{
+		return -ENODEV;
+	}
+
+	psDevInfo = psDeviceNode->pvDevice;
+	psDVFSDevice = &psDeviceNode->psDevConfig->sDVFS.sDVFSDevice;
+	psRGXData = (RGX_DATA*) psDeviceNode->psDevConfig->hDevData;
 
 	/* Check the RGX device is initialised */
 	if (!psDevInfo || !psRGXData)
@@ -176,7 +230,7 @@ static int devfreq_get_dev_status(struct device *dev, struct devfreq_dev_status 
 		return 0;
 	}
 
-	eError = psDevInfo->pfnGetGpuUtilStats(psDevInfo->psDeviceNode,
+	eError = psDevInfo->pfnGetGpuUtilStats(psDeviceNode,
 						psDVFSDevice->hGpuUtilUserDVFS,
 						&sGpuUtilStats);
 
@@ -187,19 +241,32 @@ static int devfreq_get_dev_status(struct device *dev, struct devfreq_dev_status 
 
 	stat->busy_time = sGpuUtilStats.ui64GpuStatActive;
 	stat->total_time = sGpuUtilStats.ui64GpuStatCumulative;
+
+	trace_clock_set_rate("unisoc-gpu-utilization", stat->busy_time*100/stat->total_time, raw_smp_processor_id());
 /*	PVR_DPF((PVR_DBG_WARNING, "GPU DVFS %s busy_time=%lu total_time=%lu", __func__, stat->busy_time, stat->total_time));
 	if (0 < stat->total_time)
 	{
 		PVR_DPF((PVR_DBG_WARNING, "GPU DVFS %s percent=%lu", __func__, stat->busy_time*100/stat->total_time));
 	}
 */
+
 	return 0;
 }
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 8, 0))
 static IMG_INT32 devfreq_cur_freq(struct device *dev, unsigned long *freq)
 {
-	RGX_DATA *psRGXData = (RGX_DATA*) gpsDeviceNode->psDevConfig->hDevData;
+	int deviceId = _device_get_devid(dev);
+	PVRSRV_DEVICE_NODE *psDeviceNode = PVRSRVGetDeviceInstanceByOSId(deviceId);
+	RGX_DATA *psRGXData = NULL;
+
+	/* Check the device is registered */
+	if (!psDeviceNode)
+	{
+		return -ENODEV;
+	}
+
+	psRGXData = (RGX_DATA*) psDeviceNode->psDevConfig->hDevData;
 
 	/* Check the RGX device is initialised */
 	if (!psRGXData)
@@ -222,11 +289,19 @@ static struct devfreq_dev_profile img_devfreq_dev_profile =
 #endif
 };
 
-static int FillOPPTable(struct device *dev)
+static int FillOPPTable(struct device *dev, PVRSRV_DEVICE_NODE *psDeviceNode)
 {
 	const IMG_OPP *iopp;
 	int i, err = 0;
-	IMG_DVFS_DEVICE_CFG *psDVFSDeviceCfg = &gpsDeviceNode->psDevConfig->sDVFS.sDVFSDeviceCfg;
+	IMG_DVFS_DEVICE_CFG *psDVFSDeviceCfg = NULL;
+
+	/* Check the device exists */
+	if (!dev || !psDeviceNode)
+	{
+		return -ENODEV;
+	}
+
+	psDVFSDeviceCfg = &psDeviceNode->psDevConfig->sDVFS.sDVFSDeviceCfg;
 
 	for (i = 0, iopp = psDVFSDeviceCfg->pasOPPTable;
 	     i < psDVFSDeviceCfg->ui32OPPTableSize;
@@ -242,13 +317,21 @@ static int FillOPPTable(struct device *dev)
 	return 0;
 }
 
-static void ClearOPPTable(struct device *dev)
+static void ClearOPPTable(struct device *dev, PVRSRV_DEVICE_NODE *psDeviceNode)
 {
 #if (defined(CHROMIUMOS_KERNEL) && (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 18, 0))) || \
 	(LINUX_VERSION_CODE >= KERNEL_VERSION(3, 19, 0))
 	const IMG_OPP *iopp;
 	int i;
-	IMG_DVFS_DEVICE_CFG *psDVFSDeviceCfg = &gpsDeviceNode->psDevConfig->sDVFS.sDVFSDeviceCfg;
+	IMG_DVFS_DEVICE_CFG *psDVFSDeviceCfg = NULL;
+
+	/* Check the device exists */
+	if (!dev || !psDeviceNode)
+	{
+		return;
+	}
+
+	psDVFSDeviceCfg = &psDeviceNode->psDevConfig->sDVFS.sDVFSDeviceCfg;
 
 	for (i = 0, iopp = psDVFSDeviceCfg->pasOPPTable;
 	     i < psDVFSDeviceCfg->ui32OPPTableSize;
@@ -369,7 +452,7 @@ exit:
 	return err;
 }
 
-#if !defined(CONFIG_UNISOC_GPU_COOLING_DEVICE) && defined(CONFIG_DEVFREQ_THERMAL)
+#if !defined(CONFIG_SPRD_GPU_COOLING_DEVICE) && defined(CONFIG_DEVFREQ_THERMAL)
 static int RegisterCoolingDevice(struct device *dev,
 								 IMG_DVFS_DEVICE *psDVFSDevice,
 								 struct devfreq_cooling_power *powerOps)
@@ -377,6 +460,11 @@ static int RegisterCoolingDevice(struct device *dev,
 	struct device_node *of_node;
 	int err = 0;
 	PVRSRV_VZ_RET_IF_MODE(GUEST, err);
+
+	if (!psDVFSDevice)
+	{
+		return -EINVAL;
+	}
 
 	if (!powerOps)
 	{
@@ -407,10 +495,7 @@ PVRSRV_ERROR InitDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 {
 	IMG_DVFS_DEVICE        *psDVFSDevice = NULL;
 	IMG_DVFS_DEVICE_CFG    *psDVFSDeviceCfg = NULL;
-	IMG_DVFS_GOVERNOR_CFG  *psDVFSGovernorCfg = NULL;
-	RGX_TIMING_INFORMATION *psRGXTimingInfo = NULL;
-	struct device          *psDev = psDeviceNode->psDevConfig->pvOSDevice;
-	unsigned long           min_freq = 0, max_freq = 0, min_volt = 0;
+	struct device          *psDev;
 	PVRSRV_ERROR            eError;
 	int                     err;
 
@@ -420,19 +505,23 @@ PVRSRV_ERROR InitDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 	return PVRSRV_ERROR_NOT_SUPPORTED;
 #endif
 
-	if (gpsDeviceNode)
+	if (!psDeviceNode)
+	{
+		return PVRSRV_ERROR_INVALID_PARAMS;
+	}
+
+	if (psDeviceNode->psDevConfig->sDVFS.sDVFSDevice.bInitPending)
 	{
 		PVR_DPF((PVR_DBG_ERROR,
-				 "DVFS already initialised for device node %p",
-				 gpsDeviceNode));
+				 "DVFS initialise pending for device node %p",
+				 psDeviceNode));
 		return PVRSRV_ERROR_INIT_FAILURE;
 	}
 
-	gpsDeviceNode = psDeviceNode;
+	psDev = psDeviceNode->psDevConfig->pvOSDevice;
 	psDVFSDevice = &psDeviceNode->psDevConfig->sDVFS.sDVFSDevice;
 	psDVFSDeviceCfg = &psDeviceNode->psDevConfig->sDVFS.sDVFSDeviceCfg;
-	psDVFSGovernorCfg = &psDeviceNode->psDevConfig->sDVFS.sDVFSGovernorCfg;
-	psRGXTimingInfo = ((RGX_DATA *)psDeviceNode->psDevConfig->hDevData)->psRGXTimingInfo;
+	psDeviceNode->psDevConfig->sDVFS.sDVFSDevice.bInitPending = IMG_TRUE;
 
 #if defined(SUPPORT_SOC_TIMER)
 	if (! psDeviceNode->psDevConfig->pfnSoCTimerRead)
@@ -468,7 +557,7 @@ PVRSRV_ERROR InitDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 
 	if (psDVFSDeviceCfg->pasOPPTable)
 	{
-		err = FillOPPTable(psDev);
+		err = FillOPPTable(psDev, psDeviceNode);
 		if (err)
 		{
 			PVR_DPF((PVR_DBG_ERROR, "Failed to fill OPP table with data, %d", err));
@@ -476,6 +565,48 @@ PVRSRV_ERROR InitDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 			goto err_exit;
 		}
 	}
+
+	PVR_TRACE(("PVR DVFS init pending: dev = %p, PVR device = %p",
+			   psDev, psDeviceNode));
+
+	return PVRSRV_OK;
+
+err_exit:
+	DeinitDVFS(psDeviceNode);
+	return eError;
+}
+
+PVRSRV_ERROR RegisterDVFSDevice(PPVRSRV_DEVICE_NODE psDeviceNode)
+{
+	IMG_DVFS_DEVICE        *psDVFSDevice = NULL;
+	IMG_DVFS_DEVICE_CFG    *psDVFSDeviceCfg = NULL;
+	IMG_DVFS_GOVERNOR_CFG  *psDVFSGovernorCfg = NULL;
+	RGX_TIMING_INFORMATION *psRGXTimingInfo = NULL;
+	struct device          *psDev;
+	unsigned long           min_freq = 0, max_freq = 0, min_volt = 0;
+	PVRSRV_ERROR            eError;
+	int                     err;
+
+	if (!psDeviceNode)
+	{
+		return PVRSRV_ERROR_INVALID_PARAMS;
+	}
+
+	if (!psDeviceNode->psDevConfig->sDVFS.sDVFSDevice.bInitPending)
+	{
+		PVR_DPF((PVR_DBG_ERROR,
+				 "DVFS initialise not yet pending for device node %p",
+				 psDeviceNode));
+		return PVRSRV_ERROR_INIT_FAILURE;
+	}
+
+	psDev = psDeviceNode->psDevConfig->pvOSDevice;
+	psDVFSDevice = &psDeviceNode->psDevConfig->sDVFS.sDVFSDevice;
+	psDVFSDeviceCfg = &psDeviceNode->psDevConfig->sDVFS.sDVFSDeviceCfg;
+	psDVFSGovernorCfg = &psDeviceNode->psDevConfig->sDVFS.sDVFSGovernorCfg;
+	psRGXTimingInfo = ((RGX_DATA *)psDeviceNode->psDevConfig->hDevData)->psRGXTimingInfo;
+	psDeviceNode->psDevConfig->sDVFS.sDVFSDevice.bInitPending = IMG_FALSE;
+	psDeviceNode->psDevConfig->sDVFS.sDVFSDevice.bReady = IMG_TRUE;
 
 	err = GetOPPValues(psDev, &min_freq, &min_volt, &max_freq);
 	if (err)
@@ -521,7 +652,7 @@ PVRSRV_ERROR InitDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 		goto err_exit;
 	}
 
-	eError = SuspendDVFS();
+	eError = SuspendDVFS(psDeviceNode);
 	if (eError != PVRSRV_OK)
 	{
 		PVR_DPF((PVR_DBG_ERROR, "PVRSRVInit: Failed to suspend DVFS"));
@@ -546,8 +677,7 @@ PVRSRV_ERROR InitDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 		eError = TO_IMG_ERR(err);
 		goto err_exit;
 	}
-
-#ifdef CONFIG_UNISOC_GPU_COOLING_DEVICE
+#ifdef CONFIG_SPRD_GPU_COOLING_DEVICE
 	{
 		u64 mask = 1;
 		err = create_gpu_cooling_device(psDVFSDevice->psDevFreq, &mask);
@@ -575,26 +705,32 @@ PVRSRV_ERROR InitDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 	return PVRSRV_OK;
 
 err_exit:
-	DeinitDVFS(psDeviceNode);
+	UnregisterDVFSDevice(psDeviceNode);
 	return eError;
 }
 
-void DeinitDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
+void UnregisterDVFSDevice(PPVRSRV_DEVICE_NODE psDeviceNode)
 {
-	IMG_DVFS_DEVICE *psDVFSDevice = &psDeviceNode->psDevConfig->sDVFS.sDVFSDevice;
-	struct device *psDev = psDeviceNode->psDevConfig->pvOSDevice;
+	IMG_DVFS_DEVICE *psDVFSDevice = NULL;
+	struct device *psDev = NULL;
 	IMG_INT32 i32Error;
+
+	/* Check the device exists */
+	if (!psDeviceNode)
+	{
+		return;
+	}
 
 	PVRSRV_VZ_RETN_IF_MODE(GUEST);
 
-	PVR_ASSERT(psDeviceNode == gpsDeviceNode);
+	psDVFSDevice = &psDeviceNode->psDevConfig->sDVFS.sDVFSDevice;
+	psDev = psDeviceNode->psDevConfig->pvOSDevice;
 
 	if (! psDVFSDevice)
 	{
 		return;
 	}
-
-#ifdef CONFIG_UNISOC_GPU_COOLING_DEVICE
+#ifdef CONFIG_SPRD_GPU_COOLING_DEVICE
 	destroy_gpu_cooling_device();
 #else
 #if defined(CONFIG_DEVFREQ_THERMAL)
@@ -632,8 +768,29 @@ void DeinitDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 #endif
 	}
 
+
+	psDVFSDevice->bInitPending = IMG_FALSE;
+	psDVFSDevice->bReady = IMG_FALSE;
+}
+
+void DeinitDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
+{
+	IMG_DVFS_DEVICE *psDVFSDevice = NULL;
+	struct device *psDev = NULL;
+
+	/* Check the device exists */
+	if (!psDeviceNode)
+	{
+		return;
+	}
+
+	PVRSRV_VZ_RETN_IF_MODE(GUEST);
+
+	psDVFSDevice = &psDeviceNode->psDevConfig->sDVFS.sDVFSDevice;
+	psDev = psDeviceNode->psDevConfig->pvOSDevice;
+
 	/* Remove OPP entries for this device */
-	ClearOPPTable(psDev);
+	ClearOPPTable(psDev, psDeviceNode);
 
 #if defined(CONFIG_OF)
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 19, 0)) || \
@@ -644,22 +801,37 @@ void DeinitDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 
 	SORgxGpuUtilStatsUnregister(psDVFSDevice->hGpuUtilUserDVFS);
 	psDVFSDevice->hGpuUtilUserDVFS = NULL;
-
-	gpsDeviceNode = NULL;
+	psDVFSDevice->bInitPending = IMG_FALSE;
+	psDVFSDevice->bReady = IMG_FALSE;
 }
 
-PVRSRV_ERROR SuspendDVFS(void)
+PVRSRV_ERROR SuspendDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 {
-	IMG_DVFS_DEVICE	*psDVFSDevice = &gpsDeviceNode->psDevConfig->sDVFS.sDVFSDevice;
+	IMG_DVFS_DEVICE	*psDVFSDevice = NULL;
 
+	/* Check the device is registered */
+	if (!psDeviceNode)
+	{
+		return PVRSRV_ERROR_INVALID_DEVICE;
+	}
+
+	psDVFSDevice = &psDeviceNode->psDevConfig->sDVFS.sDVFSDevice;
 	psDVFSDevice->bEnabled = IMG_FALSE;
 
 	return PVRSRV_OK;
 }
 
-PVRSRV_ERROR ResumeDVFS(void)
+PVRSRV_ERROR ResumeDVFS(PPVRSRV_DEVICE_NODE psDeviceNode)
 {
-	IMG_DVFS_DEVICE	*psDVFSDevice = &gpsDeviceNode->psDevConfig->sDVFS.sDVFSDevice;
+	IMG_DVFS_DEVICE	*psDVFSDevice = NULL;
+
+	/* Check the device is registered */
+	if (!psDeviceNode)
+	{
+		return PVRSRV_ERROR_INVALID_DEVICE;
+	}
+
+	psDVFSDevice = &psDeviceNode->psDevConfig->sDVFS.sDVFSDevice;
 
 	/* Not supported in GuestOS drivers */
 	psDVFSDevice->bEnabled = !PVRSRV_VZ_MODE_IS(GUEST);

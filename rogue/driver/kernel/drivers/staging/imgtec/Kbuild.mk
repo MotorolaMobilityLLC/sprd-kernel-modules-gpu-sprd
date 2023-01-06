@@ -50,6 +50,12 @@ ccflags-y := \
  -I$(HWDEFS_DIR) \
  $(ccflags-y)
 
+ifeq ($(SUPPORT_EXTERNAL_PHYSHEAP_INTERFACE),1)
+ ccflags-y := \
+ -I$(TOP)/$(if $(SERVICES_SC),services_sc,services)/include \
+ $(ccflags-y)
+endif
+
 adf_fbdev-y += \
  kernel/drivers/staging/imgtec/adf_fbdev.o \
  kernel/drivers/staging/imgtec/adf_common.o

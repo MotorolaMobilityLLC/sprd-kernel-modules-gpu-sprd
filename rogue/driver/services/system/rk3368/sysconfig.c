@@ -183,6 +183,7 @@ PVRSRV_ERROR SysDevInit(void *pvOSDevice, PVRSRV_DEVICE_CONFIG **ppsDevConfig)
 	/* Device's physical heaps */
 	gsDevices[0].pasPhysHeaps           = &gsPhysHeapConfig[0];
 	gsDevices[0].ui32PhysHeapCount      = ui32NextPhysHeapID;
+	gsDevices[0].eDefaultHeap = PVRSRV_PHYS_HEAP_GPU_LOCAL;
 
 	/* No power management on RK system */
 	gsDevices[0].pfnPrePowerState       = RkPrePowerState;

@@ -115,7 +115,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 typedef IMG_UINT32 DEVMEM_HEAPCFGID;
 #define DEVMEM_HEAPCFG_FORCLIENTS 0
-#define DEVMEM_HEAPCFG_META 1
+#define DEVMEM_HEAPCFG_FORFW 1
 
 
 /*
@@ -125,41 +125,6 @@ typedef IMG_UINT32 DEVMEM_HEAPCFGID;
 
 typedef IMG_HANDLE DEVMEM_BRIDGE_HANDLE;
 
-/*************************************************************************/ /*!
-@Function       DevmemUnpin
-@Description    This is the counterpart to DevmemPin(). It is meant to be
-                called before repinning an allocation.
-
-                For a detailed description see client API documentation.
-
-@Input          phMemDesc       The MemDesc that is going to be unpinned.
-
-@Return         PVRSRV_ERROR:   PVRSRV_OK on success and the memory is
-                                registered to be reclaimed. Error otherwise.
-*/ /**************************************************************************/
-IMG_INTERNAL PVRSRV_ERROR
-DevmemUnpin(DEVMEM_MEMDESC *psMemDesc);
-
-/*************************************************************************/ /*!
-@Function       DevmemPin
-@Description    This is the counterpart to DevmemUnpin(). It is meant to be
-                called after unpinning an allocation.
-
-                For a detailed description see client API documentation.
-
-@Input          phMemDesc       The MemDesc that is going to be pinned.
-
-@Return         PVRSRV_ERROR:   PVRSRV_OK on success and the allocation content
-                                was successfully restored.
-
-                                PVRSRV_ERROR_PMR_NEW_MEMORY when the content
-                                could not be restored and new physical memory
-                                was allocated.
-
-                                A different error otherwise.
-*/ /**************************************************************************/
-IMG_INTERNAL PVRSRV_ERROR
-DevmemPin(DEVMEM_MEMDESC *psMemDesc);
 
 IMG_INTERNAL PVRSRV_ERROR
 DevmemGetHeapInt(DEVMEM_HEAP *psHeap,
@@ -282,6 +247,7 @@ DevmemCreateHeap(DEVMEM_CONTEXT *psCtxPtr,
                     func takes a copy if it needs it. */
                  const IMG_CHAR *pszName,
                  DEVMEM_HEAPCFGID uiHeapBlueprintID,
+                 IMG_UINT32 uiHeapIndex,
                  DEVMEM_HEAP **ppsHeapPtr);
 /*
  * DevmemDestroyHeap()
@@ -365,7 +331,6 @@ DeviceMemChangeSparse(DEVMEM_MEMDESC *psMemDesc,
 PVRSRV_ERROR
 DevmemAllocateSparse(SHARED_DEV_CONNECTION hDevConnection,
                      IMG_DEVMEM_SIZE_T uiSize,
-                     IMG_DEVMEM_SIZE_T uiChunkSize,
                      IMG_UINT32 ui32NumPhysChunks,
                      IMG_UINT32 ui32NumVirtChunks,
                      IMG_UINT32 *pui32MappingTable,
@@ -636,7 +601,7 @@ PVRSRV_ERROR
 DevmemGetReservation(DEVMEM_MEMDESC *psMemDesc,
 		     IMG_HANDLE *hReservation);
 
-IMG_INTERNAL PVRSRV_ERROR
+IMG_INTERNAL void
 DevmemGetPMRData(DEVMEM_MEMDESC *psMemDesc,
 		IMG_HANDLE *hPMR,
 		IMG_DEVMEM_OFFSET_T *puiPMROffset);
@@ -681,6 +646,13 @@ DevmemInvalidateFBSCTable(DEVMEM_CONTEXT *psContext,
 IMG_UINT32
 DevmemGetHeapLog2PageSize(DEVMEM_HEAP *psHeap);
 
+/* DevmemGetMemFlags()
+ *
+ * Get the memalloc flags for a certain memdesc.
+ */
+PVRSRV_MEMALLOCFLAGS_T
+DevmemGetMemAllocFlags(DEVMEM_MEMDESC *psMemDesc);
+
 /* DevmemGetHeapReservedSize()
  *
  * Get the reserved size used for a certain heap.
@@ -704,19 +676,6 @@ IMG_INTERNAL PVRSRV_ERROR
 RegisterDevmemPFNotify(DEVMEM_CONTEXT *psContext,
                        IMG_UINT32     ui32PID,
                        IMG_BOOL       bRegister);
-
-/*************************************************************************/ /*!
-@Function       GetMaxDevMemSize
-@Description    Get the amount of device memory on current platform
-                (memory size in Bytes)
-@Output         puiLMASize            LMA memory size
-@Output         puiUMASize            UMA memory size
-@Return         Error code
-*/ /**************************************************************************/
-IMG_INTERNAL PVRSRV_ERROR
-GetMaxDevMemSize(SHARED_DEV_CONNECTION hDevConnection,
-		 IMG_DEVMEM_SIZE_T *puiLMASize,
-		 IMG_DEVMEM_SIZE_T *puiUMASize);
 
 /*************************************************************************/ /*!
 @Function       DevmemHeapSetPremapStatus

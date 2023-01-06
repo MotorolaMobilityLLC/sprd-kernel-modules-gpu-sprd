@@ -175,7 +175,14 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 		offsetof(RGXFWIF_MMUCACHEDATA, sMMUCacheSync),      \
 		offsetof(RGXFWIF_MMUCACHEDATA, ui32MMUCacheSyncUpdateValue)
 
+#if defined(SUPPORT_TRP)
+#define RGXFW_ALIGN_CHECKS_INIT_KM                          \
+		RGXFW_ALIGN_CHECKS_INIT_KM0,                        \
+		offsetof(RGXFWIF_FWTDMCONTEXT, ui32TRPState),       \
+		offsetof(RGXFWIF_FWTDMCONTEXT, aui64TRPChecksums2D)
+#else
 #define RGXFW_ALIGN_CHECKS_INIT_KM RGXFW_ALIGN_CHECKS_INIT_KM0
+#endif
 
 #endif /* RGX_FWIF_ALIGNCHECKS_H */
 

@@ -73,41 +73,47 @@ else # !TARGET_PLATFORM
 
  ifeq ($(is_at_least_s),1)
   SYS_INCLUDES += \
+   -isystem $(ANDROID_ROOT)/frameworks/native/cmds/dumpstate \
+   -isystem $(ANDROID_ROOT)/frameworks/native/libs/gralloc/types/include \
+   -isystem $(ANDROID_ROOT)/frameworks/native/libs/binder/ndk/include_ndk \
+   -isystem $(ANDROID_ROOT)/frameworks/native/libs/binder/ndk/include_cpp \
+   -isystem $(ANDROID_ROOT)/frameworks/native/libs/binder/ndk/include_platform \
+   -isystem $(ANDROID_ROOT)/frameworks/native/libs/ui/include_vndk \
    -isystem $(ANDROID_ROOT)/libnativehelper/include_jni \
    -isystem $(ANDROID_ROOT)/system/memory/libion/kernel-headers \
    -isystem $(ANDROID_ROOT)/system/memory/libion/kernel-headers/linux \
    -isystem $(ANDROID_ROOT)/system/memory/libion/include \
    -isystem $(ANDROID_ROOT)/system/memory/libdmabufheap/include \
-   -isystem $(ANDROID_ROOT)/system/memory/libmeminfo/libdmabufinfo/include \
-   -isystem $(ANDROID_ROOT)/frameworks/native/libs/gralloc/types/include \
-   -isystem $(ANDROID_ROOT)/frameworks/native/libs/binder/ndk/include_ndk \
-   -isystem $(ANDROID_ROOT)/frameworks/native/libs/binder/ndk/include_cpp \
-   -isystem $(ANDROID_ROOT)/frameworks/native/libs/binder/ndk/include_platform \
-   -isystem $(ANDROID_ROOT)/frameworks/native/cmds/dumpstate
+   -isystem $(ANDROID_ROOT)/system/memory/libmeminfo/libdmabufinfo/include
 
  else ifeq ($(is_at_least_r),1)
   SYS_INCLUDES += \
+   -isystem $(ANDROID_ROOT)/frameworks/native/libs/binder/ndk/include_ndk \
+   -isystem $(ANDROID_ROOT)/frameworks/native/libs/gralloc/types/include \
+   -isystem $(ANDROID_ROOT)/frameworks/native/libs/ui/include_vndk \
    -isystem $(ANDROID_ROOT)/libnativehelper/include_jni \
    -isystem $(ANDROID_ROOT)/system/memory/libion/kernel-headers \
    -isystem $(ANDROID_ROOT)/system/memory/libion/kernel-headers/linux \
-   -isystem $(ANDROID_ROOT)/system/memory/libion/include \
-   -isystem $(ANDROID_ROOT)/frameworks/native/libs/gralloc/types/include \
-   -isystem $(ANDROID_ROOT)/frameworks/native/libs/binder/ndk/include_ndk
+   -isystem $(ANDROID_ROOT)/system/memory/libion/include
  else ifeq ($(is_at_least_q),1)
   SYS_INCLUDES += \
-   -isystem $(ANDROID_ROOT)/libnativehelper/include_jni \
    -isystem $(ANDROID_ROOT)/system/core/libion \
-   -isystem $(ANDROID_ROOT)/system/core/libion/kernel-headers
+   -isystem $(ANDROID_ROOT)/system/core/libion/kernel-headers \
+   -isystem $(ANDROID_ROOT)/frameworks/native/libs/ui/include_vndk \
+   -isystem $(ANDROID_ROOT)/libnativehelper/include_jni
  else ifeq ($(is_aosp_master),1)
   SYS_INCLUDES += \
+   -isystem $(ANDROID_ROOT)/frameworks/native/libs/ui/include_vndk \
    -isystem $(ANDROID_ROOT)/libnativehelper/include_jni
  else ifeq ($(is_at_least_oreo),1)
   SYS_INCLUDES += \
+   -isystem $(ANDROID_ROOT)/frameworks/native/libs/ui/include_vndk \
    -isystem $(ANDROID_ROOT)/libnativehelper/include_jni
  else
   SYS_INCLUDES += \
-   -isystem $(ANDROID_ROOT)/libnativehelper/include/nativehelper \
-   -isystem $(ANDROID_ROOT)/libnativehelper/include
+   -isystem $(ANDROID_ROOT)/frameworks/native/include \
+   -isystem $(ANDROID_ROOT)/libnativehelper/include \
+   -isystem $(ANDROID_ROOT)/libnativehelper/include/nativehelper
  endif
 
 endif # !TARGET_PLATFORM
@@ -134,6 +140,7 @@ ifeq ($(filter-out $(NDK_ROOT)/%,$(NDK_SYSROOT)),)
  # Include headers from libfmq and libhidl
  ifeq ($(is_vendor_freeze_support),1)
   SYS_INCLUDES += \
+   -isystem $(ANDROID_ROOT)/prebuilts/vndk/v$(API_LEVEL)/$(TARGET_ARCH)/include/system/libfmq/base \
    -isystem $(ANDROID_ROOT)/prebuilts/vndk/v$(API_LEVEL)/$(TARGET_ARCH)/include/system/libfmq/include \
    -isystem $(ANDROID_ROOT)/prebuilts/vndk/v$(API_LEVEL)/$(TARGET_ARCH)/include/system/libhidl/base/include
  else

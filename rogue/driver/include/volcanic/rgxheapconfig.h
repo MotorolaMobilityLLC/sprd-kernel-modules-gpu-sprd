@@ -55,6 +55,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define RGX_HEAP_SIZE_2MiB       IMG_UINT64_C(0x0000200000)
 #define RGX_HEAP_SIZE_4MiB       IMG_UINT64_C(0x0000400000)
 #define RGX_HEAP_SIZE_16MiB      IMG_UINT64_C(0x0001000000)
+#define RGX_HEAP_SIZE_32MiB      IMG_UINT64_C(0x0002000000)
 #define RGX_HEAP_SIZE_256MiB     IMG_UINT64_C(0x0010000000)
 
 #define RGX_HEAP_SIZE_1GiB       IMG_UINT64_C(0x0040000000)
@@ -151,15 +152,38 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 /* 0xDD_0000_0000 - 0xDF_FFFF_FFFF **/
 	/* 884 GiB to 896 GiB, size of 12 GiB : FREE **/
 
-/* 0xE0_0000_0000 - 0xE0_FFFF_FFFF **/
-	/* 896 GiB to 900 GiB, size of 4 GiB : USCCODE_HEAP **/
+	/*
+	 * The breakpoint handler code heap must share the same 4GiB address
+	 * range as the USC shader code heap. The address space split is
+	 * configurable.
+	 *
+	 * The breakpoint handler register is fixed, so the following parts
+	 * of the BP handler address are static:
+	 * [31:24] = 0xFE for 4064MiB offset after the USC code heap.
+	 *   [5:0] = 0x00 i.e. aligned to 64 Byte boundary.
+	 *
+	 * The remaining part of the BP handler is dynamic and encoded in
+	 * the USC instruction BABP_target_addr. The BP handler thus
+	 * allows a range of 16 MiB with granularity of 64 Bytes.
+	 */
+
+/* 0xE0_0000_0000 - 0xE0_FDFF_FFFF **/
+	/* 896 GiB to 900 GiB, size of 4 GiB less 32 MiB : USCCODE_HEAP **/
 	#define RGX_USCCODE_HEAP_BASE               IMG_UINT64_C(0xE000000000)
-	#define RGX_USCCODE_HEAP_SIZE               RGX_HEAP_SIZE_4GiB
+	#define RGX_USCCODE_HEAP_SIZE               (RGX_HEAP_SIZE_4GiB - RGX_HEAP_SIZE_32MiB)
+
+/* 0xE0_FE00_0000 - 0xE0_FEFF_FFFF **/
+	/* 900 GiB less 32 MiB to 900 GiB less 16 MiB, size of 16 MiB : USCCODE_BPH_HEAP **/
+	#define RGX_USCCODE_BPH_HEAP_BASE           (IMG_UINT64_C(0xE100000000) - RGX_HEAP_SIZE_32MiB)
+	#define RGX_USCCODE_BPH_HEAP_SIZE           RGX_HEAP_SIZE_16MiB
+
+/* 0xE0_FF00_0000 - 0xE0_FFFF_FFFF **/
+	/* 900 GiB less 16 MiB to 900 GiB, size of 16 MiB : RESERVED **/
 
 /* 0xE1_0000_0000 - 0xE1_BFFF_FFFF **/
 	/* 900 GiB to 903 GiB, size of 3 GiB : RESERVED **/
 
-/* 0xE1_C000_000 - 0xE1_FFFF_FFFF **/
+/* 0xE1_C000_0000 - 0xE1_FFFF_FFFF **/
 	/* 903 GiB to 904 GiB, reserved 1 GiB, : FIRMWARE_HEAP **/
 
 	/* Firmware heaps defined in rgx_heap_firmware.h as they are not present in

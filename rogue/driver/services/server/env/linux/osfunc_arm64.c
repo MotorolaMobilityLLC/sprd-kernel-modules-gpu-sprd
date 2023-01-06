@@ -42,7 +42,11 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */ /**************************************************************************/
 #include <linux/version.h>
 #include <linux/cpumask.h>
-#include <linux/dma-mapping.h>
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0))
+ #include <linux/dma-map-ops.h>
+#else
+ #include <linux/dma-mapping.h>
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0) */
 #include <asm/cacheflush.h>
 #include <linux/uaccess.h>
 
@@ -51,6 +55,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "img_defs.h"
 #include "osfunc.h"
 #include "pvr_debug.h"
+
+#include "kernel_compatibility.h"
 
 #if defined(CONFIG_OUTER_CACHE)
   /* If you encounter a 64-bit ARM system with an outer cache, you'll need
@@ -63,14 +69,14 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 static inline void begin_user_mode_access(void)
 {
 #if defined(CONFIG_ARM64) && defined(CONFIG_ARM64_SW_TTBR0_PAN)
-	uaccess_enable();
+	uaccess_enable_privileged();
 #endif
 }
 
 static inline void end_user_mode_access(void)
 {
 #if defined(CONFIG_ARM64) && defined(CONFIG_ARM64_SW_TTBR0_PAN)
-	uaccess_disable();
+	uaccess_disable_privileged();
 #endif
 }
 

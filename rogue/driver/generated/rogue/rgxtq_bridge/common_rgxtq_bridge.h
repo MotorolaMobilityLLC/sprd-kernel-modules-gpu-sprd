@@ -69,12 +69,13 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 /* Bridge in structure for RGXCreateTransferContext */
 typedef struct PVRSRV_BRIDGE_IN_RGXCREATETRANSFERCONTEXT_TAG
 {
+	IMG_UINT64 ui64RobustnessAddress;
 	IMG_HANDLE hPrivData;
 	IMG_BYTE *pui8FrameworkCmd;
+	IMG_INT32 i32Priority;
 	IMG_UINT32 ui32ContextFlags;
 	IMG_UINT32 ui32FrameworkCmdize;
 	IMG_UINT32 ui32PackedCCBSizeU8888;
-	IMG_UINT32 ui32Priority;
 } __packed PVRSRV_BRIDGE_IN_RGXCREATETRANSFERCONTEXT;
 
 /* Bridge out structure for RGXCreateTransferContext */
@@ -110,7 +111,7 @@ typedef struct PVRSRV_BRIDGE_OUT_RGXDESTROYTRANSFERCONTEXT_TAG
 typedef struct PVRSRV_BRIDGE_IN_RGXSETTRANSFERCONTEXTPRIORITY_TAG
 {
 	IMG_HANDLE hTransferContext;
-	IMG_UINT32 ui32Priority;
+	IMG_INT32 i32Priority;
 } __packed PVRSRV_BRIDGE_IN_RGXSETTRANSFERCONTEXTPRIORITY;
 
 /* Bridge out structure for RGXSetTransferContextPriority */
@@ -140,7 +141,6 @@ typedef struct PVRSRV_BRIDGE_IN_RGXSUBMITTRANSFER2_TAG
 	PVRSRV_TIMELINE h2DUpdateTimeline;
 	PVRSRV_TIMELINE h3DUpdateTimeline;
 	PVRSRV_FENCE hCheckFenceFD;
-	IMG_UINT32 ui32ClientCacheOpSeqNum;
 	IMG_UINT32 ui32ExtJobRef;
 	IMG_UINT32 ui32PrepareCount;
 	IMG_UINT32 ui32SyncPMRCount;

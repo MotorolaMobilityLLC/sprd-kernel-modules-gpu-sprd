@@ -112,6 +112,12 @@ typedef struct DFS_FILE
 
 /* ----- native callbacks interface ----------------------------------------- */
 
+static void _WriteData(void *pvNativeHandle, const void *pvData,
+                       IMG_UINT32 uiSize)
+{
+	seq_write(pvNativeHandle, pvData, uiSize);
+}
+
 static void _VPrintf(void *pvNativeHandle, const IMG_CHAR *pszFmt,
                      va_list pArgs)
 {
@@ -141,6 +147,7 @@ static IMG_BOOL _HasOverflowed(void *pvNativeHandle)
 }
 
 static OSDI_IMPL_ENTRY_CB _g_sEntryCallbacks = {
+	.pfnWrite = _WriteData,
 	.pfnVPrintf = _VPrintf,
 	.pfnPuts = _Puts,
 	.pfnHasOverflowed = _HasOverflowed,
@@ -296,7 +303,7 @@ static ssize_t _Read(struct file *psFile, char __user *pcBuffer,
 		iRes = seq_read(psFile, pcBuffer, uiCount, puiPos);
 		if (iRes < 0)
 		{
-			PVR_DPF((PVR_DBG_ERROR, "%s: filed to read from file pfnRead() "
+			PVR_DPF((PVR_DBG_ERROR, "%s: failed to read from file pfnRead() "
 			        "returned %zd", __func__, iRes));
 			goto return_;
 		}
@@ -313,7 +320,7 @@ static ssize_t _Read(struct file *psFile, char __user *pcBuffer,
 		                                psEntry->sImplEntry.pvPrivData);
 		if (iRes < 0)
 		{
-			PVR_DPF((PVR_DBG_ERROR, "%s: filed to read from file pfnRead() "
+			PVR_DPF((PVR_DBG_ERROR, "%s: failed to read from file pfnRead() "
 			        "returned %zd", __func__, iRes));
 			OSFreeMem(pcLocalBuffer);
 			goto return_;
@@ -347,7 +354,7 @@ static loff_t _LSeek(struct file *psFile, loff_t iOffset, int iOrigin)
 		iRes = seq_lseek(psFile, iOffset, iOrigin);
 		if (iRes < 0)
 		{
-			PVR_DPF((PVR_DBG_ERROR, "%s: filed to set file position to "
+			PVR_DPF((PVR_DBG_ERROR, "%s: failed to set file position to "
 			        "offset %lld, pfnSeek() returned %lld", __func__,
 			        iOffset, iRes));
 			goto return_;
@@ -380,7 +387,7 @@ static loff_t _LSeek(struct file *psFile, loff_t iOffset, int iOrigin)
 		                                psEntry->sImplEntry.pvPrivData);
 		if (iRes < 0)
 		{
-			PVR_DPF((PVR_DBG_ERROR, "%s: filed to set file position to "
+			PVR_DPF((PVR_DBG_ERROR, "%s: failed to set file position to "
 			        "offset %lld, pfnSeek() returned %lld", __func__,
 			        iOffset, iRes));
 			goto return_;

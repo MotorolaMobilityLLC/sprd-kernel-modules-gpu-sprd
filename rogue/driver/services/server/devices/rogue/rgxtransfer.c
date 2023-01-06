@@ -92,7 +92,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 typedef struct {
 	DEVMEM_MEMDESC				*psFWContextStateMemDesc;
 	RGX_SERVER_COMMON_CONTEXT	*psServerCommonContext;
-	IMG_UINT32					ui32Priority;
+	IMG_INT32					i32Priority;
 #if defined(SUPPORT_BUFFER_SYNC)
 	struct pvr_buffer_sync_context *psBufferSyncContext;
 #endif
@@ -100,7 +100,7 @@ typedef struct {
 
 typedef struct {
 	RGX_SERVER_COMMON_CONTEXT	*psServerCommonContext;
-	IMG_UINT32					ui32Priority;
+	IMG_INT32					i32Priority;
 #if defined(SUPPORT_BUFFER_SYNC)
 	struct pvr_buffer_sync_context *psBufferSyncContext;
 #endif
@@ -132,12 +132,13 @@ static PVRSRV_ERROR _Create3DTransferContext(CONNECTION_DATA *psConnection,
 											 DEVMEM_MEMDESC *psAllocatedMemDesc,
 											 IMG_UINT32 ui32AllocatedOffset,
 											 DEVMEM_MEMDESC *psFWMemContextMemDesc,
-											 IMG_UINT32 ui32Priority,
+											 IMG_INT32 i32Priority,
 											 RGX_COMMON_CONTEXT_INFO *psInfo,
 											 RGX_SERVER_TQ_3D_DATA *ps3DData,
 											 IMG_UINT32 ui32CCBAllocSizeLog2,
 											 IMG_UINT32 ui32CCBMaxAllocSizeLog2,
-											 IMG_UINT32 ui32ContextFlags)
+											 IMG_UINT32 ui32ContextFlags,
+											 IMG_UINT64 ui64RobustnessAddress)
 {
 	PVRSRV_RGXDEV_INFO *psDevInfo = psDeviceNode->pvDevice;
 	PVRSRV_ERROR eError;
@@ -147,7 +148,7 @@ static PVRSRV_ERROR _Create3DTransferContext(CONNECTION_DATA *psConnection,
 		Allocate device memory for the firmware GPU context suspend state.
 		Note: the FW reads/writes the state to memory by accessing the GPU register interface.
 	*/
-	PDUMPCOMMENT("Allocate RGX firmware TQ/3D context suspend state");
+	PDUMPCOMMENT(psDeviceNode, "Allocate RGX firmware TQ/3D context suspend state");
 
 	if (!RGX_IS_FEATURE_SUPPORTED(psDevInfo, XE_MEMORY_HIERARCHY))
 	{
@@ -196,9 +197,9 @@ static PVRSRV_ERROR _Create3DTransferContext(CONNECTION_DATA *psConnection,
 	                                 ui32CCBAllocSizeLog2 ? ui32CCBAllocSizeLog2 : RGX_TQ3D_CCB_SIZE_LOG2,
 	                                 ui32CCBMaxAllocSizeLog2 ? ui32CCBMaxAllocSizeLog2 : RGX_TQ3D_CCB_MAX_SIZE_LOG2,
 	                                 ui32ContextFlags,
-	                                 ui32Priority,
+	                                 i32Priority,
 	                                 UINT_MAX, /* max deadline MS */
-	                                 0, /* robustness address */
+	                                 ui64RobustnessAddress,
 	                                 psInfo,
 	                                 &ps3DData->psServerCommonContext);
 	if (eError != PVRSRV_OK)
@@ -207,10 +208,10 @@ static PVRSRV_ERROR _Create3DTransferContext(CONNECTION_DATA *psConnection,
 	}
 
 
-	PDUMPCOMMENT("Dump 3D context suspend state buffer");
+	PDUMPCOMMENT(psDeviceNode, "Dump 3D context suspend state buffer");
 	DevmemPDumpLoadMem(ps3DData->psFWContextStateMemDesc, 0, sizeof(RGXFWIF_3DCTX_STATE), PDUMP_FLAGS_CONTINUOUS);
 
-	ps3DData->ui32Priority = ui32Priority;
+	ps3DData->i32Priority = i32Priority;
 	return PVRSRV_OK;
 
 fail_contextalloc:
@@ -226,15 +227,17 @@ fail_buffer_sync_context_create:
 }
 
 
+#if defined(RGX_FEATURE_TLA_BIT_MASK)
 static PVRSRV_ERROR _Create2DTransferContext(CONNECTION_DATA *psConnection,
 											 PVRSRV_DEVICE_NODE *psDeviceNode,
 											 DEVMEM_MEMDESC *psFWMemContextMemDesc,
-											 IMG_UINT32 ui32Priority,
+											 IMG_INT32 i32Priority,
 											 RGX_COMMON_CONTEXT_INFO *psInfo,
 											 RGX_SERVER_TQ_2D_DATA *ps2DData,
 											 IMG_UINT32 ui32CCBAllocSizeLog2,
 											 IMG_UINT32 ui32CCBMaxAllocSizeLog2,
-											 IMG_UINT32 ui32ContextFlags)
+											 IMG_UINT32 ui32ContextFlags,
+											 IMG_UINT64 ui64RobustnessAddress)
 {
 	PVRSRV_ERROR eError;
 
@@ -265,9 +268,9 @@ static PVRSRV_ERROR _Create2DTransferContext(CONNECTION_DATA *psConnection,
 	                                 ui32CCBAllocSizeLog2 ? ui32CCBAllocSizeLog2 : RGX_TQ2D_CCB_SIZE_LOG2,
 	                                 ui32CCBMaxAllocSizeLog2 ? ui32CCBMaxAllocSizeLog2 : RGX_TQ2D_CCB_MAX_SIZE_LOG2,
 	                                 ui32ContextFlags,
-	                                 ui32Priority,
+	                                 i32Priority,
 	                                 UINT_MAX, /* max deadline MS */
-	                                 0, /* robustness address */
+	                                 ui64RobustnessAddress,
 	                                 psInfo,
 	                                 &ps2DData->psServerCommonContext);
 	if (eError != PVRSRV_OK)
@@ -275,7 +278,7 @@ static PVRSRV_ERROR _Create2DTransferContext(CONNECTION_DATA *psConnection,
 		goto fail_contextalloc;
 	}
 
-	ps2DData->ui32Priority = ui32Priority;
+	ps2DData->i32Priority = i32Priority;
 	return PVRSRV_OK;
 
 fail_contextalloc:
@@ -312,7 +315,7 @@ static PVRSRV_ERROR _Destroy2DTransferContext(RGX_SERVER_TQ_2D_DATA *ps2DData,
 		return eError;
 	}
 
-	/* ... it has so we can free it's resources */
+	/* ... it has so we can free its resources */
 	FWCommonContextFree(ps2DData->psServerCommonContext);
 	ps2DData->psServerCommonContext = NULL;
 
@@ -323,6 +326,7 @@ static PVRSRV_ERROR _Destroy2DTransferContext(RGX_SERVER_TQ_2D_DATA *ps2DData,
 
 	return PVRSRV_OK;
 }
+#endif /* #if defined(RGX_FEATURE_TLA_BIT_MASK) */
 
 static PVRSRV_ERROR _Destroy3DTransferContext(RGX_SERVER_TQ_3D_DATA *ps3DData,
 											  PVRSRV_DEVICE_NODE *psDeviceNode,
@@ -347,7 +351,7 @@ static PVRSRV_ERROR _Destroy3DTransferContext(RGX_SERVER_TQ_3D_DATA *ps3DData,
 		return eError;
 	}
 
-	/* ... it has so we can free it's resources */
+	/* ... it has so we can free its resources */
 	DevmemFwUnmapAndFree(psDeviceNode->pvDevice, ps3DData->psFWContextStateMemDesc);
 	FWCommonContextFree(ps3DData->psServerCommonContext);
 	ps3DData->psServerCommonContext = NULL;
@@ -366,12 +370,13 @@ static PVRSRV_ERROR _Destroy3DTransferContext(RGX_SERVER_TQ_3D_DATA *ps3DData,
  */
 PVRSRV_ERROR PVRSRVRGXCreateTransferContextKM(CONNECTION_DATA		*psConnection,
 										   PVRSRV_DEVICE_NODE		*psDeviceNode,
-										   IMG_UINT32				ui32Priority,
+										   IMG_INT32				i32Priority,
 										   IMG_UINT32				ui32FrameworkCommandSize,
 										   IMG_PBYTE				pabyFrameworkCommand,
 										   IMG_HANDLE				hMemCtxPrivData,
 										   IMG_UINT32				ui32PackedCCBSizeU8888,
 										   IMG_UINT32				ui32ContextFlags,
+										   IMG_UINT64				ui64RobustnessAddress,
 										   RGX_SERVER_TQ_CONTEXT	**ppsTransferContext,
 										   PMR						**ppsCLIPMRMem,
 										   PMR						**ppsUSCPMRMem)
@@ -379,7 +384,7 @@ PVRSRV_ERROR PVRSRVRGXCreateTransferContextKM(CONNECTION_DATA		*psConnection,
 	RGX_SERVER_TQ_CONTEXT	*psTransferContext;
 	PVRSRV_RGXDEV_INFO *psDevInfo = psDeviceNode->pvDevice;
 	DEVMEM_MEMDESC			*psFWMemContextMemDesc = RGXGetFWMemDescFromMemoryContextHandle(hMemCtxPrivData);
-	RGX_COMMON_CONTEXT_INFO	sInfo;
+	RGX_COMMON_CONTEXT_INFO	sInfo = {NULL};
 	PVRSRV_ERROR			eError = PVRSRV_OK;
 
 	/* Allocate the server side structure */
@@ -434,7 +439,8 @@ PVRSRV_ERROR PVRSRVRGXCreateTransferContextKM(CONNECTION_DATA		*psConnection,
 		}
 
 		/* Copy the Framework client data into the framework buffer */
-		eError = PVRSRVRGXFrameworkCopyCommand(psTransferContext->psFWFrameworkMemDesc,
+		eError = PVRSRVRGXFrameworkCopyCommand(psDeviceNode,
+				psTransferContext->psFWFrameworkMemDesc,
 				pabyFrameworkCommand,
 				ui32FrameworkCommandSize);
 		if (eError != PVRSRV_OK)
@@ -454,35 +460,39 @@ PVRSRV_ERROR PVRSRVRGXCreateTransferContextKM(CONNECTION_DATA		*psConnection,
 									  psTransferContext->psFWTransferContextMemDesc,
 									  offsetof(RGXFWIF_FWTRANSFERCONTEXT, sTQContext),
 									  psFWMemContextMemDesc,
-									  ui32Priority,
+									  i32Priority,
 									  &sInfo,
 									  &psTransferContext->s3DData,
 									  U32toU8_Unpack3(ui32PackedCCBSizeU8888),
 									  U32toU8_Unpack4(ui32PackedCCBSizeU8888),
-									  ui32ContextFlags);
+									  ui32ContextFlags,
+									  ui64RobustnessAddress);
 	if (eError != PVRSRV_OK)
 	{
 		goto fail_3dtransfercontext;
 	}
 	psTransferContext->ui32Flags |= RGX_SERVER_TQ_CONTEXT_FLAGS_3D;
 
+#if defined(RGX_FEATURE_TLA_BIT_MASK)
 	if (RGX_IS_FEATURE_SUPPORTED(psDevInfo, TLA))
 	{
 		eError = _Create2DTransferContext(psConnection,
 										  psDeviceNode,
 										  psFWMemContextMemDesc,
-										  ui32Priority,
+										  i32Priority,
 										  &sInfo,
 										  &psTransferContext->s2DData,
 										  U32toU8_Unpack1(ui32PackedCCBSizeU8888),
 										  U32toU8_Unpack2(ui32PackedCCBSizeU8888),
-										  ui32ContextFlags);
+										  ui32ContextFlags,
+										  ui64RobustnessAddress);
 		if (eError != PVRSRV_OK)
 		{
 			goto fail_2dtransfercontext;
 		}
 		psTransferContext->ui32Flags |= RGX_SERVER_TQ_CONTEXT_FLAGS_2D;
 	}
+#endif
 
 	PVRSRVTQAcquireShaders(psDeviceNode, ppsCLIPMRMem, ppsUSCPMRMem);
 
@@ -497,10 +507,12 @@ PVRSRV_ERROR PVRSRVRGXCreateTransferContextKM(CONNECTION_DATA		*psConnection,
 
 	return PVRSRV_OK;
 
+#if defined(RGX_FEATURE_TLA_BIT_MASK)
 fail_2dtransfercontext:
 	_Destroy3DTransferContext(&psTransferContext->s3DData,
 							  psTransferContext->psDeviceNode,
 							  psTransferContext->ui32PDumpFlags);
+#endif
 fail_3dtransfercontext:
 fail_frameworkcopy:
 	if (psTransferContext->psFWFrameworkMemDesc)
@@ -532,6 +544,7 @@ PVRSRV_ERROR PVRSRVRGXDestroyTransferContextKM(RGX_SERVER_TQ_CONTEXT *psTransfer
 	dllist_remove_node(&(psTransferContext->sListNode));
 	OSWRLockReleaseWrite(psDevInfo->hTransferCtxListLock);
 
+#if defined(RGX_FEATURE_TLA_BIT_MASK)
 	if ((psTransferContext->ui32Flags & RGX_SERVER_TQ_CONTEXT_FLAGS_2D) &&
 			(RGX_IS_FEATURE_SUPPORTED(psDevInfo, TLA)))
 	{
@@ -545,6 +558,7 @@ PVRSRV_ERROR PVRSRVRGXDestroyTransferContextKM(RGX_SERVER_TQ_CONTEXT *psTransfer
 		/* We've freed the 2D context, don't try to free it again */
 		psTransferContext->ui32Flags &= ~RGX_SERVER_TQ_CONTEXT_FLAGS_2D;
 	}
+#endif
 
 	if (psTransferContext->ui32Flags & RGX_SERVER_TQ_CONTEXT_FLAGS_3D)
 	{
@@ -580,8 +594,10 @@ PVRSRV_ERROR PVRSRVRGXDestroyTransferContextKM(RGX_SERVER_TQ_CONTEXT *psTransfer
 	return PVRSRV_OK;
 
 fail_destroy3d:
+#if defined(RGX_FEATURE_TLA_BIT_MASK)
 
 fail_destroy2d:
+#endif
 	OSWRLockAcquireWrite(psDevInfo->hTransferCtxListLock);
 	dllist_add_to_tail(&(psDevInfo->sTransferCtxtListHead), &(psTransferContext->sListNode));
 	OSWRLockReleaseWrite(psDevInfo->hTransferCtxListLock);
@@ -593,7 +609,6 @@ fail_destroy2d:
  * PVRSRVSubmitTQ3DKickKM
  */
 PVRSRV_ERROR PVRSRVRGXSubmitTransferKM(RGX_SERVER_TQ_CONTEXT	*psTransferContext,
-									   IMG_UINT32				ui32ClientCacheOpSeqNum,
 									   IMG_UINT32				ui32PrepareCount,
 									   IMG_UINT32				*paui32ClientUpdateCount,
 									   SYNC_PRIMITIVE_BLOCK		***papauiClientUpdateUFODevVarBlock,
@@ -616,30 +631,38 @@ PVRSRV_ERROR PVRSRVRGXSubmitTransferKM(RGX_SERVER_TQ_CONTEXT	*psTransferContext,
 	PVRSRV_DEVICE_NODE *psDeviceNode = psTransferContext->psDeviceNode;
 	PVRSRV_RGXDEV_INFO *psDevInfo = psDeviceNode->pvDevice;
 	RGX_CCB_CMD_HELPER_DATA *pas3DCmdHelper;
+#if defined(RGX_FEATURE_TLA_BIT_MASK)
 	RGX_CCB_CMD_HELPER_DATA *pas2DCmdHelper;
+#endif
 	IMG_UINT32 ui323DCmdCount = 0;
-	IMG_UINT32 ui322DCmdCount = 0;
 	IMG_UINT32 ui323DCmdLast = 0;
-	IMG_UINT32 ui322DCmdLast = 0;
 	IMG_UINT32 ui323DCmdOffset = 0;
+#if defined(RGX_FEATURE_TLA_BIT_MASK)
+	IMG_UINT32 ui322DCmdCount = 0;
+	IMG_UINT32 ui322DCmdLast = 0;
 	IMG_UINT32 ui322DCmdOffset = 0;
+#endif
 	IMG_UINT32 ui32PDumpFlags = PDUMP_FLAGS_NONE;
 	IMG_UINT32 i;
 	IMG_UINT64 uiCheckFenceUID = 0;
+#if defined(RGX_FEATURE_TLA_BIT_MASK)
 	IMG_UINT64 ui2DUpdateFenceUID = 0;
+#endif
 	IMG_UINT64 ui3DUpdateFenceUID = 0;
 
-	PSYNC_CHECKPOINT ps2DUpdateSyncCheckpoint = NULL;
 	PSYNC_CHECKPOINT ps3DUpdateSyncCheckpoint = NULL;
 	PSYNC_CHECKPOINT *apsFenceSyncCheckpoints = NULL;
 	IMG_UINT32 ui32FenceSyncCheckpointCount = 0;
-	IMG_UINT32 *pui322DIntAllocatedUpdateValues = NULL;
 	IMG_UINT32 *pui323DIntAllocatedUpdateValues = NULL;
+#if defined(RGX_FEATURE_TLA_BIT_MASK)
+	PSYNC_CHECKPOINT ps2DUpdateSyncCheckpoint = NULL;
+	IMG_UINT32 *pui322DIntAllocatedUpdateValues = NULL;
 	PVRSRV_CLIENT_SYNC_PRIM *ps2DFenceTimelineUpdateSync = NULL;
-	PVRSRV_CLIENT_SYNC_PRIM *ps3DFenceTimelineUpdateSync = NULL;
 	IMG_UINT32 ui322DFenceTimelineUpdateValue = 0;
-	IMG_UINT32 ui323DFenceTimelineUpdateValue = 0;
 	void *pv2DUpdateFenceFinaliseData = NULL;
+#endif
+	PVRSRV_CLIENT_SYNC_PRIM *ps3DFenceTimelineUpdateSync = NULL;
+	IMG_UINT32 ui323DFenceTimelineUpdateValue = 0;
 	void *pv3DUpdateFenceFinaliseData = NULL;
 #if defined(SUPPORT_BUFFER_SYNC)
 	PSYNC_CHECKPOINT psBufferUpdateSyncCheckpoint = NULL;
@@ -650,7 +673,9 @@ PVRSRV_ERROR PVRSRVRGXSubmitTransferKM(RGX_SERVER_TQ_CONTEXT	*psTransferContext,
 
 	PVRSRV_ERROR eError = PVRSRV_OK;
 	PVRSRV_ERROR eError2;
+#if defined(RGX_FEATURE_TLA_BIT_MASK)
 	PVRSRV_FENCE i2DUpdateFence = PVRSRV_NO_FENCE;
+#endif
 	PVRSRV_FENCE i3DUpdateFence = PVRSRV_NO_FENCE;
 	IMG_UINT32   ui32IntJobRef = OSAtomicIncrement(&psDevInfo->iCCBSubmissionOrdinal);
 	IMG_UINT32   ui32PreparesDone = 0;
@@ -660,15 +685,21 @@ PVRSRV_ERROR PVRSRVRGXSubmitTransferKM(RGX_SERVER_TQ_CONTEXT	*psTransferContext,
 	PRGXFWIF_TIMESTAMP_ADDR pPostAddr;
 	PRGXFWIF_UFO_ADDR       pRMWUFOAddr;
 
+#if !defined(RGX_FEATURE_TLA_BIT_MASK)
+	PVR_UNREFERENCED_PARAMETER(i2DUpdateTimeline);
+	PVR_UNREFERENCED_PARAMETER(pi2DUpdateFence);
+#endif
+
 	RGX_GetTimestampCmdHelper((PVRSRV_RGXDEV_INFO*) psDeviceNode->pvDevice,
 	                          &pPreAddr,
 	                          &pPostAddr,
 	                          &pRMWUFOAddr);
-
+#if defined(RGX_FEATURE_TLA_BIT_MASK)
 	if (i2DUpdateTimeline != PVRSRV_NO_TIMELINE && !pi2DUpdateFence)
 	{
 		return PVRSRV_ERROR_INVALID_PARAMS;
 	}
+#endif
 	if (i3DUpdateTimeline != PVRSRV_NO_TIMELINE && !pi3DUpdateFence)
 	{
 		return PVRSRV_ERROR_INVALID_PARAMS;
@@ -742,12 +773,15 @@ PVRSRV_ERROR PVRSRVRGXSubmitTransferKM(RGX_SERVER_TQ_CONTEXT	*psTransferContext,
 		eError = PVRSRV_ERROR_OUT_OF_MEMORY;
 		goto fail_alloc3dhelper;
 	}
+
+#if defined(RGX_FEATURE_TLA_BIT_MASK)
 	pas2DCmdHelper = OSAllocMem(sizeof(*pas2DCmdHelper) * ui32PrepareCount);
 	if (pas2DCmdHelper == NULL)
 	{
 		eError = PVRSRV_ERROR_OUT_OF_MEMORY;
 		goto fail_alloc2dhelper;
 	}
+#endif
 
 	if (iCheckFence != PVRSRV_NO_FENCE)
 	{
@@ -785,11 +819,14 @@ PVRSRV_ERROR PVRSRVRGXSubmitTransferKM(RGX_SERVER_TQ_CONTEXT	*psTransferContext,
 		if (TQ_PREP_FLAGS_COMMAND_IS(pui32TQPrepareFlags[i], 3D))
 		{
 			ui323DCmdLast++;
-		} else if (TQ_PREP_FLAGS_COMMAND_IS(pui32TQPrepareFlags[i], 2D) &&
+		}
+#if defined(RGX_FEATURE_TLA_BIT_MASK)
+		else if (TQ_PREP_FLAGS_COMMAND_IS(pui32TQPrepareFlags[i], 2D) &&
 				(RGX_IS_FEATURE_SUPPORTED(psDevInfo, TLA)))
 		{
 			ui322DCmdLast++;
 		}
+#endif
 	}
 
 	/*
@@ -852,7 +889,9 @@ PVRSRV_ERROR PVRSRVRGXSubmitTransferKM(RGX_SERVER_TQ_CONTEXT	*psTransferContext,
 				puiUpdateFenceUID = &ui3DUpdateFenceUID;
 			}
 		}
-		else if (TQ_PREP_FLAGS_COMMAND_IS(pui32TQPrepareFlags[i], 2D) &&
+		else
+#if defined(RGX_FEATURE_TLA_BIT_MASK)
+		if (TQ_PREP_FLAGS_COMMAND_IS(pui32TQPrepareFlags[i], 2D) &&
 				(RGX_IS_FEATURE_SUPPORTED(psDevInfo, TLA)))
 		{
 			psServerCommonCtx = psTransferContext->s2DData.psServerCommonContext;
@@ -880,6 +919,7 @@ PVRSRV_ERROR PVRSRVRGXSubmitTransferKM(RGX_SERVER_TQ_CONTEXT	*psTransferContext,
 			}
 		}
 		else
+#endif
 		{
 			eError = PVRSRV_ERROR_INVALID_PARAMS;
 			goto fail_prepare_loop;
@@ -888,7 +928,7 @@ PVRSRV_ERROR PVRSRVRGXSubmitTransferKM(RGX_SERVER_TQ_CONTEXT	*psTransferContext,
 		if (i == 0)
 		{
 			ui32PDumpFlags = ((pui32TQPrepareFlags[i] & TQ_PREP_FLAGS_PDUMPCONTINUOUS) != 0) ? PDUMP_FLAGS_CONTINUOUS : PDUMP_FLAGS_NONE;
-			PDUMPCOMMENTWITHFLAGS(ui32PDumpFlags,
+			PDUMPCOMMENTWITHFLAGS(psDeviceNode, ui32PDumpFlags,
 					"%s Command Server Submit on FWCtx %08x", pszCommandName, FWCommonContextGetFWAddress(psServerCommonCtx).ui32Addr);
 			psTransferContext->ui32PDumpFlags |= ui32PDumpFlags;
 		}
@@ -1097,18 +1137,16 @@ PVRSRV_ERROR PVRSRVRGXSubmitTransferKM(RGX_SERVER_TQ_CONTEXT	*psTransferContext,
 		if (bCheckFence && ui32FenceSyncCheckpointCount)
 		{
 			/* Append the checks (from input fence) */
-			if (ui32FenceSyncCheckpointCount > 0)
+			CHKPT_DBG((PVR_DBG_ERROR, "%s:   Append %d sync checkpoints to TQ Fence (psSyncAddrListFence=<%p>)...", __func__, ui32FenceSyncCheckpointCount, (void*)psSyncAddrListFence));
+			SyncAddrListAppendCheckpoints(psSyncAddrListFence,
+										  ui32FenceSyncCheckpointCount,
+										  apsFenceSyncCheckpoints);
+			if (!pauiIntFenceUFOAddress)
 			{
-				CHKPT_DBG((PVR_DBG_ERROR, "%s:   Append %d sync checkpoints to TQ Fence (psSyncAddrListFence=<%p>)...", __func__, ui32FenceSyncCheckpointCount, (void*)psSyncAddrListFence));
-				SyncAddrListAppendCheckpoints(psSyncAddrListFence,
-											  ui32FenceSyncCheckpointCount,
-											  apsFenceSyncCheckpoints);
-				if (!pauiIntFenceUFOAddress)
-				{
-					pauiIntFenceUFOAddress = psSyncAddrListFence->pasFWAddrs;
-				}
-				ui32IntClientFenceCount += ui32FenceSyncCheckpointCount;
+				pauiIntFenceUFOAddress = psSyncAddrListFence->pasFWAddrs;
 			}
+			ui32IntClientFenceCount += ui32FenceSyncCheckpointCount;
+
 #if defined(TRANSFER_CHECKPOINT_DEBUG)
 			if (ui32IntClientFenceCount > 0)
 			{
@@ -1189,7 +1227,8 @@ PVRSRV_ERROR PVRSRVRGXSubmitTransferKM(RGX_SERVER_TQ_CONTEXT	*psTransferContext,
 		/*
 			Create the command helper data for this command
 		*/
-		RGXCmdHelperInitCmdCCB(psClientCCB,
+		RGXCmdHelperInitCmdCCB(psDevInfo,
+		                       psClientCCB,
 		                       0,
 		                       ui32IntClientFenceCount,
 		                       pauiIntFenceUFOAddress,
@@ -1225,7 +1264,8 @@ PVRSRV_ERROR PVRSRVRGXSubmitTransferKM(RGX_SERVER_TQ_CONTEXT	*psTransferContext,
 		}
 	}
 
-	if (ui322DCmdCount)
+#if defined(RGX_FEATURE_TLA_BIT_MASK)
+	if ((ui322DCmdCount) && (RGX_IS_FEATURE_SUPPORTED(psDevInfo, TLA)))
 	{
 		eError = RGXCmdHelperAcquireCmdCCB(ui322DCmdCount,
 										   &pas2DCmdHelper[0]);
@@ -1234,6 +1274,7 @@ PVRSRV_ERROR PVRSRVRGXSubmitTransferKM(RGX_SERVER_TQ_CONTEXT	*psTransferContext,
 			goto fail_cmdacquire;
 		}
 	}
+#endif
 
 	/*
 		We should acquire the kernel CCB(s) space here as the schedule could fail
@@ -1249,6 +1290,7 @@ PVRSRV_ERROR PVRSRVRGXSubmitTransferKM(RGX_SERVER_TQ_CONTEXT	*psTransferContext,
 								  FWCommonContextGetFWAddress(psTransferContext->s3DData.psServerCommonContext).ui32Addr);
 	}
 
+#if defined(RGX_FEATURE_TLA_BIT_MASK)
 	if ((ui322DCmdCount) && (RGX_IS_FEATURE_SUPPORTED(psDevInfo, TLA)))
 	{
 		ui322DCmdOffset = RGXGetHostWriteOffsetCCB(FWCommonContextGetClientCCB(psTransferContext->s2DData.psServerCommonContext));
@@ -1257,6 +1299,7 @@ PVRSRV_ERROR PVRSRVRGXSubmitTransferKM(RGX_SERVER_TQ_CONTEXT	*psTransferContext,
 								  "TQ_2D",
 								  FWCommonContextGetFWAddress(psTransferContext->s2DData.psServerCommonContext).ui32Addr);
 	}
+#endif
 
 	if (ui323DCmdCount)
 	{
@@ -1277,7 +1320,10 @@ PVRSRV_ERROR PVRSRVRGXSubmitTransferKM(RGX_SERVER_TQ_CONTEXT	*psTransferContext,
 		s3DKCCBCmd.uCmdData.sCmdKickData.ui32CWoffUpdate = RGXGetHostWriteOffsetCCB(ps3DTQCCB);
 		s3DKCCBCmd.uCmdData.sCmdKickData.ui32CWrapMaskUpdate = RGXGetWrapMaskCCB(ps3DTQCCB);
 		s3DKCCBCmd.uCmdData.sCmdKickData.ui32NumCleanupCtl = 0;
+
+#if defined(SUPPORT_WORKLOAD_ESTIMATION)
 		s3DKCCBCmd.uCmdData.sCmdKickData.ui32WorkEstCmdHeaderOffset = 0;
+#endif
 
 		HTBLOGK(HTB_SF_MAIN_KICK_3D,
 				s3DKCCBCmd.uCmdData.sCmdKickData.psContext,
@@ -1292,7 +1338,7 @@ PVRSRV_ERROR PVRSRVRGXSubmitTransferKM(RGX_SERVER_TQ_CONTEXT	*psTransferContext,
 		                  ui32FWCtx,
 		                  ui32ExtJobRef,
 		                  ui32IntJobRef,
-		                  RGX_HWPERF_KICK_TYPE_TQ3D,
+		                  RGX_HWPERF_KICK_TYPE2_TQ3D,
 		                  iCheckFence,
 		                  i3DUpdateFence,
 		                  i3DUpdateTimeline,
@@ -1306,7 +1352,6 @@ PVRSRV_ERROR PVRSRVRGXSubmitTransferKM(RGX_SERVER_TQ_CONTEXT	*psTransferContext,
 			eError2 = RGXScheduleCommand(psDevInfo,
 										RGXFWIF_DM_3D,
 										&s3DKCCBCmd,
-										ui32ClientCacheOpSeqNum,
 										ui32PDumpFlags);
 			if (eError2 != PVRSRV_ERROR_RETRY)
 			{
@@ -1315,10 +1360,18 @@ PVRSRV_ERROR PVRSRVRGXSubmitTransferKM(RGX_SERVER_TQ_CONTEXT	*psTransferContext,
 			OSWaitus(MAX_HW_TIME_US/WAIT_TRY_COUNT);
 		} END_LOOP_UNTIL_TIMEOUT();
 
+		if (eError2 != PVRSRV_OK)
+		{
+			PVR_DPF((PVR_DBG_ERROR, "PVRSRVRGXSubmitTransferKM failed to schedule kernel CCB command. (0x%x)", eError2));
+			eError = eError2;
+			goto fail_cmdacquire;
+		}
+
 		PVRGpuTraceEnqueueEvent(psDeviceNode, ui32FWCtx, ui32ExtJobRef,
-		                        ui32IntJobRef, RGX_HWPERF_KICK_TYPE_TQ3D);
+		                        ui32IntJobRef, RGX_HWPERF_KICK_TYPE2_TQ3D);
 	}
 
+#if defined(RGX_FEATURE_TLA_BIT_MASK)
 	if ((ui322DCmdCount) && (RGX_IS_FEATURE_SUPPORTED(psDevInfo, TLA)))
 	{
 		RGXFWIF_KCCB_CMD s2DKCCBCmd;
@@ -1351,7 +1404,7 @@ PVRSRV_ERROR PVRSRVRGXSubmitTransferKM(RGX_SERVER_TQ_CONTEXT	*psTransferContext,
 		                  ui32FWCtx,
 		                  ui32ExtJobRef,
 		                  ui32IntJobRef,
-		                  RGX_HWPERF_KICK_TYPE_TQ2D,
+		                  RGX_HWPERF_KICK_TYPE2_TQ2D,
 		                  iCheckFence,
 		                  i2DUpdateFence,
 		                  i2DUpdateTimeline,
@@ -1365,7 +1418,6 @@ PVRSRV_ERROR PVRSRVRGXSubmitTransferKM(RGX_SERVER_TQ_CONTEXT	*psTransferContext,
 			eError2 = RGXScheduleCommand(psDevInfo,
 										RGXFWIF_DM_2D,
 										&s2DKCCBCmd,
-										ui32ClientCacheOpSeqNum,
 										ui32PDumpFlags);
 			if (eError2 != PVRSRV_ERROR_RETRY)
 			{
@@ -1374,9 +1426,17 @@ PVRSRV_ERROR PVRSRVRGXSubmitTransferKM(RGX_SERVER_TQ_CONTEXT	*psTransferContext,
 			OSWaitus(MAX_HW_TIME_US/WAIT_TRY_COUNT);
 		} END_LOOP_UNTIL_TIMEOUT();
 
+		if (eError2 != PVRSRV_OK)
+		{
+			PVR_DPF((PVR_DBG_ERROR, "PVRSRVRGXSubmitTransferKM failed to schedule kernel CCB command. (0x%x)", eError2));
+			eError = eError2;
+			goto fail_cmdacquire;
+		}
+
 		PVRGpuTraceEnqueueEvent(psDeviceNode, ui32FWCtx, ui32ExtJobRef,
-		                        ui32IntJobRef, RGX_HWPERF_KICK_TYPE_TQ2D);
+		                        ui32IntJobRef, RGX_HWPERF_KICK_TYPE2_TQ2D);
 	}
+#endif
 
 	/*
 	 * Now check eError (which may have returned an error from our earlier calls
@@ -1390,6 +1450,7 @@ PVRSRV_ERROR PVRSRVRGXSubmitTransferKM(RGX_SERVER_TQ_CONTEXT	*psTransferContext,
 
 #if defined(NO_HARDWARE)
 	/* If NO_HARDWARE, signal the output fence's sync checkpoint and sync prim */
+#if defined(RGX_FEATURE_TLA_BIT_MASK)
 	if (ps2DUpdateSyncCheckpoint)
 	{
 		CHKPT_DBG((PVR_DBG_ERROR, "%s:   Signalling TLA NOHW sync checkpoint<%p>, ID:%d, FwAddr=0x%x", __func__, (void*)ps2DUpdateSyncCheckpoint, SyncCheckpointGetId(ps2DUpdateSyncCheckpoint), SyncCheckpointGetFirmwareAddr(ps2DUpdateSyncCheckpoint)));
@@ -1400,6 +1461,7 @@ PVRSRV_ERROR PVRSRVRGXSubmitTransferKM(RGX_SERVER_TQ_CONTEXT	*psTransferContext,
 		CHKPT_DBG((PVR_DBG_ERROR, "%s:   Updating TLA NOHW sync prim<%p> to %d", __func__, (void*)ps2DFenceTimelineUpdateSync, ui322DFenceTimelineUpdateValue));
 		SyncPrimNoHwUpdate(ps2DFenceTimelineUpdateSync, ui322DFenceTimelineUpdateValue);
 	}
+#endif
 	if (ps3DUpdateSyncCheckpoint)
 	{
 		CHKPT_DBG((PVR_DBG_ERROR, "%s:   Signalling TQ3D NOHW sync checkpoint<%p>, ID:%d, FwAddr=0x%x", __func__, (void*)ps3DUpdateSyncCheckpoint, SyncCheckpointGetId(ps3DUpdateSyncCheckpoint), SyncCheckpointGetFirmwareAddr(ps3DUpdateSyncCheckpoint)));
@@ -1424,26 +1486,32 @@ PVRSRV_ERROR PVRSRVRGXSubmitTransferKM(RGX_SERVER_TQ_CONTEXT	*psTransferContext,
 	}
 #endif /* defined(SUPPORT_BUFFER_SYNC) */
 
+#if defined(RGX_FEATURE_TLA_BIT_MASK)
 	if (pi2DUpdateFence)
 	{
 		*pi2DUpdateFence = i2DUpdateFence;
 	}
+#endif
 	if (pi3DUpdateFence)
 	{
 		*pi3DUpdateFence = i3DUpdateFence;
 	}
+#if defined(RGX_FEATURE_TLA_BIT_MASK)
 	if (pv2DUpdateFenceFinaliseData && (i2DUpdateFence != PVRSRV_NO_FENCE))
 	{
 		SyncCheckpointFinaliseFence(psDeviceNode, i2DUpdateFence, pv2DUpdateFenceFinaliseData,
 		                            ps2DUpdateSyncCheckpoint, szFenceName);
 	}
+#endif
 	if (pv3DUpdateFenceFinaliseData && (i3DUpdateFence != PVRSRV_NO_FENCE))
 	{
 		SyncCheckpointFinaliseFence(psDeviceNode, i3DUpdateFence, pv3DUpdateFenceFinaliseData,
 		                            ps3DUpdateSyncCheckpoint, szFenceName);
 	}
 
+#if defined(RGX_FEATURE_TLA_BIT_MASK)
 	OSFreeMem(pas2DCmdHelper);
+#endif
 	OSFreeMem(pas3DCmdHelper);
 
 	/* Drop the references taken on the sync checkpoints in the
@@ -1456,11 +1524,13 @@ PVRSRV_ERROR PVRSRVRGXSubmitTransferKM(RGX_SERVER_TQ_CONTEXT	*psTransferContext,
 		SyncCheckpointFreeCheckpointListMem(apsFenceSyncCheckpoints);
 	}
 	/* Free memory allocated to hold the internal list of update values */
+#if defined(RGX_FEATURE_TLA_BIT_MASK)
 	if (pui322DIntAllocatedUpdateValues)
 	{
 		OSFreeMem(pui322DIntAllocatedUpdateValues);
 		pui322DIntAllocatedUpdateValues = NULL;
 	}
+#endif
 	if (pui323DIntAllocatedUpdateValues)
 	{
 		OSFreeMem(pui323DIntAllocatedUpdateValues);
@@ -1495,21 +1565,24 @@ fail_prepare_loop:
 #endif
 
 	/* Free memory allocated to hold the internal list of update values */
+#if defined(RGX_FEATURE_TLA_BIT_MASK)
 	if (pui322DIntAllocatedUpdateValues)
 	{
 		OSFreeMem(pui322DIntAllocatedUpdateValues);
 		pui322DIntAllocatedUpdateValues = NULL;
 	}
+#endif
 	if (pui323DIntAllocatedUpdateValues)
 	{
 		OSFreeMem(pui323DIntAllocatedUpdateValues);
 		pui323DIntAllocatedUpdateValues = NULL;
 	}
-
+#if defined(RGX_FEATURE_TLA_BIT_MASK)
 	if (i2DUpdateFence != PVRSRV_NO_FENCE)
 	{
 		SyncCheckpointRollbackFenceData(i2DUpdateFence, pv2DUpdateFenceFinaliseData);
 	}
+#endif
 	if (i3DUpdateFence != PVRSRV_NO_FENCE)
 	{
 		SyncCheckpointRollbackFenceData(i3DUpdateFence, pv3DUpdateFenceFinaliseData);
@@ -1540,8 +1613,10 @@ fail_resolve_buffersync_input_fence:
 		SyncCheckpointFreeCheckpointListMem(apsFenceSyncCheckpoints);
 	}
 fail_resolve_fencesync_input_fence:
+#if defined(RGX_FEATURE_TLA_BIT_MASK)
 	OSFreeMem(pas2DCmdHelper);
 fail_alloc2dhelper:
+#endif
 	OSFreeMem(pas3DCmdHelper);
 fail_alloc3dhelper:
 
@@ -1553,22 +1628,24 @@ fail_alloc3dhelper:
 PVRSRV_ERROR PVRSRVRGXSetTransferContextPriorityKM(CONNECTION_DATA *psConnection,
                                                    PVRSRV_DEVICE_NODE * psDevNode,
                                                    RGX_SERVER_TQ_CONTEXT *psTransferContext,
-                                                   IMG_UINT32 ui32Priority)
+                                                   IMG_INT32 i32Priority)
 {
 	PVRSRV_ERROR eError;
+#if defined(RGX_FEATURE_TLA_BIT_MASK)
 	PVRSRV_RGXDEV_INFO *psDevInfo = psDevNode->pvDevice;
-
+#endif
 	PVR_UNREFERENCED_PARAMETER(psDevNode);
 
 	OSLockAcquire(psTransferContext->hLock);
 
-	if ((psTransferContext->s2DData.ui32Priority != ui32Priority) &&
+#if defined(RGX_FEATURE_TLA_BIT_MASK)
+	if ((psTransferContext->s2DData.i32Priority != i32Priority) &&
 			(RGX_IS_FEATURE_SUPPORTED(psDevInfo, TLA)))
 	{
 		eError = ContextSetPriority(psTransferContext->s2DData.psServerCommonContext,
 									psConnection,
 									psTransferContext->psDeviceNode->pvDevice,
-									ui32Priority,
+									i32Priority,
 									RGXFWIF_DM_2D);
 		if (eError != PVRSRV_OK)
 		{
@@ -1578,15 +1655,16 @@ PVRSRV_ERROR PVRSRVRGXSetTransferContextPriorityKM(CONNECTION_DATA *psConnection
 			}
 			goto fail_2dcontext;
 		}
-		psTransferContext->s2DData.ui32Priority = ui32Priority;
+		psTransferContext->s2DData.i32Priority = i32Priority;
 	}
+#endif
 
-	if (psTransferContext->s3DData.ui32Priority != ui32Priority)
+	if (psTransferContext->s3DData.i32Priority != i32Priority)
 	{
 		eError = ContextSetPriority(psTransferContext->s3DData.psServerCommonContext,
 									psConnection,
 									psTransferContext->psDeviceNode->pvDevice,
-									ui32Priority,
+									i32Priority,
 									RGXFWIF_DM_3D);
 		if (eError != PVRSRV_OK)
 		{
@@ -1596,15 +1674,17 @@ PVRSRV_ERROR PVRSRVRGXSetTransferContextPriorityKM(CONNECTION_DATA *psConnection
 			}
 			goto fail_3dcontext;
 		}
-		psTransferContext->s3DData.ui32Priority = ui32Priority;
+		psTransferContext->s3DData.i32Priority = i32Priority;
 	}
 
 	OSLockRelease(psTransferContext->hLock);
 	return PVRSRV_OK;
 
 fail_3dcontext:
+#if defined(RGX_FEATURE_TLA_BIT_MASK)
 
 fail_2dcontext:
+#endif
 	OSLockRelease(psTransferContext->hLock);
 	PVR_ASSERT(eError != PVRSRV_OK);
 	return eError;
@@ -1615,28 +1695,23 @@ PVRSRV_ERROR PVRSRVRGXSetTransferContextPropertyKM(RGX_SERVER_TQ_CONTEXT *psTran
 												   IMG_UINT64 ui64Input,
 												   IMG_UINT64 *pui64Output)
 {
-	PVRSRV_ERROR eError;
-	PVRSRV_ERROR eError2 = PVRSRV_OK;
+	PVRSRV_ERROR eError = PVRSRV_OK;
 
 	switch (eContextProperty)
 	{
 		case RGX_CONTEXT_PROPERTY_FLAGS:
 		{
+			IMG_UINT32 ui32ContextFlags = (IMG_UINT32)ui64Input;
+
 			OSLockAcquire(psTransferContext->hLock);
 			eError = FWCommonContextSetFlags(psTransferContext->s2DData.psServerCommonContext,
-			                                 (IMG_UINT32)ui64Input);
+			                                 ui32ContextFlags);
 			if (eError == PVRSRV_OK)
 			{
-				eError2 = FWCommonContextSetFlags(psTransferContext->s3DData.psServerCommonContext,
-				                                  (IMG_UINT32)ui64Input);
-			}
-			if ((eError == PVRSRV_OK) && (eError2 == PVRSRV_OK))
-			{
-				psTransferContext->ui32Flags = (IMG_UINT32)ui64Input;
+				eError = FWCommonContextSetFlags(psTransferContext->s3DData.psServerCommonContext,
+			                                     ui32ContextFlags);
 			}
 			OSLockRelease(psTransferContext->hLock);
-			PVR_LOG_IF_ERROR(eError, "FWCommonContextSetFlags eError");
-			PVR_LOG_IF_ERROR(eError2, "FWCommonContextSetFlags eError2");
 			break;
 		}
 
@@ -1664,12 +1739,14 @@ void DumpTransferCtxtsInfo(PVRSRV_RGXDEV_INFO *psDevInfo,
 		RGX_SERVER_TQ_CONTEXT *psCurrentServerTransferCtx =
 			IMG_CONTAINER_OF(psNode, RGX_SERVER_TQ_CONTEXT, sListNode);
 
+#if defined(RGX_FEATURE_TLA_BIT_MASK)
 		if ((psCurrentServerTransferCtx->ui32Flags & RGX_SERVER_TQ_CONTEXT_FLAGS_2D) &&
 				(RGX_IS_FEATURE_SUPPORTED(psDevInfo, TLA)))
 		{
 			DumpFWCommonContextInfo(psCurrentServerTransferCtx->s2DData.psServerCommonContext,
 			                        pfnDumpDebugPrintf, pvDumpDebugFile, ui32VerbLevel);
 		}
+#endif
 
 		if (psCurrentServerTransferCtx->ui32Flags & RGX_SERVER_TQ_CONTEXT_FLAGS_3D)
 		{
@@ -1693,6 +1770,7 @@ IMG_UINT32 CheckForStalledClientTransferCtxt(PVRSRV_RGXDEV_INFO *psDevInfo)
 		RGX_SERVER_TQ_CONTEXT *psCurrentServerTransferCtx =
 			IMG_CONTAINER_OF(psNode, RGX_SERVER_TQ_CONTEXT, sListNode);
 
+#if defined(RGX_FEATURE_TLA_BIT_MASK)
 		if ((psCurrentServerTransferCtx->ui32Flags & RGX_SERVER_TQ_CONTEXT_FLAGS_2D) &&
 				(NULL != psCurrentServerTransferCtx->s2DData.psServerCommonContext) &&
 				(RGX_IS_FEATURE_SUPPORTED(psDevInfo, TLA)))
@@ -1702,6 +1780,7 @@ IMG_UINT32 CheckForStalledClientTransferCtxt(PVRSRV_RGXDEV_INFO *psDevInfo)
 				ui32ContextBitMask |= RGX_KICK_TYPE_DM_TQ2D;
 			}
 		}
+#endif
 
 		if ((psCurrentServerTransferCtx->ui32Flags & RGX_SERVER_TQ_CONTEXT_FLAGS_3D) && (NULL != psCurrentServerTransferCtx->s3DData.psServerCommonContext))
 		{

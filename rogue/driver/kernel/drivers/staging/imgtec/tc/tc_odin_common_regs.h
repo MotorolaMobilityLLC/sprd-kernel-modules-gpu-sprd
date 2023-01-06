@@ -49,8 +49,7 @@
 struct tc_device;
 
 enum odin_common_regs {
-	CORE_REVISION = 0,
-	CORE_CHANGE_SET,
+	CORE_CHANGE_SET = 0,
 	CORE_USER_ID,
 	CORE_USER_BUILD,
 	CORE_INTERRUPT_ENABLE,
@@ -78,7 +77,6 @@ struct odin_orion_reg {
 	}
 
 static const struct odin_orion_reg common_regs[] = {
-	COMMON_REG_ENTRY(CORE_REVISION),
 	COMMON_REG_ENTRY(CORE_CHANGE_SET),
 	COMMON_REG_ENTRY(CORE_USER_ID),
 	COMMON_REG_ENTRY(CORE_USER_BUILD),

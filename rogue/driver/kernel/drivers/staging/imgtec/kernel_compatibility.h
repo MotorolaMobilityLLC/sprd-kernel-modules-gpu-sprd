@@ -44,13 +44,18 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define __KERNEL_COMPATIBILITY_H__
 
 #include <linux/version.h>
+#include <linux/compiler.h>
 
 /*
  * Stop supporting an old kernel? Remove the top block.
  * New incompatible kernel?       Append a new block at the bottom.
  *
- * Please write you version test as `VERSION < X.Y`, and use the earliest
+ * Please write your version test as `VERSION < X.Y`, and use the earliest
  * possible version :)
+ *
+ * If including this header file in other files, this should always be the
+ * last file included, as it can affect definitions/declarations in files
+ * included after it.
  */
 
 /* Linux 3.6 introduced seq_vprintf(). Earlier versions don't have this
@@ -493,5 +498,45 @@ struct dma_buf_map {
 	})
 
 #endif /* LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0) */
+
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 12, 0))
+
+#define drm_prime_sg_to_page_array(sgt, pages, npages) \
+	drm_prime_sg_to_page_addr_arrays(sgt, pages, NULL, npages)
+
+#endif /* (LINUX_VERSION_CODE < KERNEL_VERSION(5, 12, 0)) */
+
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 13, 0))
+
+#define drm_gem_plane_helper_prepare_fb drm_gem_fb_prepare_fb
+
+#endif /* (LINUX_VERSION_CODE < KERNEL_VERSION(5, 13, 0)) */
+
+/*
+ * Linux 5.11 renames the privileged uaccess routines for arm64 and Android
+ * kernel v5.10 merges the change as well. These routines are only used for
+ * arm64 so CONFIG_ARM64 testing can be ignored.
+ */
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0)) || \
+	((LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0)) && !defined(ANDROID))
+#define uaccess_enable_privileged() uaccess_enable()
+#define uaccess_disable_privileged() uaccess_disable()
+#endif
+
+#if defined(__GNUC__)
+#define GCC_VERSION_AT_LEAST(major, minor) \
+	(__GNUC__ > (major) || \
+	(__GNUC__ == (major) && __GNUC_MINOR__ >= (minor)))
+#else
+#define GCC_VERSION_AT_LEAST(major, minor) 0
+#endif
+
+#if !defined(__fallthrough)
+	#if GCC_VERSION_AT_LEAST(7, 0)
+		#define __fallthrough __attribute__((__fallthrough__))
+	#else
+		#define __fallthrough
+	#endif
+#endif
 
 #endif /* __KERNEL_COMPATIBILITY_H__ */

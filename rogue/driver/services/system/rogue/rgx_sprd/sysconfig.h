@@ -46,6 +46,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #if !defined(__SYSCCONFIG_H__)
 #define __SYSCCONFIG_H__
 
+extern void GetGpuPowClkState(PVRSRV_DEVICE_NODE *psDeviceNode,DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,void *pvDumpDebugFile);
 
 /*****************************************************************************
  * system specific data structures

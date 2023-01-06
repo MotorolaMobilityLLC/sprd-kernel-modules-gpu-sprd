@@ -156,10 +156,8 @@ PhysMemTestInit(PVRSRV_DEVICE_NODE **ppsDeviceNode, PVRSRV_DEVICE_CONFIG *psDevC
 	psDeviceNode->eCurrentSysPowerState = PVRSRV_SYS_POWER_STATE_ON;
 
 	/* Initialise Phys mem heaps */
-	eError = PVRSRVPhysMemHeapsInit(psDeviceNode, psDevConfig);
-	PVR_LOG_GOTO_IF_ERROR(eError, "PVRSRVPhysMemHeapsInit", ErrorSysDevDeInit);
-
-	psDeviceNode->sDevMMUPxSetup.uiMMUPxLog2AllocGran = OSGetPageShift();
+	eError = PhysHeapInitDeviceHeaps(psDeviceNode, psDevConfig);
+	PVR_LOG_GOTO_IF_ERROR(eError, "PhysHeapInitDeviceHeaps", ErrorSysDevDeInit);
 
 	*ppsDeviceNode = psDeviceNode;
 
@@ -176,7 +174,7 @@ static void
 PhysMemTestDeInit(PVRSRV_DEVICE_NODE *psDeviceNode)
 {
 	/* Deinitialise Phys mem heaps */
-	PVRSRVPhysMemHeapsDeinit(psDeviceNode);
+	PhysHeapDeInitDeviceHeaps(psDeviceNode);
 
 	OSFreeMem(psDeviceNode);
 }
@@ -227,17 +225,16 @@ PMRValidationTest(PVRSRV_DEVICE_NODE *psDeviceNode, PVRSRV_MEMALLOCFLAGS_T uiFla
 		pui32MappingTable[i++] = ui32Index;
 	}
 
-	/* Allocate Sparse PMR with SPARSE | READ | WRITE | UNCACHED attributes */
+	/* Allocate Sparse PMR with SPARSE | READ | WRITE | UNCACHED_WC attributes */
 	uiFlags |= PVRSRV_MEMALLOCFLAG_SPARSE_NO_DUMMY_BACKING | \
 				PVRSRV_MEMALLOCFLAG_CPU_READABLE | \
 				PVRSRV_MEMALLOCFLAG_CPU_WRITEABLE | \
-				PVRSRV_MEMALLOCFLAG_CPU_UNCACHED;
+				PVRSRV_MEMALLOCFLAG_CPU_UNCACHED_WC;
 
 	/* Allocate a sparse PMR from given physical heap - CPU/GPU/FW */
 	eError = PhysmemNewRamBackedPMR(NULL,
 									psDeviceNode,
 									ui32NumOfPages * uiPageSize,
-									uiPageSize,
 									ui32NumOfPhysPages,
 									ui32NumOfPages,
 									pui32MappingTable,
@@ -247,7 +244,8 @@ PMRValidationTest(PVRSRV_DEVICE_NODE *psDeviceNode, PVRSRV_MEMALLOCFLAGS_T uiFla
 									"PMR ValidationTest",
 									OSGetCurrentClientProcessIDKM(),
 									&psPMR,
-									PDUMP_NONE);
+									PDUMP_NONE,
+									NULL);
 	if (eError != PVRSRV_OK)
 	{
 		PVR_DPF((PVR_DBG_ERROR, "Failed to allocate a PMR"));
@@ -299,7 +297,7 @@ PMRValidationTest(PVRSRV_DEVICE_NODE *psDeviceNode, PVRSRV_MEMALLOCFLAGS_T uiFla
 				PVR_DPF((PVR_DBG_ERROR, "Failed to Acquire Kernel Mapping of PMR"));
 				goto ErrorUnlockPhysAddresses;
 			}
-			OSDeviceMemCopy(pvKernAddr, pcWriteBuffer, OSGetPageSize());
+			OSCachedMemCopyWMB(pvKernAddr, pcWriteBuffer, OSGetPageSize());
 
 			eError = PMRReleaseKernelMappingData(psPMR, hPrivData);
 			PVR_LOG_IF_ERROR(eError, "PMRReleaseKernelMappingData");
@@ -320,7 +318,7 @@ PMRValidationTest(PVRSRV_DEVICE_NODE *psDeviceNode, PVRSRV_MEMALLOCFLAGS_T uiFla
 				goto ErrorUnlockPhysAddresses;
 			}
 			OSCachedMemSet(pcReadBuffer, 0x0, uiPageSize);
-			OSDeviceMemCopy(pcReadBuffer, pvKernAddr, uiMappedSize);
+			OSCachedMemCopy(pcReadBuffer, pvKernAddr, uiMappedSize);
 
 			eError = PMRReleaseKernelMappingData(psPMR, hPrivData);
 			PVR_LOG_IF_ERROR(eError, "PMRReleaseKernelMappingData");
@@ -565,7 +563,6 @@ MemTestPatterns(PVRSRV_DEVICE_NODE *psDeviceNode, PVRSRV_MEMALLOCFLAGS_T uiFlags
 	eError = PhysmemNewRamBackedPMR(NULL,
 									psDeviceNode,
 									uiPageSize * PHYSMEM_TEST_PAGES,
-									uiPageSize * PHYSMEM_TEST_PAGES,
 									1,
 									1,
 									&ui32MappingTable,
@@ -575,7 +572,8 @@ MemTestPatterns(PVRSRV_DEVICE_NODE *psDeviceNode, PVRSRV_MEMALLOCFLAGS_T uiFlags
 									"PMR PhysMemTest",
 									OSGetCurrentClientProcessIDKM(),
 									&psPMR,
-									PDUMP_NONE);
+									PDUMP_NONE,
+									NULL);
 	PVR_LOG_RETURN_IF_ERROR(eError, "PhysmemNewRamBackedPMR");
 
 	/* Check whether allocated PMR can be locked and obtain physical

@@ -922,6 +922,7 @@ static unsigned int pfim_num_tiles(struct device *dev, u32 width, u32 height,
 		default:
 			dev_warn(dev, "WARNING: Wrong bit depth: %d\n",
 				 bpp);
+			return 0;
 		}
 		halign = 8;
 		break;

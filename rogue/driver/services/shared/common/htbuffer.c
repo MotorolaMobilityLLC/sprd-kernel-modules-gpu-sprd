@@ -45,7 +45,18 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */ /**************************************************************************/
 
-#include <stdarg.h>
+#if defined(__linux__) && defined(__KERNEL__)
+ #include <linux/version.h>
+
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
+  #include <linux/stdarg.h>
+ #else
+  #include <stdarg.h>
+ #endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0) */
+#else
+ #include <stdarg.h>
+#endif /* __linux__ */
+
 #include "htbuffer.h"
 #include "osfunc.h"
 #include "client_htbuffer_bridge.h"
@@ -96,7 +107,7 @@ HTBControl(
 /*************************************************************************/ /*!
 */ /**************************************************************************/
 static PVRSRV_ERROR
-_HTBLog(IMG_HANDLE hSrvHandle, IMG_UINT32 PID, IMG_UINT32 TID, IMG_UINT64 ui64TimeStampus,
+_HTBLog(IMG_HANDLE hSrvHandle, IMG_UINT32 PID, IMG_UINT32 TID, IMG_UINT64 ui64TimeStamp,
 		HTB_LOG_SFids SF, va_list args)
 {
 #if defined(__KERNEL__)
@@ -118,13 +129,13 @@ _HTBLog(IMG_HANDLE hSrvHandle, IMG_UINT32 PID, IMG_UINT32 TID, IMG_UINT64 ui64Ti
 		aui32Args[i] = va_arg(args, IMG_UINT32);
 	}
 
-	return BridgeHTBLog(hSrvHandle, PID, TID, ui64TimeStampus, SF,
+	return BridgeHTBLog(hSrvHandle, PID, TID, ui64TimeStamp, SF,
 			ui32NumArgs, aui32Args);
 #else
 	PVR_UNREFERENCED_PARAMETER(hSrvHandle);
 	PVR_UNREFERENCED_PARAMETER(PID);
 	PVR_UNREFERENCED_PARAMETER(TID);
-	PVR_UNREFERENCED_PARAMETER(ui64TimeStampus);
+	PVR_UNREFERENCED_PARAMETER(ui64TimeStamp);
 	PVR_UNREFERENCED_PARAMETER(SF);
 	PVR_UNREFERENCED_PARAMETER(args);
 
@@ -142,20 +153,20 @@ _HTBLog(IMG_HANDLE hSrvHandle, IMG_UINT32 PID, IMG_UINT32 TID, IMG_UINT64 ui64Ti
                         than querying internally so that events
                         associated with a particular process, but
                         performed by another can be logged correctly.
- @Input         ui64TimeStampus The timestamp to be associated with this
+ @Input         ui64TimeStamp   The timestamp to be associated with this
                                 log event
  @Input         SF              The log event ID
  @Input         ...             Log parameters
  @Return        PVRSRV_OK       Success.
 */ /**************************************************************************/
 IMG_INTERNAL PVRSRV_ERROR
-HTBLog(IMG_HANDLE hSrvHandle, IMG_UINT32 PID, IMG_UINT32 TID, IMG_UINT64 ui64TimeStampns,
+HTBLog(IMG_HANDLE hSrvHandle, IMG_UINT32 PID, IMG_UINT32 TID, IMG_UINT64 ui64TimeStamp,
 		IMG_UINT32 SF, ...)
 {
 	PVRSRV_ERROR eError;
 	va_list args;
 	va_start(args, SF);
-	eError =_HTBLog(hSrvHandle, PID, TID, ui64TimeStampns, SF, args);
+	eError =_HTBLog(hSrvHandle, PID, TID, ui64TimeStamp, SF, args);
 	va_end(args);
 	return eError;
 }
@@ -173,11 +184,11 @@ IMG_INTERNAL PVRSRV_ERROR
 HTBLogSimple(IMG_HANDLE hSrvHandle, IMG_UINT32 SF, ...)
 {
 	PVRSRV_ERROR eError;
-	IMG_UINT64 ui64Timestamp;
+	IMG_UINT64 ui64TimeStamp;
 	va_list args;
 	va_start(args, SF);
-	OSClockMonotonicns64(&ui64Timestamp);
-	eError = _HTBLog(hSrvHandle, OSGetCurrentProcessID(), OSGetCurrentThreadID(), ui64Timestamp,
+	OSClockMonotonicns64(&ui64TimeStamp);
+	eError = _HTBLog(hSrvHandle, OSGetCurrentProcessID(), OSGetCurrentThreadID(), ui64TimeStamp,
 			SF, args);
 	va_end(args);
 	return eError;

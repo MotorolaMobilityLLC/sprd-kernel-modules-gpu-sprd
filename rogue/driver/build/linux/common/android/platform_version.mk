@@ -42,9 +42,9 @@ ifeq ($(__included_platform_version_mk),)
 
 $(warning PLATFORM_RELEASE was not set. Attempting to determine version using \
 build.prop.)
+
 $(warning Consider setting PLATFORM_RELEASE, as platform autodetection is \
 now deprecated.)
-
 
 BUILD_PROP := $(TARGET_ROOT)/product/$(TARGET_DEVICE)/system/build.prop
 
@@ -81,10 +81,10 @@ $(eval $(subst #,$(newline),$(shell cat $(BUILD_PROP) | \
 	grep '^ro.build.version.release=\|^ro.build.id=' | \
 	sed -e 's,ro.build.version.release=,PLATFORM_RELEASE=,' \
 	    -e 's,ro.build.id=,PLATFORM_BUILDID=,' | tr '\n' '#')))
-
 else
 PLATFORM_RELEASE=$(PLATFORM_VERSION)
 PLATFORM_CODENAME=$(PLATFORM_VERSION_CODENAME)
+
 endif # ! PLATFORM_RELEASE
 
 endif # ! PLATFORM_VERSION
@@ -206,7 +206,7 @@ is_future_version := \
 #
 ifeq ($(is_future_version),1)
 override JACK_VERSION :=
-API_LEVEL := 31
+API_LEVEL := 33
 else ifeq ($(is_at_least_s),1)
 override JACK_VERSION :=
 API_LEVEL := 31

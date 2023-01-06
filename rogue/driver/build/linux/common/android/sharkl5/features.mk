@@ -43,6 +43,7 @@
 SUPPORT_ANDROID_PLATFORM := 1
 SUPPORT_OPENGLES1_V1_ONLY := 1
 DONT_USE_SONAMES := 1
+PVRSRV_USE_LINUX_INIT_ON_ALLOC := 0
 
 # By default, the HAL_VARIANT should match TARGET_DEVICE
 #
@@ -64,6 +65,16 @@ KERNEL_COMPONENTS := srvkm
 # of the Android security model and should not be disabled.
 #
 PVR_LINUX_PHYSMEM_ZERO_ALL_PAGES ?= 1
+
+ifeq ($(SUPPORT_ARC_PLATFORM),)
+ # Use a separate device node for PVR Sync.
+ #
+ USE_PVRSYNC_DEVNODE := 1
+endif
+
+# Initialise Services and Sync devices on open
+#
+override PVRSRV_DEVICE_INIT_MODE := PVRSRV_LINUX_DEV_INIT_ON_OPEN
 
 # If we are not using the VNDK (it's a full/standalone build) we probably
 # have build.prop files, ensuring that the system and vendor directories
@@ -104,6 +115,10 @@ ifeq ($(SUPPORT_ANDROID_COMPACT_INSTALL),1)
  TEST_DESTDIR := /data/nativetest
 endif
 
+# Show GPU activity in systrace
+#
+SUPPORT_GPUTRACE_EVENTS ?= 1
+
 # Enable source fortification by default
 #
 FORTIFY ?= 1
@@ -129,6 +144,22 @@ PVRSRV_NEED_PVR_STACKTRACE_NATIVE ?= 1
  endif
 endif
 
+# Enable PVR DVFS
+#
+FEATURE_PVR_DVFS ?= 1
+
+# Enable PVR HW DVFS
+#
+#PVR_HW_DVFS ?= 1
+
+# Enable PVR PDVFS
+#SUPPORT_PDVFS ?= 1
+#PDVFS_COM ?= PDVFS_COM_PMC
+#PVR_GPIO_MODE ?= PVR_GPIO_MODE_GENERAL
+
+# Enable stack trace functions by default. This uses libutils.
+#
+
 ifeq ($(GTRACE_TOOL),1)
  ifeq ($(is_at_least_pie),1)
   PVRSRV_USE_LIBUTILSCALLSTACK ?= 1
@@ -140,13 +171,23 @@ endif
 # can be enabled, and the Signer and KeyID fields will be added
 # to the signature header.
 #
+ifneq ($(wildcard $(KERNELDIR)/certs/signing_key.x509),)
+RGX_FW_SIGNED   := 0
+# When the default system keyring has been set, use the system keyring instead.
+# If the system keyring is arbitrary, set-up the paths for the
+# RGX_FW_X509 and RGX_FW_PRIV_KEY variables in the platform makefile.
+ifneq ($(wildcard $(KERNELDIR)/testkey.x509.pem),)
+RGX_FW_X509     ?= build/linux/common/android/testkey.x509
+RGX_FW_PRIV_KEY ?= $(addsuffix .pem,$(RGX_FW_X509))
+else
 RGX_FW_X509     ?= $(wildcard $(KERNELDIR)/certs/signing_key.x509)
+ifneq ($(wildcard $(KERNELDIR)/certs/signing_key.pem),)
 RGX_FW_PRIV_KEY ?= $(wildcard $(KERNELDIR)/certs/signing_key.pem)
-ifneq ($(RGX_FW_PRIV_KEY),)
- ifneq ($(RGX_FW_X509),)
-  RGX_FW_SIGNED := 0
- endif # !RGX_FW_X509
-endif # !RGX_FW_PRIV_KEY
+else
+RGX_FW_PRIV_KEY := $(BSP_ROOT_DIR)/kernel/$(KERNEL_PATH)/certs/signing_key.pem
+endif
+endif
+endif
 
 # If sanitizer has been enabled, the sanitized binaries must be installed
 # under /data/asan on android.
@@ -225,6 +266,10 @@ EGL_EXTENSION_ANDROID_BLOB_CACHE ?= 1
 # the framebuffer
 #
 EGL_EXTENSION_ANDROID_FRAMEBUFFER_TARGET := 1
+##############################################################################
+# This is currently broken on KK. Disable until fixed.
+#
+SUPPORT_ANDROID_APPHINTS := 0
 
 ##############################################################################
 # KitKat added very provisional/early support for sRGB render targets
@@ -421,11 +466,6 @@ ifeq ($(is_at_least_oreo),1)
 OCL_ONLINE_COMPILER_DIRECTLY_LINKED ?= 1
 endif
 
-# OpenCL-compiled precompiled headers can be enabled or disabled
-# based on library size constraints.
-#
-OCLC_ENABLE_PCH ?= 1
-
 # On Android O, link the pvrANDROID_WSEGL module directly into IMGEGL. This
 # cuts down on unnecessary dynamic library dependencies.
 #
@@ -492,11 +532,6 @@ endif
 # From Android O mr1, use the HIDL interface.
 ifeq ($(is_at_least_oreo_mr1),1)
 PVR_DEBUGGER_SUPPORTS_HIDL_API ?= 1
-endif
-
-# Enabling IPC based mechanism for apphints (requires Treble)
-ifeq ($(is_at_least_oreo_mr1),1)
-PVR_APPHINTS_IPC ?= 1
 endif
 
 # If this is newer than oreo-mr1, <system/window.h> provides the typedef for
@@ -637,21 +672,15 @@ PVR_ANDROID_HAS_HAL_DATASPACE_V0 := 1
 #
 USE_LLD := 1
 
-# Use Link Time Optimisation by default since Android Q (10.0).
-#
-ifneq ($(BUILD),debug)
-USE_LTO ?= 1
-endif
-
 # Enable PVR_DPF and Android logcat in debug build
 #
 ifeq ($(BUILD),debug)
 PVRSRV_NEED_PVR_DPF ?= 1
 endif
 
-# Enable PVR ION memory stats by default.
+# Support DRM format modifiers.
 #
-PVRSRV_ENABLE_PVR_ION_STATS ?= 1
+PVR_ANDROID_HAS_DRM_FORMAT_MODIFIERS ?= 1
 
 endif
 
@@ -686,6 +715,7 @@ JAVA_VERSION := 11
 PVR_ANDROID_HAS_GRAPHICSHAL_HIDL ?= 0
 ifeq ($(PVR_ANDROID_HAS_GRAPHICSHAL_HIDL),1)
  override PVR_ANDROID_HAS_GRALLOC_4 := 1
+ override PVR_ANDROID_HAS_GRALLOC_1 := 0
 endif
 
 # Support gralloc v4 by default on Android R.
@@ -698,6 +728,34 @@ endif
 # Support EGL 1.5 on Android 11.
 #
 IMGEGL_PLATFORM_ANDROID_HAS_1_5 ?=1
+
+endif
+
+##############################################################################
+# Android-12 (S) supporting features
+#
+ifeq ($(is_at_least_s), 1)
+# Enable dumpstate hal.
+#
+PVR_ANDROID_HAS_DUMPSTATE_HAL_V1_1 ?= 1
+
+# Support NV_context_priority_realtime EGL extension.
+# On Android, SurfaceFlinger will elevate to using a REALTIME priority to
+# eliminate jank in the UI.
+#
+EGL_EXTENSION_NV_CONTEXT_PRIORITY_REALTIME ?= 1
+
+# Add libdmabufheap in gralloc to allow using a mix of ION and DMA-BUF heaps.
+#
+PVR_ANDROID_HAS_LIBDMABUFHEAP ?= 1
+
+# Support AIDL Memtrack HAL.
+#
+PVR_ANDROID_HAS_MEMTRACKHAL_AIDL ?= 1
+
+# Support THERMAL HAL V2.
+#
+PVR_ANDROID_HAS_THERMAL_HAL_V2 ?= 1
 
 endif
 
@@ -720,3 +778,27 @@ endif
 # and there is a name collision between 64-bit and 32-bit binaries.
 #
 MULTIARCH_32BIT_EXEC_SUFFIX ?= 1
+
+# The ION is removed since kernel 5.15.
+#
+KERNEL_COMPATIBLE_ION := $(shell (test $(KERNEL_VERSION) -ge 5 && \
+ test $(KERNEL_PATCHLEVEL) -ge 15) && echo 0 || echo 1)
+ifeq ($(KERNEL_COMPATIBLE_ION),1)
+ PVRSRV_ENABLE_PVR_ION_STATS ?= 1
+else
+ override PVRSRV_ENABLE_PVR_ION_STATS := 0
+ override PVR_ANDROID_ION_FBCDC_ALLOC := 0
+ override SUPPORT_ION := 0
+endif
+
+# Android Linux kernel has dma_heap_find in dma-heap.h API from version 5.10.
+#
+PVR_ANDROID_HAS_DMA_HEAP_FIND := $(shell (test $(KERNEL_VERSION) -ge 5 && \
+ test $(KERNEL_PATCHLEVEL) -ge 10) && echo 1 || echo 0)
+
+ifeq ($(SUPPORT_TRUSTED_DEVICE),1)
+ ifeq ($(PVR_ANDROID_HAS_DMA_HEAP_FIND),0)
+  $(warning Android KM secure alloc not implemented. Fallback to UM secure alloc.)
+  override SUPPORT_SECURE_ALLOC_KM := 0
+ endif
+endif

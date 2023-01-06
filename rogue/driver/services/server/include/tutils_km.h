@@ -85,11 +85,13 @@ PVRSRV_ERROR DevmemIntAllocHostMemKM(IMG_DEVMEM_SIZE_T ui32Size,
 PVRSRV_ERROR DevmemIntFreeHostMemKM(PMR *psPMR);
 
 IMG_EXPORT
-PVRSRV_ERROR PowerTestIoctlKM(IMG_UINT32  uiCmd,
-				  IMG_UINT32  uiIn1,
-				  IMG_UINT32  uiIn2,
-				  IMG_UINT32  *puiOut1,
-				  IMG_UINT32  *puiOut2);
+PVRSRV_ERROR PowerTestIoctlKM(CONNECTION_DATA *psConnection,
+							  PVRSRV_DEVICE_NODE *psDeviceNode,
+							  IMG_UINT32  uiCmd,
+							  IMG_UINT32  uiIn1,
+							  IMG_UINT32  uiIn2,
+							  IMG_UINT32  *puiOut1,
+							  IMG_UINT32  *puiOut2);
 
 PVRSRV_ERROR TestIOCTLSyncFbFenceSignalPVR(CONNECTION_DATA * psConnection,
                                            PVRSRV_DEVICE_NODE *psDevNode,
@@ -150,4 +152,23 @@ PVRSRV_ERROR TestIOCTLSyncCheckpointCreateFenceKM(CONNECTION_DATA *psConnection,
 PVRSRV_ERROR TestIOCTLWriteByteKM(IMG_BYTE ui8WriteData);
 
 PVRSRV_ERROR TestIOCTLReadByteKM(IMG_BYTE *pui8ReadData);
+
+typedef IMG_UINT32 DI_CONTEXT;
+PVRSRV_ERROR TestIOCTLHandleArray2CreateKM(DI_CONTEXT **ppsTestResources);
+PVRSRV_ERROR TestIOCTLHandleArray10CreateKM(DI_CONTEXT **ppsTestResources);
+PVRSRV_ERROR TestIOCTLHandleCleanupDestroy(DI_CONTEXT *psTestResource);
+PVRSRV_ERROR TestIOCTLHandleArray2CreateCPKM(DI_CONTEXT **ppsTestResources);
+PVRSRV_ERROR TestIOCTLHandleCleanupDestroyCP(DI_CONTEXT *psTestResource);
+PVRSRV_ERROR TestIOCTLHandleArray2CreatePPKM(CONNECTION_DATA    *psConnection,
+                                             PVRSRV_DEVICE_NODE *psDeviceNode,
+                                             DI_CONTEXT **ppsTestResources);
+PVRSRV_ERROR TestIOCTLHandleArray2CreateLUKM(DI_CONTEXT *psLookedup,
+                                             DI_CONTEXT **ppsTestResources);
+PVRSRV_ERROR TestIOCTLHandleArrayNCreate(IMG_UINT32 ui32NumResourcesRequested,
+                                         IMG_UINT32 *pui32NumResourcesCreated,
+                                         DI_CONTEXT **ppsTestResources);
+PVRSRV_ERROR TestIOCTLHandleArrayNCreateCP(IMG_UINT32 ui32NumResourcesRequested,
+                                           IMG_UINT32 *pui32NumResourcesCreated,
+                                           DI_CONTEXT **ppsTestResources);
+
 #endif	/* TUTILS_KM_H */

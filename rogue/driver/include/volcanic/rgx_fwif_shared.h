@@ -49,6 +49,27 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "img_defs.h"
 #include "rgx_common.h"
 #include "powervr/mem_types.h"
+#include "devicemem_typedefs.h"
+
+/* Indicates the number of RTDATAs per RTDATASET */
+#if defined(SUPPORT_AGP)
+#if defined(SUPPORT_AGP4)
+#define RGXMKIF_NUM_RTDATAS           4U
+#define RGXMKIF_NUM_GEOMDATAS         4U
+#define RGXMKIF_NUM_RTDATA_FREELISTS  20U /* RGXMKIF_NUM_RTDATAS * RGXFW_MAX_FREELISTS */
+#define RGX_NUM_GEOM_CORES           (4U)
+#else
+#define RGXMKIF_NUM_RTDATAS           4U
+#define RGXMKIF_NUM_GEOMDATAS         4U
+#define RGXMKIF_NUM_RTDATA_FREELISTS  12U /* RGXMKIF_NUM_RTDATAS * RGXFW_MAX_FREELISTS */
+#define RGX_NUM_GEOM_CORES           (2U)
+#endif
+#else
+#define RGXMKIF_NUM_RTDATAS           2U
+#define RGXMKIF_NUM_GEOMDATAS         1U
+#define RGXMKIF_NUM_RTDATA_FREELISTS  2U  /* RGXMKIF_NUM_RTDATAS * RGXFW_MAX_FREELISTS */
+#define RGX_NUM_GEOM_CORES           (1U)
+#endif
 
 /* Maximum number of UFOs in a CCB command.
  * The number is based on having 32 sync prims (as originally), plus 32 sync
@@ -86,6 +107,7 @@ typedef IMG_UINT8	RGXFWIF_CCCB;
 typedef RGXFWIF_DEV_VIRTADDR  PRGXFWIF_UFO_ADDR;
 typedef RGXFWIF_DEV_VIRTADDR  PRGXFWIF_CLEANUP_CTL;
 
+
 /*!
  * @InGroup ClientCCBTypes
  * @Brief Command data for fence & update types Client CCB commands.
@@ -96,6 +118,10 @@ typedef struct
 	IMG_UINT32			ui32Value;  /*!< Value to check-against/update-to */
 } RGXFWIF_UFO;
 
+/*!
+ * @InGroup RenderTarget
+ * @Brief Track pending and completed workloads of HWRTDATA and ZSBUFFER
+ */
 typedef struct
 {
 	IMG_UINT32			ui32SubmittedCommands;	/*!< Number of commands received by the FW */
@@ -117,13 +143,17 @@ typedef enum
 	RGXFWIF_PRBUFFER_UNBACKING_PENDING,
 }RGXFWIF_PRBUFFER_STATE;
 
+/*!
+ * @InGroup RenderTarget
+ * @Brief OnDemand Z/S/MSAA Buffers
+ */
 typedef struct
 {
-	IMG_UINT32				ui32BufferID;				/*!< Buffer ID*/
-	IMG_BOOL				bOnDemand;					/*!< Needs On-demand Z/S/MSAA Buffer allocation */
-	RGXFWIF_PRBUFFER_STATE	eState;						/*!< Z/S/MSAA -Buffer state */
-	RGXFWIF_CLEANUP_CTL		sCleanupState;				/*!< Cleanup state */
-	IMG_UINT32				ui32PRBufferFlags;		/*!< Compatibility and other flags */
+	IMG_UINT32		ui32BufferID;		/*!< Buffer ID*/
+	IMG_BOOL		bOnDemand;		/*!< Needs On-demand Z/S/MSAA Buffer allocation */
+	RGXFWIF_PRBUFFER_STATE	eState;			/*!< Z/S/MSAA -Buffer state */
+	RGXFWIF_CLEANUP_CTL	sCleanupState;		/*!< Cleanup state */
+	IMG_UINT32		ui32PRBufferFlags;	/*!< Compatibility and other flags */
 } UNCACHED_ALIGN RGXFWIF_PRBUFFER;
 
 /*
@@ -179,12 +209,19 @@ typedef struct
 	                                 *    must be aligned to 16 bytes. */
 	IMG_UINT32  ui32ReadOffset;     /*!< Firmware read offset into CCB.
 	                                      Points to the command that is
-	                                 *    runnable on GPU, if R!=W */
+	                                      runnable on GPU, if R!=W */
 	IMG_UINT32  ui32DepOffset;      /*!< Firmware fence dependency offset.
-	                                 *    Points to commands not ready, i.e.
-	                                 *    fence dependencies are not met. */
+	                                      Points to commands not ready, i.e.
+	                                      fence dependencies are not met. */
 	IMG_UINT32  ui32WrapMask;       /*!< Offset wrapping mask, total capacity
-	                                 *    in bytes of the CCB-1 */
+	                                      in bytes of the CCB-1 */
+#if defined(SUPPORT_AGP)
+	IMG_UINT32  ui32ReadOffset2;
+#if defined(SUPPORT_AGP4)
+	IMG_UINT32  ui32ReadOffset3;
+	IMG_UINT32  ui32ReadOffset4;
+#endif
+#endif
 } UNCACHED_ALIGN RGXFWIF_CCCB_CTL;
 
 
@@ -192,14 +229,32 @@ typedef IMG_UINT32 RGXFW_FREELIST_TYPE;
 
 #define RGXFW_LOCAL_FREELIST     IMG_UINT32_C(0)
 #define RGXFW_GLOBAL_FREELIST    IMG_UINT32_C(1)
+#if defined(SUPPORT_AGP4)
+#define RGXFW_GLOBAL2_FREELIST   IMG_UINT32_C(2)
+#define RGXFW_GLOBAL3_FREELIST   IMG_UINT32_C(3)
+#define RGXFW_GLOBAL4_FREELIST   IMG_UINT32_C(4)
+#define RGXFW_MAX_FREELISTS      (RGXFW_GLOBAL4_FREELIST + 1U)
+#elif defined(SUPPORT_AGP)
+#define RGXFW_GLOBAL2_FREELIST   IMG_UINT32_C(2)
+#define RGXFW_MAX_FREELISTS      (RGXFW_GLOBAL2_FREELIST + 1U)
+#else
 #define RGXFW_MAX_FREELISTS      (RGXFW_GLOBAL_FREELIST + 1U)
+#endif
+#define RGXFW_MAX_HWFREELISTS    (2U)
 
+/*!
+ * @Defgroup ContextSwitching Context switching data interface
+ * @Brief Types grouping data structures and defines used in realising the Context Switching (CSW) functionality
+ * @{
+ */
 
+/*!
+ * @Brief GEOM DM or TA register controls for context switch
+ */
 typedef struct
 {
-	IMG_UINT64	uTAReg_DCE_ROOT_CTRL_STREAM;
 	IMG_UINT64	uTAReg_DCE_CONTEXT_STATE_BASE_ADDR;
-	IMG_UINT64	uTAReg_TA_CONTEXT_STATE_BASE_ADDR;
+	IMG_UINT64	uTAReg_TA_CONTEXT_STATE_BASE_ADDR; /*!< The base address of the TA's context state buffer */
 
 	struct
 	{
@@ -225,6 +280,7 @@ typedef struct
 	} asTAState[2];
 
 } RGXFWIF_TAREGISTERS_CSWITCH;
+/*! @} End of Defgroup ContextSwitching */
 
 typedef struct
 {
@@ -243,6 +299,18 @@ typedef struct
 	IMG_UINT64	uCDMReg_CDM_CONTEXT_PDS0_B;
 	IMG_UINT64	uCDMReg_CDM_RESUME_PDS0_B;
 
+#if defined(SUPPORT_SECURE_CONTEXT_SWITCH)
+	IMG_UINT64	uCDMReg_CDM_CONTEXT_SECURE_PDS0;
+	IMG_UINT64	uCDMReg_CDM_CONTEXT_SECURE_PDS0_B;
+
+	IMG_UINT64	uCDMReg_CDM_RESUME_SECURE_PDS0;
+	IMG_UINT64	uCDMReg_CDM_RESUME_SECURE_PDS0_B;
+
+	IMG_DEV_VIRTADDR	uCDMReg_CDM_CONTEXT_sSRBuffer;
+	IMG_DEV_VIRTADDR	uCDMReg_CDM_CONTEXT_sSRBuffer_B;
+
+	IMG_UINT64	uCDMReg_CDM_CONTEXT_STATE_BASE_ADDR;
+#endif
 } RGXFWIF_CDM_REGISTERS_CSWITCH;
 
 static_assert((sizeof(RGXFWIF_CDM_REGISTERS_CSWITCH) % 8U) == 0U,
@@ -250,10 +318,13 @@ static_assert((sizeof(RGXFWIF_CDM_REGISTERS_CSWITCH) % 8U) == 0U,
 
 #define RGXFWIF_CDM_REGISTERS_CSWITCH_SIZE sizeof(RGXFWIF_CDM_REGISTERS_CSWITCH)
 
-
+/*!
+ * @InGroup ContextSwitching
+ * @Brief Render context static register controls for context switch
+ */
 typedef struct
 {
-	RGXFWIF_TAREGISTERS_CSWITCH	RGXFW_ALIGN sCtxSwitch_GeomRegs;/*!< Geometry registers for ctx switch */
+	RGXFWIF_TAREGISTERS_CSWITCH	RGXFW_ALIGN asCtxSwitch_GeomRegs[RGX_NUM_GEOM_CORES];
 	RGXFWIF_3DREGISTERS_CSWITCH RGXFW_ALIGN sCtxSwitch_3DRegs;  /*!< 3D registers for ctx switch */
 } RGXFWIF_STATIC_RENDERCONTEXT_STATE;
 
@@ -315,6 +386,33 @@ typedef struct
 	RGX_CONTEXT_RESET_REASON eResetReason; /*!< Reset reason */
 	IMG_UINT32 ui32ResetExtJobRef;  /*!< External Job ID */
 } RGX_CONTEXT_RESET_REASON_DATA;
+
+#define RGX_HEAP_UM_PDS_RESERVED_SIZE               DEVMEM_HEAP_RESERVED_SIZE_GRANULARITY
+#define RGX_HEAP_UM_PDS_RESERVED_REGION_OFFSET      0
+#define RGX_HEAP_PDS_RESERVED_TOTAL_SIZE            RGX_HEAP_UM_PDS_RESERVED_SIZE
+
+#define RGX_HEAP_UM_USC_RESERVED_SIZE               DEVMEM_HEAP_RESERVED_SIZE_GRANULARITY
+#define RGX_HEAP_UM_USC_RESERVED_REGION_OFFSET      0
+#define RGX_HEAP_USC_RESERVED_TOTAL_SIZE            RGX_HEAP_UM_USC_RESERVED_SIZE
+
+#define RGX_HEAP_UM_GENERAL_RESERVED_SIZE           DEVMEM_HEAP_RESERVED_SIZE_GRANULARITY
+#define RGX_HEAP_UM_GENERAL_RESERVED_REGION_OFFSET  0
+#if defined(SUPPORT_TRUSTED_DEVICE)
+#define RGX_HEAP_KM_GENERAL_RESERVED_SIZE           DEVMEM_HEAP_RESERVED_SIZE_GRANULARITY
+#else
+#define RGX_HEAP_KM_GENERAL_RESERVED_SIZE           0
+#endif
+#define RGX_HEAP_KM_GENERAL_RESERVED_REGION_OFFSET  RGX_HEAP_UM_GENERAL_RESERVED_SIZE
+
+#define RGX_HEAP_GENERAL_RESERVED_TOTAL_SIZE        (RGX_HEAP_UM_GENERAL_RESERVED_SIZE + RGX_HEAP_KM_GENERAL_RESERVED_SIZE)
+
+/*
+ * 4 dwords reserved for shared register management.
+ * The first dword is the number of shared register blocks to reload.
+ * Should be a multiple of 4 dwords, size in bytes.
+ */
+#define		RGX_LLS_SHARED_REGS_RESERVE_SIZE	(16U)
+
 #endif /*  RGX_FWIF_SHARED_H */
 
 /******************************************************************************

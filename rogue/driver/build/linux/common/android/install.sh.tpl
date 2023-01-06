@@ -261,8 +261,8 @@ function install_locally {
     }
 
     # If we install to an empty $DISCIMAGE, then we need to create some
-    # dummy directories, even if they contain no files, otherwise 'adb
-    # sync' may fail. (It allows '/vendor' to not exist currently.)
+    # directories, even if they contain no files, otherwise 'adb sync'
+    # may fail. (It allows '/vendor' to not exist currently.)
     [ ! -d ${DISCIMAGE}/data ]   && mkdir ${DISCIMAGE}/data
     [ ! -d ${DISCIMAGE}/system ] && mkdir ${DISCIMAGE}/system
 

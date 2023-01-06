@@ -149,7 +149,6 @@ PVRSRV_ERROR
 PhysmemNewRamBackedPMR(CONNECTION_DATA * psConnection,
                        PVRSRV_DEVICE_NODE *psDevNode,
                        IMG_DEVMEM_SIZE_T uiSize,
-                       IMG_DEVMEM_SIZE_T uiChunkSize,
                        IMG_UINT32 ui32NumPhysChunks,
                        IMG_UINT32 ui32NumVirtChunks,
                        IMG_UINT32 *pui32MappingTable,
@@ -159,13 +158,13 @@ PhysmemNewRamBackedPMR(CONNECTION_DATA * psConnection,
                        const IMG_CHAR *pszAnnotation,
                        IMG_PID uiPid,
                        PMR **ppsPMROut,
-                       IMG_UINT32 ui32PDumpFlags);
+                       IMG_UINT32 ui32PDumpFlags,
+                       PVRSRV_MEMALLOCFLAGS_T *puiPMRFlags);
 
 PVRSRV_ERROR
 PhysmemNewRamBackedPMR_direct(CONNECTION_DATA * psConnection,
 							  PVRSRV_DEVICE_NODE *psDevNode,
 							  IMG_DEVMEM_SIZE_T uiSize,
-							  IMG_DEVMEM_SIZE_T uiChunkSize,
 							  IMG_UINT32 ui32NumPhysChunks,
 							  IMG_UINT32 ui32NumVirtChunks,
 							  IMG_UINT32 *pui32MappingTable,
@@ -175,7 +174,8 @@ PhysmemNewRamBackedPMR_direct(CONNECTION_DATA * psConnection,
 							  const IMG_CHAR *pszAnnotation,
 							  IMG_PID uiPid,
 							  PMR **ppsPMROut,
-							  IMG_UINT32 ui32PDumpFlags);
+							  IMG_UINT32 ui32PDumpFlags,
+							  PVRSRV_MEMALLOCFLAGS_T *puiPMRFlags);
 
 /*
  * PhysmemNewRamBackedLockedPMR
@@ -196,7 +196,6 @@ PVRSRV_ERROR
 PhysmemNewRamBackedLockedPMR(CONNECTION_DATA * psConnection,
                              PVRSRV_DEVICE_NODE *psDevNode,
                              IMG_DEVMEM_SIZE_T uiSize,
-                             PMR_SIZE_T uiChunkSize,
                              IMG_UINT32 ui32NumPhysChunks,
                              IMG_UINT32 ui32NumVirtChunks,
                              IMG_UINT32 *pui32MappingTable,
@@ -206,7 +205,8 @@ PhysmemNewRamBackedLockedPMR(CONNECTION_DATA * psConnection,
                              const IMG_CHAR *pszAnnotation,
                              IMG_PID uiPid,
                              PMR **ppsPMRPtr,
-                             IMG_UINT32 ui32PDumpFlags);
+                             IMG_UINT32 ui32PDumpFlags,
+                             PVRSRV_MEMALLOCFLAGS_T *puiPMRFlags);
 
 /*************************************************************************/ /*!
 @Function       PhysmemImportPMR
@@ -234,16 +234,56 @@ PhysmemImportPMR(CONNECTION_DATA *psConnection,
                  PMR **ppsPMR);
 
 /*************************************************************************/ /*!
-@Function       PVRSRVGetMaxDevMemSizeKM
-@Description    Get the amount of device memory on current platform
-@Output         puiLMASize             LMA memory size
-@Output         puiUMASize             UMA memory size
-@Return         None
+@Function       PVRSRVGetMaxPhysHeapCountKM
+@Description    Get the user accessible physical heap count
+@Output         puiPhysHeapCount   user accessible physical heap count
+@Return         PVRSRV_OK if successful
 */ /**************************************************************************/
 PVRSRV_ERROR
-PVRSRVGetMaxDevMemSizeKM(CONNECTION_DATA * psConnection,
-                         PVRSRV_DEVICE_NODE *psDevNode,
-                         IMG_DEVMEM_SIZE_T *puiLMASize,
-                         IMG_DEVMEM_SIZE_T *puiUMASize);
+PVRSRVGetMaxPhysHeapCountKM(CONNECTION_DATA *psConnection,
+			    PVRSRV_DEVICE_NODE *psDevNode,
+			    IMG_UINT32 *puiPhysHeapCount);
+
+/*************************************************************************/ /*!
+@Function       PVRSRVGetDefaultPhysicalHeapKM
+@Description    For the specified device, get the physical heap used for
+                allocations when the PVRSRV_PHYS_HEAP_DEFAULT
+                physical heap hint is set in memalloc flags.
+@Output         peHeap                 Default Heap return value
+@Return         PVRSRV_OK if successful
+*/ /**************************************************************************/
+PVRSRV_ERROR
+PVRSRVGetDefaultPhysicalHeapKM(CONNECTION_DATA *psConnection,
+			  PVRSRV_DEVICE_NODE *psDevNode,
+			  PVRSRV_PHYS_HEAP *peHeap);
+
+/*************************************************************************/ /*!
+@Function       PVRSRVGetHeapPhysMemUsageKM
+@Description    Get the memory usage statistics for all user accessible
+                physical heaps
+@Input          ui32PhysHeapCount      Total user accessible physical heaps
+@Output         apPhysHeapMemStats     Buffer to hold the memory statistics
+@Return         PVRSRV_OK if successful
+*/ /**************************************************************************/
+PVRSRV_ERROR
+PVRSRVGetHeapPhysMemUsageKM(CONNECTION_DATA *psConnection,
+			    PVRSRV_DEVICE_NODE *psDevNode,
+			    IMG_UINT32 ui32PhysHeapCount,
+			    PHYS_HEAP_MEM_STATS *apPhysHeapMemStats);
+
+/*************************************************************************/ /*!
+@Function       PVRSRVPhysHeapGetMemInfoKM
+@Description    Get the memory usage statistics for a given physical heap ID
+@Input          ui32PhysHeapCount      Physical Heap count
+@Input          paePhysHeapID          Array of Physical Heap ID's
+@Output         paPhysHeapMemStats     Buffer to hold the memory statistics
+@Return         PVRSRV_OK if successful
+*/ /**************************************************************************/
+PVRSRV_ERROR
+PVRSRVPhysHeapGetMemInfoKM(CONNECTION_DATA *psConnection,
+			   PVRSRV_DEVICE_NODE *psDevNode,
+			   IMG_UINT32 ui32PhysHeapCount,
+			   PVRSRV_PHYS_HEAP *paePhysHeapID,
+			   PHYS_HEAP_MEM_STATS *paPhysHeapMemStats);
 
 #endif /* SRVSRV_PHYSMEM_H */

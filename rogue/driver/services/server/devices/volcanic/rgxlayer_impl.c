@@ -48,7 +48,17 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "cache_km.h"
 
 #if defined(PDUMP)
-#include <stdarg.h>
+#if defined(__linux__)
+ #include <linux/version.h>
+
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
+  #include <linux/stdarg.h>
+ #else
+  #include <stdarg.h>
+ #endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0) */
+#else
+ #include <stdarg.h>
+#endif /* __linux__ */
 #endif
 
 void RGXMemCopy(const void *hPrivate,
@@ -74,11 +84,17 @@ void RGXCommentLog(const void *hPrivate,
                    ...)
 {
 #if defined(PDUMP)
+	RGX_LAYER_PARAMS *psParams;
+	PVRSRV_RGXDEV_INFO *psDevInfo;
 	va_list argList;
 	va_start(argList, pszString);
-	PDumpCommentWithFlagsVA(PDUMP_FLAGS_CONTINUOUS, pszString, argList);
+
+	PVR_ASSERT(hPrivate != NULL);
+	psParams = (RGX_LAYER_PARAMS*)hPrivate;
+	psDevInfo = psParams->psDevInfo;
+
+	PDumpCommentWithFlagsVA(psDevInfo->psDeviceNode, PDUMP_FLAGS_CONTINUOUS, pszString, argList);
 	va_end(argList);
-	PVR_UNREFERENCED_PARAMETER(hPrivate);
 #else
 	PVR_UNREFERENCED_PARAMETER(hPrivate);
 	PVR_UNREFERENCED_PARAMETER(pszString);
@@ -161,16 +177,18 @@ void RGXWriteReg32(const void *hPrivate, IMG_UINT32 ui32RegAddr, IMG_UINT32 ui32
 	PVR_ASSERT(hPrivate != NULL);
 	psParams = (RGX_LAYER_PARAMS*)hPrivate;
 	psDevInfo = psParams->psDevInfo;
-	pvRegsBase = psDevInfo->pvRegsBaseKM;
+	pvRegsBase = (ui32RegAddr < RGX_HOST_SECURE_REGBANK_OFFSET) ?
+	             (psDevInfo->pvRegsBaseKM) : (psDevInfo->pvSecureRegsBaseKM);
 
 #if defined(PDUMP)
 	if (!(psParams->ui32PdumpFlags & PDUMP_FLAGS_NOHW))
 #endif
 	{
-		OSWriteHWReg32(pvRegsBase, ui32RegAddr, ui32RegValue);
+		OSWriteUncheckedHWReg32(pvRegsBase, ui32RegAddr, ui32RegValue);
 	}
 
-	PDUMPREG32(RGX_PDUMPREG_NAME, ui32RegAddr, ui32RegValue, psParams->ui32PdumpFlags);
+	PDUMPREG32(psDevInfo->psDeviceNode, RGX_PDUMPREG_NAME,
+	           ui32RegAddr, ui32RegValue, psParams->ui32PdumpFlags);
 }
 
 void RGXWriteReg64(const void *hPrivate, IMG_UINT32 ui32RegAddr, IMG_UINT64 ui64RegValue)
@@ -182,16 +200,18 @@ void RGXWriteReg64(const void *hPrivate, IMG_UINT32 ui32RegAddr, IMG_UINT64 ui64
 	PVR_ASSERT(hPrivate != NULL);
 	psParams = (RGX_LAYER_PARAMS*)hPrivate;
 	psDevInfo = psParams->psDevInfo;
-	pvRegsBase = psDevInfo->pvRegsBaseKM;
+	pvRegsBase = (ui32RegAddr < RGX_HOST_SECURE_REGBANK_OFFSET) ?
+	             (psDevInfo->pvRegsBaseKM) : (psDevInfo->pvSecureRegsBaseKM);
 
 #if defined(PDUMP)
 	if (!(psParams->ui32PdumpFlags & PDUMP_FLAGS_NOHW))
 #endif
 	{
-		OSWriteHWReg64(pvRegsBase, ui32RegAddr, ui64RegValue);
+		OSWriteUncheckedHWReg64(pvRegsBase, ui32RegAddr, ui64RegValue);
 	}
 
-	PDUMPREG64(RGX_PDUMPREG_NAME, ui32RegAddr, ui64RegValue, psParams->ui32PdumpFlags);
+	PDUMPREG64(psDevInfo->psDeviceNode, RGX_PDUMPREG_NAME,
+	           ui32RegAddr, ui64RegValue, psParams->ui32PdumpFlags);
 }
 
 IMG_UINT32 RGXReadReg32(const void *hPrivate, IMG_UINT32 ui32RegAddr)
@@ -204,7 +224,8 @@ IMG_UINT32 RGXReadReg32(const void *hPrivate, IMG_UINT32 ui32RegAddr)
 	PVR_ASSERT(hPrivate != NULL);
 	psParams = (RGX_LAYER_PARAMS*)hPrivate;
 	psDevInfo = psParams->psDevInfo;
-	pvRegsBase = psDevInfo->pvRegsBaseKM;
+	pvRegsBase = (ui32RegAddr < RGX_HOST_SECURE_REGBANK_OFFSET) ?
+	             (psDevInfo->pvRegsBaseKM) : (psDevInfo->pvSecureRegsBaseKM);
 
 #if defined(PDUMP)
 	if (psParams->ui32PdumpFlags & PDUMP_FLAGS_NOHW)
@@ -214,10 +235,11 @@ IMG_UINT32 RGXReadReg32(const void *hPrivate, IMG_UINT32 ui32RegAddr)
 	else
 #endif
 	{
-		ui32RegValue = OSReadHWReg32(pvRegsBase, ui32RegAddr);
+		ui32RegValue = OSReadUncheckedHWReg32(pvRegsBase, ui32RegAddr);
 	}
 
-	PDUMPREGREAD32(RGX_PDUMPREG_NAME, ui32RegAddr, psParams->ui32PdumpFlags);
+	PDUMPREGREAD32(psDevInfo->psDeviceNode, RGX_PDUMPREG_NAME,
+	               ui32RegAddr, psParams->ui32PdumpFlags);
 
 	return ui32RegValue;
 }
@@ -232,7 +254,8 @@ IMG_UINT64 RGXReadReg64(const void *hPrivate, IMG_UINT32 ui32RegAddr)
 	PVR_ASSERT(hPrivate != NULL);
 	psParams = (RGX_LAYER_PARAMS*)hPrivate;
 	psDevInfo = psParams->psDevInfo;
-	pvRegsBase = psDevInfo->pvRegsBaseKM;
+	pvRegsBase = (ui32RegAddr < RGX_HOST_SECURE_REGBANK_OFFSET) ?
+	             (psDevInfo->pvRegsBaseKM) : (psDevInfo->pvSecureRegsBaseKM);
 
 #if defined(PDUMP)
 	if (psParams->ui32PdumpFlags & PDUMP_FLAGS_NOHW)
@@ -242,10 +265,11 @@ IMG_UINT64 RGXReadReg64(const void *hPrivate, IMG_UINT32 ui32RegAddr)
 	else
 #endif
 	{
-		ui64RegValue = OSReadHWReg64(pvRegsBase, ui32RegAddr);
+		ui64RegValue = OSReadUncheckedHWReg64(pvRegsBase, ui32RegAddr);
 	}
 
-	PDUMPREGREAD64(RGX_PDUMPREG_NAME, ui32RegAddr, PDUMP_FLAGS_CONTINUOUS);
+	PDUMPREGREAD64(psDevInfo->psDeviceNode, RGX_PDUMPREG_NAME,
+	               ui32RegAddr, PDUMP_FLAGS_CONTINUOUS);
 
 	return ui64RegValue;
 }
@@ -262,31 +286,36 @@ IMG_UINT32 RGXReadModifyWriteReg64(const void *hPrivate,
 	PVR_ASSERT(hPrivate != NULL);
 	psParams = (RGX_LAYER_PARAMS*)hPrivate;
 	psDevInfo = psParams->psDevInfo;
-	pvRegsBase = psDevInfo->pvRegsBaseKM;
+	pvRegsBase = (ui32RegAddr < RGX_HOST_SECURE_REGBANK_OFFSET) ?
+	             (psDevInfo->pvRegsBaseKM) : (psDevInfo->pvSecureRegsBaseKM);
 
 	/* only use the new values for bits we update according to the keep mask */
 	uiRegValueNew &= ~uiRegKeepMask;
 
 #if defined(PDUMP)
 	/* Store register offset to temp PDump variable */
-	PDumpRegRead64ToInternalVar(RGX_PDUMPREG_NAME, ":SYSMEM:$1", ui32RegAddr, PDUMP_FLAGS_CONTINUOUS);
+	PDumpRegRead64ToInternalVar(psDevInfo->psDeviceNode, RGX_PDUMPREG_NAME,
+	                            ":SYSMEM:$1", ui32RegAddr, PDUMP_FLAGS_CONTINUOUS);
 
 	/* Keep the bits set in the mask */
-	PDumpWriteVarANDValueOp(":SYSMEM:$1", uiRegKeepMask, PDUMP_FLAGS_CONTINUOUS);
+	PDumpWriteVarANDValueOp(psDevInfo->psDeviceNode, ":SYSMEM:$1",
+	                        uiRegKeepMask, PDUMP_FLAGS_CONTINUOUS);
 
 	/* OR the new values */
-	PDumpWriteVarORValueOp(":SYSMEM:$1", uiRegValueNew, PDUMP_FLAGS_CONTINUOUS);
+	PDumpWriteVarORValueOp(psDevInfo->psDeviceNode, ":SYSMEM:$1",
+	                       uiRegValueNew, PDUMP_FLAGS_CONTINUOUS);
 
 	/* Do the actual register write */
-	PDumpInternalVarToReg64(RGX_PDUMPREG_NAME, ui32RegAddr, ":SYSMEM:$1", 0);
+	PDumpInternalVarToReg64(psDevInfo->psDeviceNode, RGX_PDUMPREG_NAME,
+	                        ui32RegAddr, ":SYSMEM:$1", 0);
 
 	if (!(psParams->ui32PdumpFlags & PDUMP_FLAGS_NOHW))
 #endif
 
 	{
-		IMG_UINT64 uiRegValue = OSReadHWReg64(pvRegsBase, ui32RegAddr);
+		IMG_UINT64 uiRegValue = OSReadUncheckedHWReg64(pvRegsBase, ui32RegAddr);
 		uiRegValue &= uiRegKeepMask;
-		OSWriteHWReg64(pvRegsBase, ui32RegAddr, uiRegValue | uiRegValueNew);
+		OSWriteUncheckedHWReg64(pvRegsBase, ui32RegAddr, uiRegValue | uiRegValueNew);
 	}
 
 	return PVRSRV_OK;
@@ -304,7 +333,8 @@ PVRSRV_ERROR RGXPollReg32(const void *hPrivate,
 	PVR_ASSERT(hPrivate != NULL);
 	psParams = (RGX_LAYER_PARAMS*)hPrivate;
 	psDevInfo = psParams->psDevInfo;
-	pvRegsBase = psDevInfo->pvRegsBaseKM;
+	pvRegsBase = (ui32RegAddr < RGX_HOST_SECURE_REGBANK_OFFSET) ?
+	             (psDevInfo->pvRegsBaseKM) : (psDevInfo->pvSecureRegsBaseKM);
 
 #if defined(PDUMP)
 	if (!(psParams->ui32PdumpFlags & PDUMP_FLAGS_NOHW))
@@ -321,7 +351,8 @@ PVRSRV_ERROR RGXPollReg32(const void *hPrivate,
 		}
 	}
 
-	PDUMPREGPOL(RGX_PDUMPREG_NAME,
+	PDUMPREGPOL(psDevInfo->psDeviceNode,
+	            RGX_PDUMPREG_NAME,
 	            ui32RegAddr,
 	            ui32RegValue,
 	            ui32RegMask,
@@ -349,7 +380,8 @@ PVRSRV_ERROR RGXPollReg64(const void *hPrivate,
 	PVR_ASSERT(hPrivate != NULL);
 	psParams = (RGX_LAYER_PARAMS*)hPrivate;
 	psDevInfo = psParams->psDevInfo;
-	pvRegsBase = psDevInfo->pvRegsBaseKM;
+	pvRegsBase = (ui32RegAddr < RGX_HOST_SECURE_REGBANK_OFFSET) ?
+	             (psDevInfo->pvRegsBaseKM) : (psDevInfo->pvSecureRegsBaseKM);
 
 #if defined(PDUMP)
 	if (!(psParams->ui32PdumpFlags & PDUMP_FLAGS_NOHW))
@@ -376,7 +408,8 @@ PVRSRV_ERROR RGXPollReg64(const void *hPrivate,
 		}
 	}
 
-	PDUMPREGPOL(RGX_PDUMPREG_NAME,
+	PDUMPREGPOL(psDevInfo->psDeviceNode,
+	            RGX_PDUMPREG_NAME,
 	            ui32RegAddr + 4,
 	            ui32UpperValue,
 	            ui32UpperMask,
@@ -384,7 +417,8 @@ PVRSRV_ERROR RGXPollReg64(const void *hPrivate,
 	            PDUMP_POLL_OPERATOR_EQUAL);
 
 
-	PDUMPREGPOL(RGX_PDUMPREG_NAME,
+	PDUMPREGPOL(psDevInfo->psDeviceNode,
+	            RGX_PDUMPREG_NAME,
 	            ui32RegAddr,
 	            ui32LowerValue,
 	            ui32LowerMask,
@@ -396,9 +430,12 @@ PVRSRV_ERROR RGXPollReg64(const void *hPrivate,
 
 void RGXWaitCycles(const void *hPrivate, IMG_UINT32 ui32Cycles, IMG_UINT32 ui32TimeUs)
 {
-	PVR_UNREFERENCED_PARAMETER(hPrivate);
+	PVRSRV_RGXDEV_INFO *psDevInfo;
+
+	PVR_ASSERT(hPrivate != NULL);
+	psDevInfo = ((RGX_LAYER_PARAMS*)hPrivate)->psDevInfo;
 	OSWaitus(ui32TimeUs);
-	PDUMPIDLWITHFLAGS(ui32Cycles, PDUMP_FLAGS_CONTINUOUS);
+	PDUMPIDLWITHFLAGS(psDevInfo->psDeviceNode, ui32Cycles, PDUMP_FLAGS_CONTINUOUS);
 }
 
 void RGXAcquireKernelMMUPC(const void *hPrivate, IMG_DEV_PHYADDR *psPCAddr)
@@ -420,7 +457,7 @@ void RGXWriteKernelMMUPC32(const void *hPrivate,
 	psDevInfo = ((RGX_LAYER_PARAMS*)hPrivate)->psDevInfo;
 
 	/* Write the cat-base address */
-	OSWriteHWReg32(psDevInfo->pvRegsBaseKM, ui32PCReg, ui32PCVal);
+	OSWriteUncheckedHWReg32(psDevInfo->pvSecureRegsBaseKM, ui32PCReg, ui32PCVal);
 
 	/* Pdump catbase address */
 	MMU_PDumpWritePageCatBase(psDevInfo->psKernelMMUCtx,
@@ -485,8 +522,10 @@ PVRSRV_ERROR RGXFabricCoherencyTest(const void *hPrivate)
 	IMG_UINT32 ui32OddEvenSeed = 1;
 	PVRSRV_ERROR eError = PVRSRV_OK;
 	IMG_BOOL bFullTestPassed = IMG_TRUE;
-	IMG_BOOL bSubTestPassed = IMG_FALSE;
 	IMG_BOOL bExit = IMG_FALSE;
+#if defined(DEBUG)
+	IMG_BOOL bSubTestPassed = IMG_FALSE;
+#endif
 	enum TEST_TYPE {
 		CPU_WRITE_GPU_READ_SM=0, GPU_WRITE_CPU_READ_SM,
 		CPU_WRITE_GPU_READ_SH,   GPU_WRITE_CPU_READ_SH
@@ -693,11 +732,11 @@ PVRSRV_ERROR RGXFabricCoherencyTest(const void *hPrivate)
 					ui32FWValue = i + ui32OddEvenSeed;
 
 					/* Write the value using the RGX slave-port interface */
-					eError = RGXWriteMETAAddr(psDevInfo, ui32FWAddr, ui32FWValue);
+					eError = RGXWriteFWModuleAddr(psDevInfo, ui32FWAddr, ui32FWValue);
 					if (eError != PVRSRV_OK)
 					{
 						PVR_DPF((PVR_DBG_ERROR,
-								"RGXWriteMETAAddr error: %s, exiting",
+								"RGXWriteFWModuleAddr error: %s, exiting",
 								 PVRSRVGetErrorString(eError)));
 						bExit = IMG_TRUE;
 						continue;
@@ -705,11 +744,11 @@ PVRSRV_ERROR RGXFabricCoherencyTest(const void *hPrivate)
 
 					/* Read back value using RGX slave-port interface, this is used
 					   as a sort of memory barrier for the above write */
-					eError = RGXReadMETAAddr(psDevInfo, ui32FWAddr, &ui32FWValue2);
+					eError = RGXReadFWModuleAddr(psDevInfo, ui32FWAddr, &ui32FWValue2);
 					if (eError != PVRSRV_OK)
 					{
 						PVR_DPF((PVR_DBG_ERROR,
-								"RGXReadMETAAddr error: %s, exiting",
+								"RGXReadFWModuleAddr error: %s, exiting",
 								 PVRSRVGetErrorString(eError)));
 						bExit = IMG_TRUE;
 						continue;
@@ -717,7 +756,7 @@ PVRSRV_ERROR RGXFabricCoherencyTest(const void *hPrivate)
 					else if (ui32FWValue != ui32FWValue2)
 					{
 						//IMG_UINT32 ui32FWValue3;
-						//RGXReadMETAAddr(psDevInfo, 0xC1F00000, &ui32FWValue3);
+						//RGXReadFWModuleAddr(psDevInfo, 0xC1F00000, &ui32FWValue3);
 
 						/* Fatal error, we should abort */
 						PVR_DPF((PVR_DBG_ERROR,
@@ -752,7 +791,7 @@ PVRSRV_ERROR RGXFabricCoherencyTest(const void *hPrivate)
 					pui32FabricCohTestBufferCpuVA[i] = i + ui32OddEvenSeed;
 
 					/* Flush possible cpu store-buffer(ing) on LMA */
-					OSWriteMemoryBarrier();
+					OSWriteMemoryBarrier(&pui32FabricCohTestBufferCpuVA[i]);
 
 					switch (eTestType)
 					{
@@ -766,7 +805,7 @@ PVRSRV_ERROR RGXFabricCoherencyTest(const void *hPrivate)
 					}
 
 					/* Read back value using RGX slave-port interface */
-					eError = RGXReadMETAAddr(psDevInfo, ui32FWAddr, &ui32FWValue);
+					eError = RGXReadFWModuleAddr(psDevInfo, ui32FWAddr, &ui32FWValue);
 					if (eError != PVRSRV_OK)
 					{
 						PVR_DPF((PVR_DBG_ERROR,
@@ -796,13 +835,17 @@ PVRSRV_ERROR RGXFabricCoherencyTest(const void *hPrivate)
 				/* Compare to see if sub-test passed */
 				if (pui32FabricCohTestBufferCpuVA[i] == ui32FWValue)
 				{
+#if defined(DEBUG)
 					bSubTestPassed = IMG_TRUE;
+#endif
 				}
 				else
 				{
-					bSubTestPassed = IMG_FALSE;
 					bFullTestPassed = IMG_FALSE;
 					eError = PVRSRV_ERROR_INIT_FAILURE;
+#if defined(DEBUG)
+					bSubTestPassed = IMG_FALSE;
+#endif
 					if (ui32LastFWValue != ui32FWValue)
 					{
 #if defined(DEBUG)

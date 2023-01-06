@@ -72,10 +72,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "ossecure_export.h"
 #endif
 
-#if defined(SUPPORT_EXTRA_METASP_DEBUG)
-#include "rgxdebug.h"
-#endif
-
 /* Set this to enable debug relating to the construction and maintenance of the sync address list */
 #define SYNC_ADDR_LIST_DEBUG 0
 
@@ -725,10 +721,7 @@ void _SyncConnectionAddBlock(CONNECTION_DATA *psConnection, SYNC_PRIMITIVE_BLOCK
 		_SyncConnectionRef(psSyncConnectionData);
 
 		OSLockAcquire(psSyncConnectionData->hLock);
-		if (psConnection != NULL)
-		{
-			dllist_add_to_head(&psSyncConnectionData->sListHead, &psBlock->sConnectionNode);
-		}
+		dllist_add_to_head(&psSyncConnectionData->sListHead, &psBlock->sConnectionNode);
 		OSLockRelease(psSyncConnectionData->hLock);
 		psBlock->psSyncConnectionData = psSyncConnectionData;
 	}
@@ -785,7 +778,7 @@ PVRSRVAllocSyncPrimitiveBlockKM(CONNECTION_DATA *psConnection,
 
 	psNewSyncBlk->psDevNode = psDevNode;
 
-	PDUMPCOMMENTWITHFLAGS(PDUMP_FLAGS_CONTINUOUS, "Allocate UFO block");
+	PDUMPCOMMENTWITHFLAGS(psDevNode, PDUMP_FLAGS_CONTINUOUS, "Allocate UFO block");
 
 	eError = psDevNode->pfnAllocUFOBlock(psDevNode,
 										 &psNewSyncBlk->psMemDesc,
@@ -811,7 +804,7 @@ PVRSRVAllocSyncPrimitiveBlockKM(CONNECTION_DATA *psConnection,
 	*ppsSyncBlk = psNewSyncBlk;
 	*puiSyncPrimBlockSize = psNewSyncBlk->ui32BlockSize;
 
-	PDUMPCOMMENTWITHFLAGS(PDUMP_FLAGS_CONTINUOUS,
+	PDUMPCOMMENTWITHFLAGS(psDevNode, PDUMP_FLAGS_CONTINUOUS,
 						  "Allocated UFO block (FirmwareVAddr = 0x%08x)",
 						  *puiSyncPrimVAddr);
 
@@ -960,7 +953,7 @@ void SyncUnregisterConnection(SYNC_CONNECTION_DATA *psSyncConnectionData)
 	_SyncConnectionUnref(psSyncConnectionData);
 }
 
-void SyncConnectionPDumpSyncBlocks(void *hSyncPrivData, PDUMP_TRANSITION_EVENT eEvent)
+void SyncConnectionPDumpSyncBlocks(PVRSRV_DEVICE_NODE *psDevNode, void *hSyncPrivData, PDUMP_TRANSITION_EVENT eEvent)
 {
 	if ((eEvent == PDUMP_TRANSITION_EVENT_RANGE_ENTERED) || (eEvent == PDUMP_TRANSITION_EVENT_BLOCK_STARTED))
 	{
@@ -969,7 +962,7 @@ void SyncConnectionPDumpSyncBlocks(void *hSyncPrivData, PDUMP_TRANSITION_EVENT e
 
 		OSLockAcquire(psSyncConnectionData->hLock);
 
-		PDUMPCOMMENT("Dump client Sync Prim state");
+		PDUMPCOMMENT(psDevNode, "Dump client Sync Prim state");
 		dllist_foreach_node(&psSyncConnectionData->sListHead, psNode, psNext)
 		{
 			SYNC_PRIMITIVE_BLOCK *psSyncBlock =
@@ -1153,11 +1146,11 @@ static PVRSRV_ERROR SyncRecordListInit(PVRSRV_DEVICE_NODE *psDevNode)
 	PVR_GOTO_IF_ERROR(eError, fail_lock_create);
 	dllist_init(&psDevNode->sSyncServerRecordList);
 
-	eError = PVRSRVRegisterDbgRequestNotify(&psDevNode->hSyncServerRecordNotify,
-											psDevNode,
-											_SyncRecordRequest,
-											DEBUG_REQUEST_SYNCTRACKING,
-											psDevNode);
+	eError = PVRSRVRegisterDeviceDbgRequestNotify(&psDevNode->hSyncServerRecordNotify,
+		                                          psDevNode,
+		                                          _SyncRecordRequest,
+		                                          DEBUG_REQUEST_SYNCTRACKING,
+		                                          psDevNode);
 
 	PVR_GOTO_IF_ERROR(eError, fail_dbg_register);
 
@@ -1196,7 +1189,7 @@ static void SyncRecordListDeinit(PVRSRV_DEVICE_NODE *psDevNode)
 
 	if (psDevNode->hSyncServerRecordNotify)
 	{
-		PVRSRVUnregisterDbgRequestNotify(psDevNode->hSyncServerRecordNotify);
+		PVRSRVUnregisterDeviceDbgRequestNotify(psDevNode->hSyncServerRecordNotify);
 	}
 	OSLockDestroy(psDevNode->hSyncServerRecordLock);
 }

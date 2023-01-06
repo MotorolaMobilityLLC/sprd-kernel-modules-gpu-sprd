@@ -60,12 +60,14 @@
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/pm.h>
+#include <linux/mutex.h>
 
 #include "module_common.h"
 #include "pvr_drm.h"
 #include "pvr_drv.h"
 #include "pvrversion.h"
 #include "services_kernel_client.h"
+#include "pvr_sync_ioctl_drm.h"
 
 #include "kernel_compatibility.h"
 
@@ -73,30 +75,151 @@
 #define PVR_DRM_DRIVER_DESC "Imagination Technologies PVR DRM"
 #define	PVR_DRM_DRIVER_DATE "20170530"
 
+/*
+ * Protects global PVRSRV_DATA on a multi device system. i.e. this is used to
+ * protect the PVRSRVCommonDeviceXXXX() APIs in the Server common layer which
+ * are not re-entrant for device creation and initialisation.
+ */
+static DEFINE_MUTEX(g_device_mutex);
 
+/* Executed before sleep/suspend-to-RAM/S3. During this phase the content
+ * of the video memory is preserved (copied to system RAM). This step is
+ * necessary because the device can be powered off and the content of the
+ * video memory lost.
+ */
 static int pvr_pm_suspend(struct device *dev)
 {
 	struct drm_device *ddev = dev_get_drvdata(dev);
-	struct pvr_drm_private *priv = ddev->dev_private;
 
 	DRM_DEBUG_DRIVER("device %p\n", dev);
 
-	return PVRSRVDeviceSuspend(priv->dev_node);
+	return PVRSRVDeviceSuspend(ddev);
 }
 
+/* Executed after the system is woken up from sleep/suspend-to-RAM/S3. This
+ * phase restores the content of the video memory from the system RAM.
+ */
 static int pvr_pm_resume(struct device *dev)
 {
 	struct drm_device *ddev = dev_get_drvdata(dev);
-	struct pvr_drm_private *priv = ddev->dev_private;
 
 	DRM_DEBUG_DRIVER("device %p\n", dev);
 
-	return PVRSRVDeviceResume(priv->dev_node);
+	return PVRSRVDeviceResume(ddev);
+}
+
+/* Executed before the hibernation image is created. This callback allows to
+ * preserve the content of the video RAM into the system RAM which in turn
+ * is then stored into a disk.
+ */
+static int pvr_pm_freeze(struct device *dev)
+{
+	struct drm_device *ddev = dev_get_drvdata(dev);
+
+	DRM_DEBUG_DRIVER("%s(): device %p\n", __func__, dev);
+
+	return PVRSRVDeviceSuspend(ddev);
+}
+
+/* Executed after the hibernation image is created or if the creation of the
+ * image has failed. This callback should undo whatever was done in
+ * pvr_pm_freeze to allow the device to operate in the same way as before the
+ * call to pvr_pm_freeze.
+ */
+static int pvr_pm_thaw(struct device *dev)
+{
+	struct drm_device *ddev = dev_get_drvdata(dev);
+
+	DRM_DEBUG_DRIVER("%s(): device %p\n", __func__, dev);
+
+	return PVRSRVDeviceResume(ddev);
+}
+
+/* Executed after the hibernation image is created. This callback should not
+ * preserve the content of the video memory since this was already done
+ * in pvr_pm_freeze.
+ *
+ * Note: from the tests performed on a TestChip this callback is not executed
+ *       and driver's pvr_shutdown() is executed instead.
+ */
+static int pvr_pm_poweroff(struct device *dev)
+{
+	struct drm_device *ddev = dev_get_drvdata(dev);
+
+	DRM_DEBUG_DRIVER("%s(): device %p\n", __func__, dev);
+
+	PVRSRVDeviceShutdown(ddev);
+
+	return 0;
+}
+
+/* Executed after the content of the system memory is restored from the
+ * hibernation image. This callback restored video RAM from the system RAM
+ * and performs any necessary device setup required for the device to operate
+ * properly.
+ */
+static int pvr_pm_restore(struct device *dev)
+{
+	struct drm_device *ddev = dev_get_drvdata(dev);
+
+	DRM_DEBUG_DRIVER("%s(): device %p\n", __func__, dev);
+
+	return PVRSRVDeviceResume(ddev);
 }
 
 const struct dev_pm_ops pvr_pm_ops = {
+	/* Sleep (suspend-to-RAM/S3) callbacks.
+	 * This mode saves the content of the video RAM to the system RAM and
+	 * powers off the device to reduce the power consumption. Because the
+	 * video RAM can be powered off, it needs to be preserved beforehand.
+	 */
 	.suspend = pvr_pm_suspend,
 	.resume = pvr_pm_resume,
+
+	/* Hibernation (suspend-to-disk/S4) callbacks.
+	 * This mode saves the content of the video RAM to the system RAM and then
+	 * dumps the system RAM to disk (swap partition or swap file). The system
+	 * then powers off. After power on the system RAM content is loaded from
+	 * the disk and then video RAM is restored from the system RAM.
+	 *
+	 * The procedure is executed in following order
+	 *
+	 * - Suspend-to-disk is triggered
+	 *   At this point the OS goes through the list of all registered devices and
+	 *   calls provided callbacks.
+	 * -- pvr_pm_freeze() is called
+	 *         The GPU is powered of and submitting new work is blocked.
+	 *         The content of the video RAM is saved to the system RAM, and
+	 *         other actions required to suspend the device are performed.
+	 * -- system RAM image is created and saved on the disk
+	 *         The disk now contains a snapshot for the DDK Driver for the
+	 *         moment when pvr_pm_freeze() was called.
+	 * -- pvr_pm_thaw() is called
+	 *         All actions taken in pvr_pm_freeze() are undone. The memory
+	 *         allocated for the video RAM is freed and all actions necessary
+	 *         to bring the device to operational state are taken.
+	 *         This makes sure that regardless if image was created successfully
+	 *         or not the device remains operational.
+	 *
+	 * - System is powered off
+	 * -- pvr_shutdown() is called
+	 *         No actions are required beside powering off the GPU.
+	 *
+	 * - System is powered up
+	 * -- system RAM image is read from the disk
+	 *         This restores the snapshot of the DDK driver along with the saved
+	 *         video RAM buffer.
+	 * -- pvr_pm_restore() is called
+	 *         Video RAM is restored from the buffer located in the system RAM.
+	 *         Actions to reset the device and bring it back to working state
+	 *         are taken. Video RAM buffer is freed.
+	 *         In summary the same procedure as in the case of pvr_pm_thaw() is
+	 *         performed.
+	 */
+	.freeze = pvr_pm_freeze,
+	.thaw = pvr_pm_thaw,
+	.poweroff = pvr_pm_poweroff,
+	.restore = pvr_pm_restore,
 };
 
 
@@ -110,6 +233,7 @@ int pvr_drm_load(struct drm_device *ddev, unsigned long flags)
 	int err, deviceId;
 
 	DRM_DEBUG_DRIVER("device %p\n", ddev->dev);
+//	DRM_ERROR("ericyin enter, device %p\n", ddev->dev);
 
 	dev_set_drvdata(ddev->dev, ddev);
 
@@ -137,14 +261,7 @@ int pvr_drm_load(struct drm_device *ddev, unsigned long flags)
 		ddev->dev->dma_parms = &priv->dma_parms;
 	dma_set_max_seg_size(ddev->dev, DMA_BIT_MASK(32));
 
-#if defined(SUPPORT_BUFFER_SYNC) || defined(SUPPORT_NATIVE_FENCE_SYNC)
-	priv->fence_status_wq = create_freezable_workqueue("pvr_fce_status");
-	if (!priv->fence_status_wq) {
-		DRM_ERROR("failed to create fence status workqueue\n");
-		err = -ENOMEM;
-		goto err_unset_dma_parms;
-	}
-#endif
+	mutex_lock(&g_device_mutex);
 
 	srv_err = PVRSRVCommonDeviceCreate(ddev->dev, deviceId, &priv->dev_node);
 	if (srv_err != PVRSRV_OK) {
@@ -154,8 +271,12 @@ int pvr_drm_load(struct drm_device *ddev, unsigned long flags)
 			err = -EPROBE_DEFER;
 		else
 			err = -ENODEV;
-		goto err_workqueue_destroy;
+		goto err_unset_dma_parms;
 	}
+//	else
+//	{
+//		DRM_ERROR("%s %d: ericyin OK???\n", __func__, __LINE__);
+//	}
 
 	err = PVRSRVDeviceInit(priv->dev_node);
 	if (err) {
@@ -166,27 +287,29 @@ int pvr_drm_load(struct drm_device *ddev, unsigned long flags)
 
 	drm_mode_config_init(ddev);
 
-#if defined(SUPPORT_FWLOAD_ON_PROBE)
+#if (PVRSRV_DEVICE_INIT_MODE == PVRSRV_LINUX_DEV_INIT_ON_PROBE)
 	srv_err = PVRSRVCommonDeviceInitialise(priv->dev_node);
 	if (srv_err != PVRSRV_OK) {
 		err = -ENODEV;
 		DRM_ERROR("device %p initialisation failed (err=%d)\n",
 			  ddev->dev, err);
-		drm_mode_config_cleanup(ddev);
-		PVRSRVDeviceDeinit(priv->dev_node);
-		goto err_device_destroy;
+		goto err_device_deinit;
 	}
 #endif
 
+	mutex_unlock(&g_device_mutex);
+
 	return 0;
 
+#if (PVRSRV_DEVICE_INIT_MODE == PVRSRV_LINUX_DEV_INIT_ON_PROBE)
+err_device_deinit:
+	drm_mode_config_cleanup(ddev);
+	PVRSRVDeviceDeinit(priv->dev_node);
+#endif
 err_device_destroy:
 	PVRSRVCommonDeviceDestroy(priv->dev_node);
-err_workqueue_destroy:
-#if defined(SUPPORT_BUFFER_SYNC) || defined(SUPPORT_NATIVE_FENCE_SYNC)
-	destroy_workqueue(priv->fence_status_wq);
 err_unset_dma_parms:
-#endif
+	mutex_unlock(&g_device_mutex);
 	if (ddev->dev->dma_parms == &priv->dma_parms)
 		ddev->dev->dma_parms = NULL;
 	kfree(priv);
@@ -206,16 +329,15 @@ void pvr_drm_unload(struct drm_device *ddev)
 	struct pvr_drm_private *priv = ddev->dev_private;
 
 	DRM_DEBUG_DRIVER("device %p\n", ddev->dev);
+//	DRM_ERROR("ericyin enter, device %p\n", ddev->dev);
 
 	drm_mode_config_cleanup(ddev);
 
 	PVRSRVDeviceDeinit(priv->dev_node);
 
+	mutex_lock(&g_device_mutex);
 	PVRSRVCommonDeviceDestroy(priv->dev_node);
-
-#if defined(SUPPORT_BUFFER_SYNC) || defined(SUPPORT_NATIVE_FENCE_SYNC)
-	destroy_workqueue(priv->fence_status_wq);
-#endif
+	mutex_unlock(&g_device_mutex);
 
 	if (ddev->dev->dma_parms == &priv->dma_parms)
 		ddev->dev->dma_parms = NULL;
@@ -230,19 +352,25 @@ void pvr_drm_unload(struct drm_device *ddev)
 
 static int pvr_drm_open(struct drm_device *ddev, struct drm_file *dfile)
 {
+#if (PVRSRV_DEVICE_INIT_MODE != PVRSRV_LINUX_DEV_INIT_ON_CONNECT)
 	struct pvr_drm_private *priv = ddev->dev_private;
 	int err;
+#endif
 
 	if (!try_module_get(THIS_MODULE)) {
 		DRM_ERROR("failed to get module reference\n");
 		return -ENOENT;
 	}
 
-	err = PVRSRVDeviceOpen(priv->dev_node, dfile);
+#if (PVRSRV_DEVICE_INIT_MODE != PVRSRV_LINUX_DEV_INIT_ON_CONNECT)
+	err = PVRSRVDeviceServicesOpen(priv->dev_node, dfile);
 	if (err)
 		module_put(THIS_MODULE);
 
 	return err;
+#else
+	return 0;
+#endif
 }
 
 static void pvr_drm_release(struct drm_device *ddev, struct drm_file *dfile)
@@ -258,7 +386,20 @@ static void pvr_drm_release(struct drm_device *ddev, struct drm_file *dfile)
  * The DRM global lock is taken for ioctls unless the DRM_UNLOCKED flag is set.
  */
 static struct drm_ioctl_desc pvr_drm_ioctls[] = {
-	DRM_IOCTL_DEF_DRV(PVR_SRVKM_CMD, PVRSRV_BridgeDispatchKM, DRM_RENDER_ALLOW | DRM_UNLOCKED)
+	DRM_IOCTL_DEF_DRV(PVR_SRVKM_CMD, PVRSRV_BridgeDispatchKM,
+			  DRM_RENDER_ALLOW | DRM_UNLOCKED),
+	DRM_IOCTL_DEF_DRV(PVR_SRVKM_INIT, drm_pvr_srvkm_init,
+			  DRM_RENDER_ALLOW | DRM_UNLOCKED),
+#if defined(SUPPORT_NATIVE_FENCE_SYNC) && !defined(USE_PVRSYNC_DEVNODE)
+	DRM_IOCTL_DEF_DRV(PVR_SYNC_RENAME_CMD, pvr_sync_rename_ioctl,
+			  DRM_RENDER_ALLOW | DRM_UNLOCKED),
+	DRM_IOCTL_DEF_DRV(PVR_SYNC_FORCE_SW_ONLY_CMD, pvr_sync_force_sw_only_ioctl,
+			  DRM_RENDER_ALLOW | DRM_UNLOCKED),
+	DRM_IOCTL_DEF_DRV(PVR_SW_SYNC_CREATE_FENCE_CMD, pvr_sw_sync_create_fence_ioctl,
+			  DRM_RENDER_ALLOW | DRM_UNLOCKED),
+	DRM_IOCTL_DEF_DRV(PVR_SW_SYNC_INC_CMD, pvr_sw_sync_inc_ioctl,
+			  DRM_RENDER_ALLOW | DRM_UNLOCKED),
+#endif
 };
 
 #if defined(CONFIG_COMPAT)
@@ -274,7 +415,7 @@ static long pvr_compat_ioctl(struct file *file, unsigned int cmd,
 }
 #endif /* defined(CONFIG_COMPAT) */
 
-static const struct file_operations pvr_drm_fops = {
+const struct file_operations pvr_drm_fops = {
 	.owner			= THIS_MODULE,
 	.open			= drm_open,
 	.release		= drm_release,

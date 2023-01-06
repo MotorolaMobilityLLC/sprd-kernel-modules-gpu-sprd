@@ -90,11 +90,11 @@ void RgxSuspend(struct rk_context *platform);
 PVRSRV_ERROR RkPrePowerState(IMG_HANDLE hSysData,
 							 PVRSRV_SYS_POWER_STATE eNewPowerState,
 							 PVRSRV_SYS_POWER_STATE eCurrentPowerState,
-							 IMG_BOOL bForced);
+							 PVRSRV_POWER_FLAGS ePwrFlags);
 PVRSRV_ERROR RkPostPowerState(IMG_HANDLE hSysData,
 							  PVRSRV_SYS_POWER_STATE eNewPowerState,
 							  PVRSRV_SYS_POWER_STATE eCurrentPowerState,
-							  IMG_BOOL bForced);
+							  PVRSRV_POWER_FLAGS ePwrFlags);
 void rkSetFrequency(IMG_UINT32 ui32Frequency);
 void rkSetVoltage(IMG_UINT32 ui32Voltage);
 #endif	/* __RK_INIT_V2__ */

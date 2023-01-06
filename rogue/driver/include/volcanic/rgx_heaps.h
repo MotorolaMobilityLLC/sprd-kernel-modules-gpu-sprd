@@ -51,6 +51,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define RGX_GENERAL_NON4K_HEAP_IDENT        "General NON-4K"            /*!< RGX General non-4K Heap Identifier */
 #define RGX_PDSCODEDATA_HEAP_IDENT          "PDS Code and Data"         /*!< RGX PDS Code/Data Heap Identifier */
 #define RGX_USCCODE_HEAP_IDENT              "USC Code"                  /*!< RGX USC Code Heap Identifier */
+#define RGX_USCCODE_BPH_HEAP_IDENT          "BP Handler USC Code"       /*!< RGX USC Code for breakpoint handlers Heap Identifier */
 #define RGX_VK_CAPT_REPLAY_HEAP_IDENT       "Vulkan Capture Replay"     /*!< RGX vulkan capture replay buffer Heap Identifier */
 #define RGX_SIGNALS_HEAP_IDENT              "Signals"                   /*!< Compute Signals Heap Identifier */
 #define RGX_COMPONENT_CTRL_HEAP_IDENT       "Component Control"         /*!< RGX DCE Component Control Heap Identifier */

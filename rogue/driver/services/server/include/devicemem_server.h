@@ -62,72 +62,14 @@ typedef struct _DEVMEMINT_MAPPING_ DEVMEMINT_MAPPING;
 typedef struct _DEVMEMINT_PF_NOTIFY_ DEVMEMINT_PF_NOTIFY;
 
 
-/*************************************************************************/ /*!
-@Function       DevmemIntUnpin
-@Description    This is the counterpart to DevmemPin(). It is meant to be
-                called when the allocation is NOT mapped in the device virtual
-                space.
+/* Function prototypes for obsolete Devmem bridge calls kept
+ * to minimise compatibility impact.
+ */
+PVRSRV_ERROR DevmemCompatReserve2(PMR *psPMR);
+PVRSRV_ERROR DevmemCompatReserve4(DEVMEMINT_MAPPING *psDevmemMapping, PMR *psPMR);
+PVRSRV_ERROR DevmemCompatReserve1(PMR *psPMR);
+PVRSRV_ERROR DevmemCompatReserve3(DEVMEMINT_MAPPING *psDevmemMapping, PMR *psPMR);
 
-@Input          psPMR           The physical memory to unpin.
-
-@Return         PVRSRV_ERROR:   PVRSRV_OK on success and the memory is
-                                registered to be reclaimed. Error otherwise.
-*/ /**************************************************************************/
-PVRSRV_ERROR DevmemIntUnpin(PMR *psPMR);
-
-/*************************************************************************/ /*!
-@Function       DevmemIntUnpinInvalidate
-@Description    This is the counterpart to DevmemIntPinValidate(). It is meant
-                to be called for allocations that ARE mapped in the device
-                virtual space and we have to invalidate the mapping.
-
-@Input          psPMR           The physical memory to unpin.
-
-@Return         PVRSRV_ERROR:   PVRSRV_OK on success and the memory is
-                                registered to be reclaimed. Error otherwise.
-*/ /**************************************************************************/
-PVRSRV_ERROR
-DevmemIntUnpinInvalidate(DEVMEMINT_MAPPING *psDevmemMapping, PMR *psPMR);
-
-/*************************************************************************/ /*!
-@Function       DevmemIntPin
-@Description    This is the counterpart to DevmemIntUnpin().
-                Is meant to be called if there is NO device mapping present.
-
-@Input          psPMR           The physical memory to pin.
-
-@Return         PVRSRV_ERROR:   PVRSRV_OK on success and the allocation content
-                                was successfully restored.
-
-                                PVRSRV_ERROR_PMR_NEW_MEMORY when the content
-                                could not be restored and new physical memory
-                                was allocated.
-
-                                A different error otherwise.
-*/ /**************************************************************************/
-PVRSRV_ERROR DevmemIntPin(PMR *psPMR);
-
-/*************************************************************************/ /*!
-@Function       DevmemIntPinValidate
-@Description    This is the counterpart to DevmemIntUnpinInvalidate().
-                Is meant to be called if there is IS a device mapping present
-                that needs to be taken care of.
-
-@Input          psDevmemMapping The mapping structure used for the passed PMR.
-
-@Input          psPMR           The physical memory to pin.
-
-@Return         PVRSRV_ERROR:   PVRSRV_OK on success and the allocation content
-                                was successfully restored.
-
-                                PVRSRV_ERROR_PMR_NEW_MEMORY when the content
-                                could not be restored and new physical memory
-                                was allocated.
-
-                                A different error otherwise.
-*/ /**************************************************************************/
-PVRSRV_ERROR
-DevmemIntPinValidate(DEVMEMINT_MAPPING *psDevmemMapping, PMR *psPMR);
 /*
  * DevmemServerGetImportHandle()
  *
@@ -253,6 +195,8 @@ DevmemIntCtxDestroy(DEVMEMINT_CTX *psDevmemCtx);
  */
 PVRSRV_ERROR
 DevmemIntHeapCreate(DEVMEMINT_CTX *psDevmemCtx,
+                    IMG_UINT32 uiHeapConfigIndex,
+                    IMG_UINT32 uiHeapIndex,
                     IMG_DEV_VIRTADDR sHeapBaseAddr,
                     IMG_DEVMEM_SIZE_T uiHeapLength,
                     IMG_UINT32 uiLog2DataPageSize,
@@ -267,6 +211,13 @@ DevmemIntHeapCreate(DEVMEMINT_CTX *psDevmemCtx,
  */
 PVRSRV_ERROR
 DevmemIntHeapDestroy(DEVMEMINT_HEAP *psDevmemHeap);
+
+/* DevmemIntHeapGetBaseAddr()
+ *
+ * Get heap base address pre carveouts.
+ */
+IMG_DEV_VIRTADDR
+DevmemIntHeapGetBaseAddr(DEVMEMINT_HEAP *psDevmemHeap);
 
 /*
  * DevmemIntMapPMR()
@@ -479,21 +430,6 @@ IMG_UINT32
 DevmemIntMMUContextID(DEVMEMINT_CTX *psDevMemContext);
 
 PVRSRV_ERROR
-DevmemIntPDumpBitmap(CONNECTION_DATA * psConnection,
-                     PVRSRV_DEVICE_NODE *psDeviceNode,
-                     IMG_CHAR *pszFileName,
-                     IMG_UINT32 ui32FileOffset,
-                     IMG_UINT32 ui32Width,
-                     IMG_UINT32 ui32Height,
-                     IMG_UINT32 ui32StrideInBytes,
-                     IMG_DEV_VIRTADDR sDevBaseAddr,
-                     DEVMEMINT_CTX *psDevMemContext,
-                     IMG_UINT32 ui32Size,
-                     PDUMP_PIXEL_FORMAT ePixelFormat,
-                     IMG_UINT32 ui32AddrMode,
-                     IMG_UINT32 ui32PDumpFlags);
-
-PVRSRV_ERROR
 DevmemIntPDumpImageDescriptor(CONNECTION_DATA * psConnection,
                               PVRSRV_DEVICE_NODE *psDeviceNode,
                               DEVMEMINT_CTX *psDevMemContext,
@@ -546,40 +482,6 @@ DevmemIntPDumpSaveToFileVirtual(DEVMEMINT_CTX *psDevmemCtx,
 	PVR_UNREFERENCED_PARAMETER(uiArraySize);
 	PVR_UNREFERENCED_PARAMETER(pszFilename);
 	PVR_UNREFERENCED_PARAMETER(ui32FileOffset);
-	PVR_UNREFERENCED_PARAMETER(ui32PDumpFlags);
-	return PVRSRV_OK;
-}
-
-#ifdef INLINE_IS_PRAGMA
-#pragma inline(DevmemIntPDumpBitmap)
-#endif
-static INLINE PVRSRV_ERROR
-DevmemIntPDumpBitmap(CONNECTION_DATA * psConnection,
-                     PVRSRV_DEVICE_NODE *psDeviceNode,
-                     IMG_CHAR *pszFileName,
-                     IMG_UINT32 ui32FileOffset,
-                     IMG_UINT32 ui32Width,
-                     IMG_UINT32 ui32Height,
-                     IMG_UINT32 ui32StrideInBytes,
-                     IMG_DEV_VIRTADDR sDevBaseAddr,
-                     DEVMEMINT_CTX *psDevMemContext,
-                     IMG_UINT32 ui32Size,
-                     PDUMP_PIXEL_FORMAT ePixelFormat,
-                     IMG_UINT32 ui32AddrMode,
-                     IMG_UINT32 ui32PDumpFlags)
-{
-	PVR_UNREFERENCED_PARAMETER(psConnection);
-	PVR_UNREFERENCED_PARAMETER(psDeviceNode);
-	PVR_UNREFERENCED_PARAMETER(pszFileName);
-	PVR_UNREFERENCED_PARAMETER(ui32FileOffset);
-	PVR_UNREFERENCED_PARAMETER(ui32Width);
-	PVR_UNREFERENCED_PARAMETER(ui32Height);
-	PVR_UNREFERENCED_PARAMETER(ui32StrideInBytes);
-	PVR_UNREFERENCED_PARAMETER(sDevBaseAddr);
-	PVR_UNREFERENCED_PARAMETER(psDevMemContext);
-	PVR_UNREFERENCED_PARAMETER(ui32Size);
-	PVR_UNREFERENCED_PARAMETER(ePixelFormat);
-	PVR_UNREFERENCED_PARAMETER(ui32AddrMode);
 	PVR_UNREFERENCED_PARAMETER(ui32PDumpFlags);
 	return PVRSRV_OK;
 }

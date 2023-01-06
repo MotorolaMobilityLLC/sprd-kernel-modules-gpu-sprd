@@ -65,6 +65,7 @@
 #include "plato_drv.h"
 
 #if defined(PDP_USE_ATOMIC)
+#include <drm/drm_atomic.h>
 #include <drm/drm_atomic_helper.h>
 #endif
 
@@ -347,9 +348,16 @@ static void pdp_crtc_helper_mode_set_nofb(struct drm_crtc *crtc)
 	pdp_crtc_mode_set(crtc, &crtc->state->adjusted_mode);
 }
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0))
 static void pdp_crtc_helper_atomic_flush(struct drm_crtc *crtc,
 					 struct drm_crtc_state *old_crtc_state)
 {
+#else
+static void pdp_crtc_helper_atomic_flush(struct drm_crtc *crtc,
+					 struct drm_atomic_state *state)
+{
+	struct drm_crtc_state *old_crtc_state = drm_atomic_get_new_crtc_state(state, crtc);
+#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0) */
 	struct drm_crtc_state *new_crtc_state = crtc->state;
 
 	if (!new_crtc_state->active || !old_crtc_state->active)
@@ -380,8 +388,13 @@ static void pdp_crtc_helper_atomic_flush(struct drm_crtc *crtc,
 	}
 }
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0))
 static void pdp_crtc_helper_atomic_enable(struct drm_crtc *crtc,
 					  struct drm_crtc_state *old_crtc_state)
+#else
+static void pdp_crtc_helper_atomic_enable(struct drm_crtc *crtc,
+					  struct drm_atomic_state *state)
+#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0) */
 {
 	pdp_crtc_set_enabled(crtc, true);
 
@@ -400,8 +413,13 @@ static void pdp_crtc_helper_atomic_enable(struct drm_crtc *crtc,
 	}
 }
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0))
 static void pdp_crtc_helper_atomic_disable(struct drm_crtc *crtc,
 					   struct drm_crtc_state *old_crtc_state)
+#else
+static void pdp_crtc_helper_atomic_disable(struct drm_crtc *crtc,
+					   struct drm_atomic_state *state)
+#endif /* LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0) */
 {
 	pdp_crtc_set_enabled(crtc, false);
 

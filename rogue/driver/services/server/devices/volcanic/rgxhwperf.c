@@ -146,6 +146,18 @@ PVRSRV_ERROR RGXServerFeatureFlagsToHWPerfFlags(PVRSRV_RGXDEV_INFO *psDevInfo, R
 		psBVNC->ui32BvncKmFeatureFlags |= RGX_HWPERF_FEATURE_MULTICORE_FLAG;
 	}
 
+	/* Determine if we've got the new RAY_TRACING feature supported. This is
+	 * only determined by comparing the RAY_TRACING_ARCHITECTURE value */
+	if (RGX_IS_FEATURE_VALUE_SUPPORTED(psDevInfo, RAY_TRACING_ARCH))
+	{
+		psBVNC->ui32BvncKmFeatureFlags |= RGX_HWPERF_FEATURE_RAYTRACING_FLAG;
+	}
+
+	if (RGX_IS_FEATURE_SUPPORTED(psDevInfo, CATURIX_TOP_INFRASTRUCTURE))
+	{
+		psBVNC->ui32BvncKmFeatureFlags |= RGX_HWPERF_FEATURE_CXT_TOP_INFRASTRUCTURE_FLAG;
+	}
+
 #ifdef SUPPORT_WORKLOAD_ESTIMATION
 	/* Not a part of BVNC feature line and so doesn't need the feature supported check */
 	psBVNC->ui32BvncKmFeatureFlags |= RGX_HWPERF_FEATURE_WORKLOAD_ESTIMATION;
@@ -185,8 +197,20 @@ PVRSRV_ERROR RGXServerFeatureFlagsToHWPerfFlags(PVRSRV_RGXDEV_INFO *psDevInfo, R
 						 * The SLC_BLKID_ALL is keyed from SLC0. Need to access
 						 * the NUM_MEMBUS feature to see how many are physically
 						 * present.
+						 * For CXT_TOP_INFRASTRUCTURE systems we present a
+						 * singleton SLCBANK - this provides accumulated counts
+						 * for all registers within the physical SLCBANK instances.
 						 */
-						uiNumUnits = RGX_GET_FEATURE_VALUE(psDevInfo, NUM_MEMBUS);
+						if (psBVNC->ui32BvncKmFeatureFlags &
+						    RGX_HWPERF_FEATURE_CXT_TOP_INFRASTRUCTURE_FLAG)
+						{
+							uiNumUnits = 1U;
+						}
+						else
+						{
+							uiNumUnits = RGX_GET_FEATURE_VALUE(psDevInfo,
+							                                   NUM_MEMBUS);
+						}
 						break;
 					case RGX_CNTBLK_ID_SLCBANK1:
 					case RGX_CNTBLK_ID_SLCBANK2:
@@ -236,7 +260,7 @@ PVRSRV_ERROR PVRSRVRGXConfigureHWPerfBlocksKM(
 
 	PVR_UNREFERENCED_PARAMETER(psConnection);
 
-	PVRSRV_VZ_RET_IF_MODE(GUEST, PVRSRV_ERROR_NOT_IMPLEMENTED);
+	PVRSRV_VZ_RET_IF_MODE(GUEST, PVRSRV_ERROR_NOT_SUPPORTED);
 
 	PVR_LOG_RETURN_IF_FALSE(ui32ArrayLen > 0, "ui32ArrayLen is 0",
 	                        PVRSRV_ERROR_INVALID_PARAMS);
@@ -251,15 +275,16 @@ PVRSRV_ERROR PVRSRVRGXConfigureHWPerfBlocksKM(
 	sKccbCmd.uCmdData.sHWPerfCfgEnableBlks.ui32CtrlWord = ui32CtrlWord;
 	sKccbCmd.uCmdData.sHWPerfCfgEnableBlks.ui32NumBlocks = ui32ArrayLen;
 
+	/* used for passing counters config to the Firmware, write-only for the CPU */
 	eError = DevmemFwAllocate(psDevice,
 	                          sizeof(RGX_HWPERF_CONFIG_CNTBLK)*ui32ArrayLen,
 	                          PVRSRV_MEMALLOCFLAG_DEVICE_FLAG(PMMETA_PROTECT) |
 	                          PVRSRV_MEMALLOCFLAG_GPU_READABLE |
 	                          PVRSRV_MEMALLOCFLAG_GPU_WRITEABLE |
-	                          PVRSRV_MEMALLOCFLAG_CPU_READABLE |
+	                          PVRSRV_MEMALLOCFLAG_GPU_UNCACHED |
+	                          PVRSRV_MEMALLOCFLAG_CPU_WRITEABLE |
+	                          PVRSRV_MEMALLOCFLAG_CPU_UNCACHED_WC |
 	                          PVRSRV_MEMALLOCFLAG_KERNEL_CPU_MAPPABLE |
-	                          PVRSRV_MEMALLOCFLAG_UNCACHED |
-	                          PVRSRV_MEMALLOCFLAG_ZERO_ON_ALLOC |
 	                          PVRSRV_MEMALLOCFLAG_PHYS_HEAP_HINT(FW_MAIN),
 	                          "FwHWPerfCountersConfigBlock",
 	                          &psFwBlkConfigsMemDesc);
@@ -272,7 +297,7 @@ PVRSRV_ERROR PVRSRVRGXConfigureHWPerfBlocksKM(
 	eError = DevmemAcquireCpuVirtAddr(psFwBlkConfigsMemDesc, (void **)&psFwArray);
 	PVR_LOG_GOTO_IF_ERROR(eError, "DevmemAcquireCpuVirtAddr", fail2);
 
-	OSDeviceMemCopy(psFwArray, psBlockConfigs, sizeof(RGX_HWPERF_CONFIG_CNTBLK)*ui32ArrayLen);
+	OSCachedMemCopyWMB(psFwArray, psBlockConfigs, sizeof(RGX_HWPERF_CONFIG_CNTBLK)*ui32ArrayLen);
 	DevmemPDumpLoadMem(psFwBlkConfigsMemDesc,
 	                   0,
 	                   sizeof(RGX_HWPERF_CONFIG_CNTBLK)*ui32ArrayLen,
@@ -283,7 +308,6 @@ PVRSRV_ERROR PVRSRVRGXConfigureHWPerfBlocksKM(
 	eError = RGXScheduleCommandAndGetKCCBSlot(psDevice,
 											  RGXFWIF_DM_GP,
 											  &sKccbCmd,
-											  0,
 											  PDUMP_FLAGS_CONTINUOUS,
 											  &ui32kCCBCommandSlot);
 	PVR_LOG_GOTO_IF_ERROR(eError, "RGXScheduleCommandAndGetKCCBSlot", fail2);
@@ -384,6 +408,118 @@ PVRSRV_ERROR RGXHWPerfConfigureCounters(
 	}
 
 	return PVRSRV_OK;
+}
+
+PVRSRV_ERROR PVRSRVRGXGetConfiguredHWPerfCounters(PVRSRV_DEVICE_NODE *psDevNode,
+                                                  RGXFWIF_HWPERF_CTL *psHWPerfCtl,
+                                                  IMG_UINT32 ui32BlockID,
+                                                  RGX_HWPERF_CONFIG_CNTBLK *psConfiguredCounters)
+{
+	RGX_HWPERF_CONFIG_CNTBLK sBlockConfig;
+	IMG_UINT32 i;
+	PVRSRV_ERROR eError = PVRSRV_OK;
+
+	PVR_RETURN_IF_FALSE(psDevNode != NULL, PVRSRV_ERROR_INVALID_PARAMS);
+	PVR_RETURN_IF_FALSE(psHWPerfCtl != NULL, PVRSRV_ERROR_INVALID_PARAMS);
+	PVR_RETURN_IF_FALSE(psConfiguredCounters != NULL, PVRSRV_ERROR_INVALID_PARAMS);
+
+	if ((ui32BlockID & ~RGX_CNTBLK_ID_UNIT_ALL_MASK) < RGX_CNTBLK_ID_LAST)
+	{
+		RGXFWIF_HWPERF_CTL_BLK *psBlock = NULL;
+
+		PVR_RETURN_IF_ERROR(PVRSRVPowerLock(psDevNode));
+
+		for (i = 0; i < psHWPerfCtl->ui32NumBlocks; i++)
+		{
+			if (psHWPerfCtl->sBlkCfg[i].uiBlockID != ui32BlockID)
+			{
+				continue;
+			}
+			else if (psHWPerfCtl->sBlkCfg[i].uiEnabled == 0)
+			{
+				PVR_DPF((PVR_DBG_ERROR, "Block (0x%04x) is not enabled.", ui32BlockID));
+				PVR_GOTO_WITH_ERROR(eError, PVRSRV_ERROR_INVALID_PARAMS, Error);
+			}
+
+			psBlock = &psHWPerfCtl->sBlkCfg[i];
+			break;
+		}
+
+		if (psBlock == NULL)
+		{
+			PVR_DPF((PVR_DBG_ERROR, "Block ID (0x%04x) was invalid.", ui32BlockID));
+			PVR_GOTO_WITH_ERROR(eError, PVRSRV_ERROR_INVALID_PARAMS, Error);
+		}
+
+		sBlockConfig.ui16BlockID = psBlock->uiBlockID;
+		sBlockConfig.ui16NumCounters = psBlock->uiNumCounters;
+
+		for (i = 0; i < psBlock->uiNumCounters; i++)
+		{
+			sBlockConfig.ui16Counters[i] = psBlock->aui32CounterCfg[i];
+		}
+	}
+	else
+	{
+		PVR_DPF((PVR_DBG_ERROR, "Block ID (0x%04x) was invalid.", ui32BlockID));
+		PVR_GOTO_WITH_ERROR(eError, PVRSRV_ERROR_INVALID_PARAMS, InvalidIDError);
+	}
+
+Error:
+	PVRSRVPowerUnlock(psDevNode);
+
+InvalidIDError:
+	*psConfiguredCounters = sBlockConfig;
+	return eError;
+}
+
+PVRSRV_ERROR PVRSRVRGXGetEnabledHWPerfBlocks(PVRSRV_DEVICE_NODE *psDevNode,
+                                             RGXFWIF_HWPERF_CTL *psHWPerfCtl,
+                                             IMG_UINT32 ui32ArrayLen,
+                                             IMG_UINT32 *pui32BlockCount,
+                                             IMG_UINT32 *pui32EnabledBlockIDs)
+{
+	IMG_UINT32 ui32LastIDIdx = 0;
+	IMG_UINT32 i;
+	PVRSRV_ERROR eError = PVRSRV_OK;
+
+	PVR_RETURN_IF_FALSE(psDevNode != NULL, PVRSRV_ERROR_INVALID_PARAMS);
+	PVR_RETURN_IF_FALSE(psHWPerfCtl != NULL, PVRSRV_ERROR_INVALID_PARAMS);
+
+	*pui32BlockCount = 0;
+
+	if (ui32ArrayLen > 0 && pui32EnabledBlockIDs == NULL)
+	{
+		PVR_DPF((PVR_DBG_WARNING, "ui32ArrayLen is greater than 0 but pui32EnabledBlockIDs is NULL"));
+	}
+
+	PVR_RETURN_IF_ERROR(PVRSRVPowerLock(psDevNode));
+
+	for (i = 0; i < psHWPerfCtl->ui32NumBlocks; i++)
+	{
+		if (psHWPerfCtl->sBlkCfg[i].uiEnabled)
+		{
+			*pui32BlockCount += 1;
+
+			if (pui32EnabledBlockIDs == NULL)
+			{
+				continue;
+			}
+
+			if (ui32LastIDIdx + 1 > ui32ArrayLen)
+			{
+				PVR_DPF((PVR_DBG_ERROR, "ui32ArrayLen less than the number of enabled blocks."));
+				PVR_GOTO_WITH_ERROR(eError, PVRSRV_ERROR_OUT_OF_MEMORY, Error);
+			}
+
+			pui32EnabledBlockIDs[ui32LastIDIdx] = psHWPerfCtl->sBlkCfg[i].uiBlockID;
+			ui32LastIDIdx += 1;
+		}
+	}
+
+Error:
+	PVRSRVPowerUnlock(psDevNode);
+	return eError;
 }
 
 /******************************************************************************

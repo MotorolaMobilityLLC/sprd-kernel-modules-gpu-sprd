@@ -114,6 +114,13 @@ static_assert(RGX_TDM_CCB_SIZE_LOG2 >= MIN_SAFE_CCB_SIZE_LOG2 &&
 static_assert(RGX_TDM_CCB_MAX_SIZE_LOG2 >= PVRSRV_RGX_LOG2_CLIENT_CCB_SIZE_TDM &&
 	RGX_TDM_CCB_MAX_SIZE_LOG2 <= MAX_SAFE_CCB_SIZE_LOG2, "TDM max CCB size is invalid");
 
+#define RGX_RDM_CCB_SIZE_LOG2          PVRSRV_RGX_LOG2_CLIENT_CCB_SIZE_RDM
+static_assert(RGX_RDM_CCB_SIZE_LOG2 >= MIN_SAFE_CCB_SIZE_LOG2 &&
+	RGX_RDM_CCB_SIZE_LOG2 <= MAX_SAFE_CCB_SIZE_LOG2, "RDM CCB size is invalid");
+#define RGX_RDM_CCB_MAX_SIZE_LOG2		PVRSRV_RGX_LOG2_CLIENT_CCB_MAX_SIZE_RDM
+static_assert(RGX_RDM_CCB_MAX_SIZE_LOG2 >= PVRSRV_RGX_LOG2_CLIENT_CCB_SIZE_RDM &&
+	RGX_RDM_CCB_MAX_SIZE_LOG2 <= MAX_SAFE_CCB_SIZE_LOG2, "RDM max CCB size is invalid");
+
 typedef struct _RGX_CLIENT_CCB_ RGX_CLIENT_CCB;
 
 /*
@@ -259,10 +266,11 @@ void RGXReleaseCCB(RGX_CLIENT_CCB *psClientCCB,
 IMG_UINT32 RGXGetHostWriteOffsetCCB(RGX_CLIENT_CCB *psClientCCB);
 IMG_UINT32 RGXGetWrapMaskCCB(RGX_CLIENT_CCB *psClientCCB);
 
-PVRSRV_ERROR RGXSetCCBFlags(RGX_CLIENT_CCB *psClientCCB,
-							IMG_UINT32		ui32Flags);
+void RGXSetCCBFlags(RGX_CLIENT_CCB *psClientCCB,
+					IMG_UINT32		ui32Flags);
 
-void RGXCmdHelperInitCmdCCB_CommandSize(IMG_UINT64 ui64FBSCEntryMask,
+void RGXCmdHelperInitCmdCCB_CommandSize(PVRSRV_RGXDEV_INFO *psDevInfo,
+										IMG_UINT64 ui64FBSCEntryMask,
                                         IMG_UINT32 ui32ClientFenceCount,
                                         IMG_UINT32 ui32ClientUpdateCount,
                                         IMG_UINT32 ui32CmdSize,
@@ -292,7 +300,8 @@ void RGXCmdHelperInitCmdCCB_OtherData(RGX_CLIENT_CCB *psClientCCB,
                                       IMG_BOOL bCCBStateOpen,
                                       RGX_CCB_CMD_HELPER_DATA *psCmdHelperData);
 
-void RGXCmdHelperInitCmdCCB(RGX_CLIENT_CCB          *psClientCCB,
+void RGXCmdHelperInitCmdCCB(PVRSRV_RGXDEV_INFO *psDevInfo,
+							RGX_CLIENT_CCB          *psClientCCB,
                             IMG_UINT64              ui64FBSCEntryMask,
                             IMG_UINT32              ui32ClientFenceCount,
                             PRGXFWIF_UFO_ADDR       *pauiFenceUFOAddress,
@@ -330,7 +339,7 @@ IMG_UINT32 RGXCmdHelperGetCommandOffset(RGX_CCB_CMD_HELPER_DATA *asCmdHelperData
 
 IMG_UINT32 RGXCmdHelperGetDMCommandHeaderOffset(RGX_CCB_CMD_HELPER_DATA *psCmdHelperData);
 
-void DumpStalledCCBCommand(PRGXFWIF_FWCOMMONCONTEXT sFWCommonContext,
+void DumpFirstCCBCmd(PRGXFWIF_FWCOMMONCONTEXT sFWCommonContext,
 				RGX_CLIENT_CCB  *psCurrentClientCCB,
 				DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,
 				void *pvDumpDebugFile);

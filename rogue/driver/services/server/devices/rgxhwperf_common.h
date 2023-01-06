@@ -52,6 +52,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "connection_server.h"
 #include "rgxdevice.h"
 #include "rgx_hwperf.h"
+#include "rgx_fwif_hwperf.h"
 
 /* HWPerf host buffer size constraints in KBs */
 #define HWPERF_HOST_TL_STREAM_SIZE_DEFAULT PVRSRV_APPHINT_HWPERFHOSTBUFSIZEINKB
@@ -79,6 +80,46 @@ PVRSRV_ERROR RGXHWPerfInitOnDemandResources(PVRSRV_RGXDEV_INFO* psRgxDevInfo);
 void RGXHWPerfDeinit(PVRSRV_RGXDEV_INFO *psRgxDevInfo);
 void RGXHWPerfInitAppHintCallbacks(const PVRSRV_DEVICE_NODE *psDeviceNode);
 void RGXHWPerfClientInitAppHintCallbacks(void);
+
+static INLINE PVRSRV_ERROR RGXAcquireHWPerfCtlCPUAddr(PVRSRV_DEVICE_NODE *psDevNode,
+                                                      RGXFWIF_HWPERF_CTL **ppsHWPerfCtl)
+{
+	PVRSRV_RGXDEV_INFO *psDevInfo;
+	PVRSRV_ERROR eError;
+
+	PVR_RETURN_IF_FALSE(psDevNode != NULL, PVRSRV_ERROR_INVALID_PARAMS);
+
+	psDevInfo = (PVRSRV_RGXDEV_INFO*)psDevNode->pvDevice;
+	PVR_RETURN_IF_FALSE(psDevInfo != NULL, PVRSRV_ERROR_INVALID_PARAMS);
+
+	eError = DevmemAcquireCpuVirtAddr(psDevInfo->psRGXFWIfHWPerfCountersMemDesc,
+	                                  (void**)ppsHWPerfCtl);
+
+	return eError;
+}
+
+static INLINE void RGXReleaseHWPerfCtlCPUAddr(PVRSRV_DEVICE_NODE *psDevNode)
+{
+	PVRSRV_RGXDEV_INFO *psDevInfo;
+
+	PVR_LOG_RETURN_VOID_IF_FALSE(psDevNode != NULL, "psDevNode is invalid");
+
+	psDevInfo = (PVRSRV_RGXDEV_INFO*)psDevNode->pvDevice;
+	PVR_LOG_RETURN_VOID_IF_FALSE(psDevInfo != NULL, "psDevInfo invalid");
+
+	DevmemReleaseCpuVirtAddr(psDevInfo->psRGXFWIfHWPerfCountersMemDesc);
+}
+
+PVRSRV_ERROR PVRSRVRGXGetConfiguredHWPerfCountersKM(CONNECTION_DATA *psConnection,
+                                                    PVRSRV_DEVICE_NODE *psDeviceNode,
+                                                    const IMG_UINT32 ui32BlockID,
+                                                    RGX_HWPERF_CONFIG_CNTBLK *psConfiguredCounters);
+
+PVRSRV_ERROR PVRSRVRGXGetEnabledHWPerfBlocksKM(CONNECTION_DATA *psConnection,
+                                               PVRSRV_DEVICE_NODE *psDeviceNode,
+                                               const IMG_UINT32 ui32ArrayLen,
+                                               IMG_UINT32 *pui32BlockCount,
+                                               IMG_UINT32 *pui32EnabledBlockIDs);
 
 /******************************************************************************
  * RGX HW Performance Profiling API(s)
@@ -109,6 +150,11 @@ void RGXHWPerfHostDeInit(PVRSRV_RGXDEV_INFO	*psRgxDevInfo);
 void RGXHWPerfHostSetEventFilter(PVRSRV_RGXDEV_INFO *psRgxDevInfo,
                                  IMG_UINT32 ui32Filter);
 
+void RGXHWPerfHostPostRaw(PVRSRV_RGXDEV_INFO *psRgxDevInfo,
+						  RGX_HWPERF_HOST_EVENT_TYPE eEvType,
+						  IMG_BYTE *pbPayload,
+						  IMG_UINT32 ui32PayloadSize);
+
 void RGXHWPerfHostPostEnqEvent(PVRSRV_RGXDEV_INFO *psRgxDevInfo,
                                RGX_HWPERF_KICK_TYPE eEnqType,
                                IMG_UINT32 ui32Pid,
@@ -121,7 +167,7 @@ void RGXHWPerfHostPostEnqEvent(PVRSRV_RGXDEV_INFO *psRgxDevInfo,
                                IMG_UINT64 ui64CheckFenceUID,
                                IMG_UINT64 ui64UpdateFenceUID,
                                IMG_UINT64 ui64DeadlineInus,
-                               IMG_UINT64 ui64CycleEstimate);
+                               IMG_UINT32 ui32CycleEstimate);
 
 void RGXHWPerfHostPostAllocEvent(PVRSRV_RGXDEV_INFO *psRgxDevInfo,
                                  RGX_HWPERF_HOST_RESOURCE_TYPE eAllocType,
@@ -168,6 +214,10 @@ void RGXHWPerfHostPostSWTimelineAdv(PVRSRV_RGXDEV_INFO *psRgxDevInfo,
                                     IMG_PID uiPID,
 									PVRSRV_TIMELINE hSWTimeline,
 									IMG_UINT64 ui64SyncPtIndex);
+
+void RGXHWPerfHostPostClientInfoProcName(PVRSRV_RGXDEV_INFO *psRgxDevInfo,
+                                         IMG_PID uiPID,
+									     const IMG_CHAR *psName);
 
 IMG_BOOL RGXHWPerfHostIsEventEnabled(PVRSRV_RGXDEV_INFO *psRgxDevInfo, RGX_HWPERF_HOST_EVENT_TYPE eEvent);
 
@@ -466,6 +516,20 @@ do { \
 		RGXHWPerfHostPostSWTimelineAdv((I), (PID), (SW_TL), (SPI)); \
 	} \
 } while (0)
+
+/**
+ * @param D      Device Node pointer
+ * @param PID    Process ID that the following timeline belongs to
+ * @param N      Null terminated string containing the process name
+ */
+#define RGXSRV_HWPERF_HOST_CLIENT_INFO_PROCESS_NAME(D, PID, N) \
+do { \
+	if (RGXHWPerfHostIsEventEnabled(_RGX_DEVICE_INFO_FROM_NODE(D), RGX_HWPERF_HOST_CLIENT_INFO)) \
+	{ \
+		RGXHWPerfHostPostClientInfoProcName(_RGX_DEVICE_INFO_FROM_NODE(D), (PID), (N)); \
+	} \
+} while (0)
+
 #else
 
 #define RGXSRV_HWPERF_ENQ(C, P, X, E, I, K, CF, UF, UT, CHKUID, UPDUID, D, CE)
@@ -482,6 +546,7 @@ do { \
 #define RGXSRV_HWPERF_HOST_INFO(I, T)
 #define RGXSRV_HWPERF_SYNC_FENCE_WAIT(I, T, PID, F, D)
 #define RGXSRV_HWPERF_SYNC_SW_TL_ADV(I, PID, SW_TL, SPI)
+#define RGXSRV_HWPERF_HOST_CLIENT_INFO_PROCESS_NAME(D, PID, N)
 
 #endif
 

@@ -48,7 +48,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "rgxtimecorr.h"
 
 #define USEC_TO_MSEC 1000
-
 extern IMG_UINT32 gPVRCurFreq;
 
 static inline IMG_BOOL _PDVFSEnabled(void)
@@ -97,7 +96,7 @@ PVRSRV_ERROR PDVFSLimitMaxFrequency(PVRSRV_RGXDEV_INFO *psDevInfo, IMG_UINT32 ui
 		OSWaitus(MAX_HW_TIME_US/WAIT_TRY_COUNT);
 	} END_LOOP_UNTIL_TIMEOUT();
 
-	return PVRSRV_OK;
+	return eError;
 }
 
 PVRSRV_ERROR PDVFSLimitMinFrequency(PVRSRV_RGXDEV_INFO *psDevInfo, IMG_UINT32 ui32MinOPPPoint)
@@ -132,7 +131,7 @@ PVRSRV_ERROR PDVFSLimitMinFrequency(PVRSRV_RGXDEV_INFO *psDevInfo, IMG_UINT32 ui
 		OSWaitus(MAX_HW_TIME_US/WAIT_TRY_COUNT);
 	} END_LOOP_UNTIL_TIMEOUT();
 
-	return PVRSRV_OK;
+	return eError;
 }
 
 
@@ -186,11 +185,13 @@ PVRSRV_ERROR PDVFSProcessCoreClkChangeRequest(PVRSRV_RGXDEV_INFO *psDevInfo, IMG
 	}
 
 	psRGXTimingInfo->ui32CoreClockSpeed = ui32CoreClockRate;
+
 	gPVRCurFreq = ui32CoreClockRate;
 
 #if (PDVFS_COM == PDVFS_COM_HOST)
 	psDVFSDeviceCfg->pfnSetFreqVolt(ui32CoreClockRate, psOpp->ui32Volt);
 #endif
+
 
 	PVRSRVDevicePostClockSpeedChange(psDevInfo->psDeviceNode, psDVFSDeviceCfg->bIdleReq, NULL);
 

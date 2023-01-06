@@ -43,13 +43,21 @@ XE_BVNC = $(shell echo $(RGX_BVNC) | grep '^22.*\|^24.*\|^29.*\|^36.*')
 ifeq ($(RGX_BVNC),$(XE_BVNC))
  $(eval $(call KernelConfigC,TC_APOLLO_TCF5,))
  SUPPORT_FPGA_DUT_CLK_INFO ?= 1
+ SUPPORT_FPGA_DUT_MULTIPLEX_INFO ?= 1
 endif
 
 ifeq ($(PVR_ARCH),volcanic)
  SUPPORT_FPGA_DUT_CLK_INFO ?= 1
+ SUPPORT_FPGA_DUT_MULTIPLEX_INFO ?= 1
+endif
+
+ifeq ($(PVR_ARCH_DEFS),oceanic)
+ SUPPORT_FPGA_DUT_CLK_INFO ?= 1
+ SUPPORT_FPGA_DUT_MULTIPLEX_INFO ?= 1
 endif
 
 $(eval $(call TunableKernelConfigC,SUPPORT_FPGA_DUT_CLK_INFO,))
+$(eval $(call TunableKernelConfigC,SUPPORT_FPGA_DUT_MULTIPLEX_INFO,))
 
 ifeq ($(RGX_BVNC),1.82.4.5)
  $(eval $(call KernelConfigC,TC_APOLLO_ES2,))
@@ -83,6 +91,8 @@ else ifeq ($(RGX_BVNC),29.12.52.208)
  $(eval $(call KernelConfigC,TC_ORION,))
 else ifeq ($(RGX_BVNC),29.19.52.202)
  $(eval $(call KernelConfigC,TC_APOLLO_TCF5_29_19_52_202,))
+else ifeq ($(RGX_BVNC),27.5.254.2)
+ $(eval $(call KernelConfigC,TC_ODIN_27_5_254_2,))
 else ifeq ($(RGX_BVNC),$(XE_BVNC))
  $(warning WARNING $(RGX_BVNC) is currently not supported on a Linux TCF5 system)
  $(eval $(call KernelConfigC,TC_APOLLO_TCF5_BVNC_NOT_SUPPORTED,))

@@ -49,6 +49,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvrsrv_error.h"
 #include "servicesext.h"
 #include "opaque_types.h"
+#include "di_common.h"
 
 /*!
  *****************************************************************************
@@ -59,6 +60,27 @@ typedef struct _PVRSRV_POWER_DEV_TAG_ PVRSRV_POWER_DEV;
 
 typedef IMG_BOOL (*PFN_SYS_DEV_IS_DEFAULT_STATE_OFF)(PVRSRV_POWER_DEV *psPowerDevice);
 
+/* Power transition handler prototypes */
+
+/*!
+  Typedef for a pointer to a Function that will be called before a transition
+  from one power state to another. See also PFN_POST_POWER.
+ */
+typedef PVRSRV_ERROR (*PFN_PRE_POWER) (IMG_HANDLE				hDevHandle,
+									   PVRSRV_DEV_POWER_STATE	eNewPowerState,
+									   PVRSRV_DEV_POWER_STATE	eCurrentPowerState,
+									   PVRSRV_POWER_FLAGS		ePwrFlags);
+/*!
+  Typedef for a pointer to a Function that will be called after a transition
+  from one power state to another. See also PFN_PRE_POWER.
+ */
+typedef PVRSRV_ERROR (*PFN_POST_POWER) (IMG_HANDLE				hDevHandle,
+										PVRSRV_DEV_POWER_STATE	eNewPowerState,
+										PVRSRV_DEV_POWER_STATE	eCurrentPowerState,
+										PVRSRV_POWER_FLAGS		ePwrFlags);
+
+const char *PVRSRVSysPowerStateToString(PVRSRV_SYS_POWER_STATE eState);
+const char *PVRSRVDevPowerStateToString(PVRSRV_DEV_POWER_STATE eState);
 
 PVRSRV_ERROR PVRSRVPowerLockInit(PPVRSRV_DEVICE_NODE psDeviceNode);
 void PVRSRVPowerLockDeInit(PPVRSRV_DEVICE_NODE psDeviceNode);
@@ -124,27 +146,27 @@ IMG_BOOL PVRSRVDeviceIsDefaultStateOFF(PVRSRV_POWER_DEV *psPowerDevice);
 
  @Input		psDeviceNode : Device node
  @Input		eNewPowerState : New power state
- @Input		bForced : TRUE if the transition should not fail (e.g. OS request)
+ @Input		ePwrFlags : Power state change flags
 
  @Return	PVRSRV_ERROR
 
 ******************************************************************************/
 PVRSRV_ERROR PVRSRVSetDevicePowerStateKM(PPVRSRV_DEVICE_NODE	psDeviceNode,
 										 PVRSRV_DEV_POWER_STATE	eNewPowerState,
-										 IMG_BOOL				bForced,
-										 IMG_BOOL				bPreserveRam);
+										 PVRSRV_POWER_FLAGS		ePwrFlags);
 
 /*************************************************************************/ /*!
 @Function     PVRSRVSetDeviceSystemPowerState
 @Description  Set the device into a new power state based on the systems power
               state
-@Input        psDeviceNode          Device node
+@Input        psDeviceNode       Device node
 @Input        eNewSysPowerState  New system power state
+@Input        ePwrFlags          Power state change flags
 @Return       PVRSRV_ERROR       PVRSRV_OK on success or an error otherwise
 */ /**************************************************************************/
 PVRSRV_ERROR PVRSRVSetDeviceSystemPowerState(PPVRSRV_DEVICE_NODE psDeviceNode,
 											 PVRSRV_SYS_POWER_STATE eNewSysPowerState,
-											 IMG_BOOL bPreserveRam);
+											 PVRSRV_POWER_FLAGS ePwrFlags);
 
 /*!
 ******************************************************************************
@@ -160,6 +182,22 @@ PVRSRV_ERROR PVRSRVSetDeviceSystemPowerState(PPVRSRV_DEVICE_NODE psDeviceNode,
 
 ******************************************************************************/
 PVRSRV_ERROR PVRSRVSetDeviceDefaultPowerState(PCPVRSRV_DEVICE_NODE psDeviceNode,
+					PVRSRV_DEV_POWER_STATE eNewPowerState);
+
+/*!
+******************************************************************************
+
+ @Function      PVRSRVSetDeviceCurrentPowerState
+
+ @Description   Set the current device power state to eNewPowerState
+
+ @Input         psPowerDevice : Power device
+ @Input         eNewPowerState : New power state
+
+ @Return        PVRSRV_ERROR
+
+******************************************************************************/
+PVRSRV_ERROR PVRSRVSetDeviceCurrentPowerState(PVRSRV_POWER_DEV *psPowerDevice,
 					PVRSRV_DEV_POWER_STATE eNewPowerState);
 
 /*!
@@ -234,10 +272,8 @@ PVRSRV_ERROR PVRSRVRegisterPowerDevice(PPVRSRV_DEVICE_NODE				psDeviceNode,
 
  @Input		psDeviceNode : Device node
 
- @Return	PVRSRV_ERROR
-
 ******************************************************************************/
-PVRSRV_ERROR PVRSRVRemovePowerDevice(PPVRSRV_DEVICE_NODE psDeviceNode);
+void PVRSRVRemovePowerDevice(PPVRSRV_DEVICE_NODE psDeviceNode);
 
 /*!
 ******************************************************************************
@@ -406,6 +442,13 @@ PVRSRV_ERROR PVRSRVDeviceIdleCancelRequestKM(PPVRSRV_DEVICE_NODE psDeviceNode);
 PVRSRV_ERROR PVRSRVDeviceGPUUnitsPowerChange(PPVRSRV_DEVICE_NODE psDeviceNode,
 					IMG_UINT32	ui32NewValue);
 
+#if defined(PVRSRV_ENABLE_PROCESS_STATS)
+void PVRSRVSetFirmwareStartTime(PVRSRV_POWER_DEV *psPowerDevice, IMG_UINT32 ui32TimeStamp);
+
+void PVRSRVSetFirmwareHandshakeIdleTime(PVRSRV_POWER_DEV *psPowerDevice, IMG_UINT64 ui64Duration);
+
+int PVRSRVPowerStatsPrintElements(OSDI_IMPL_ENTRY *psEntry, void *pvData);
+#endif
 
 #endif /* POWER_H */
 

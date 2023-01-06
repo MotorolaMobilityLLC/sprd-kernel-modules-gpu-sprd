@@ -72,14 +72,21 @@ typedef enum _PVRSRV_SERVICES_STATE_
  *****************************************************************************
  *	States for power management
  *****************************************************************************/
+
 /*!
   System Power State Enum
  */
+
+#define _PVRSRV_SYS_POWER_STATES \
+	X(Unspecified, -1) /*!< Unspecified : Uninitialised */ \
+	X(OFF,          0) /*!< Off */ \
+	X(ON,           1) /*!< On */
+
 typedef enum _PVRSRV_SYS_POWER_STATE_
 {
-	PVRSRV_SYS_POWER_STATE_Unspecified		= -1,	/*!< Unspecified : Uninitialised */
-	PVRSRV_SYS_POWER_STATE_OFF				= 0,	/*!< Off */
-	PVRSRV_SYS_POWER_STATE_ON				= 1,	/*!< On */
+#define X(name, value) PVRSRV_SYS_POWER_STATE_##name = value,
+	_PVRSRV_SYS_POWER_STATES
+#undef X
 
 	PVRSRV_SYS_POWER_STATE_FORCE_I32 = 0x7fffffff	/*!< Force enum to be at least 32-bits wide */
 
@@ -88,35 +95,20 @@ typedef enum _PVRSRV_SYS_POWER_STATE_
 /*!
   Device Power State Enum
  */
-typedef enum _PVRSRV_DEV_POWER_STATE_
-{
-	PVRSRV_DEV_POWER_STATE_DEFAULT	= -1,	/*!< Default state for the device */
-	PVRSRV_DEV_POWER_STATE_OFF		= 0,	/*!< Unpowered */
-	PVRSRV_DEV_POWER_STATE_ON		= 1,	/*!< Running */
-
-	PVRSRV_DEV_POWER_STATE_FORCE_I32 = 0x7fffffff	/*!< Force enum to be at least 32-bits wide */
-
-} PVRSRV_DEV_POWER_STATE, *PPVRSRV_DEV_POWER_STATE;	/*!< Typedef for ptr to PVRSRV_DEV_POWER_STATE */ /* PRQA S 3205 */
-
-
-/* Power transition handler prototypes */
+typedef IMG_INT32 PVRSRV_DEV_POWER_STATE;
+typedef IMG_INT32 *PPVRSRV_DEV_POWER_STATE;	/*!< Typedef for ptr to PVRSRV_DEV_POWER_STATE */ /* PRQA S 3205 */
+#define PVRSRV_DEV_POWER_STATE_DEFAULT	-1	/*!< Default state for the device */
+#define PVRSRV_DEV_POWER_STATE_OFF		 0	/*!< Unpowered */
+#define PVRSRV_DEV_POWER_STATE_ON		 1	/*!< Running */
 
 /*!
-  Typedef for a pointer to a Function that will be called before a transition
-  from one power state to another. See also PFN_POST_POWER.
+  Power Flags Enum
  */
-typedef PVRSRV_ERROR (*PFN_PRE_POWER) (IMG_HANDLE				hDevHandle,
-									   PVRSRV_DEV_POWER_STATE	eNewPowerState,
-									   PVRSRV_DEV_POWER_STATE	eCurrentPowerState,
-									   IMG_BOOL					bForced);
-/*!
-  Typedef for a pointer to a Function that will be called after a transition
-  from one power state to another. See also PFN_PRE_POWER.
- */
-typedef PVRSRV_ERROR (*PFN_POST_POWER) (IMG_HANDLE				hDevHandle,
-										PVRSRV_DEV_POWER_STATE	eNewPowerState,
-										PVRSRV_DEV_POWER_STATE	eCurrentPowerState,
-										IMG_BOOL				bForced);
+typedef IMG_UINT32 PVRSRV_POWER_FLAGS;
+#define PVRSRV_POWER_FLAGS_NONE        0U      /*!< No flags */
+#define PVRSRV_POWER_FLAGS_FORCED      1U << 0 /*!< Power the transition should not fail */
+#define PVRSRV_POWER_FLAGS_SUSPEND_REQ 1U << 1 /*!< Power transition is due to OS suspend request */
+#define PVRSRV_POWER_FLAGS_RESUME_REQ  1U << 2 /*!< Power transition is due to OS resume request */
 
 /* Clock speed handler prototypes */
 

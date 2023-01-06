@@ -67,9 +67,11 @@ PVR_SYSTEM := rk3368
 
 # Kernel for Geekbox does not support llvm tools.
 ifeq ($(KERNEL_CC),clang)
-override KERNEL_LD :=
-override KERNEL_NM :=
-override KERNEL_OBJCOPY :=
+ ifeq ($(prefer_clang_kbuild),false)
+  override KERNEL_LD :=
+  override KERNEL_NM :=
+  override KERNEL_OBJCOPY :=
+ endif
 endif
 else
 PVR_SYSTEM := rgx_sunxi

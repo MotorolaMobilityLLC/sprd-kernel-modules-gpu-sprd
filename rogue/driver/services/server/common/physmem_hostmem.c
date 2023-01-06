@@ -158,6 +158,7 @@ PVRSRV_ERROR HostMemDeviceCreate(PVRSRV_DEVICE_NODE **ppsDeviceNode)
 	/* early save return pointer to aid clean-up */
 	*ppsDeviceNode = psDeviceNode;
 
+	psDeviceNode->sDevId.ui32InternalID = PVRSRV_HOST_DEVICE_ID;
 	psDeviceNode->psDevConfig = psDevConfig;
 	psDeviceNode->papsRegisteredPhysHeaps =
 		OSAllocZMem(sizeof(*psDeviceNode->papsRegisteredPhysHeaps) *

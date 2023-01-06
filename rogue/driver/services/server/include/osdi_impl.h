@@ -43,7 +43,17 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #ifndef OSDI_IMPL_H
 #define OSDI_IMPL_H
 
-#include <stdarg.h>
+#if defined(__linux__)
+ #include <linux/version.h>
+
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
+  #include <linux/stdarg.h>
+ #else
+  #include <stdarg.h>
+ #endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0) */
+#else
+ #include <stdarg.h>
+#endif /* __linux__ */
 
 #include "di_common.h"
 #include "pvrsrv_error.h"
@@ -52,6 +62,19 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * implementation handles. */
 typedef struct OSDI_IMPL_ENTRY_CB
 {
+    /*! @Function pfnWrite
+     *
+     * @Description
+     * Writes the binary data of the DI entry to the output sync, whatever that
+     * may be for the DI implementation.
+     *
+     * @Input pvNativeHandle native implementation handle
+     * @Input pvData data
+     * @Input uiSize pvData length
+     */
+    void (*pfnWrite)(void  *pvNativeHandle, const void *pvData,
+                     IMG_UINT32 uiSize);
+
     /*! @Function pfnVPrintf
      *
      * @Description
@@ -84,7 +107,7 @@ typedef struct OSDI_IMPL_ENTRY_CB
 } OSDI_IMPL_ENTRY_CB;
 
 /*! Debug Info entry specialisation. */
-typedef struct OSDI_IMPL_ENTRY
+struct OSDI_IMPL_ENTRY
 {
     /*! Pointer to the private data. The data originates from DICreateEntry()
      *  function. */
@@ -93,7 +116,7 @@ typedef struct OSDI_IMPL_ENTRY
     void *pvNative;
     /*! Implementation entry callbacks. */
     OSDI_IMPL_ENTRY_CB *psCb;
-} OSDI_IMPL_ENTRY;
+}; /* OSDI_IMPL_ENTRY is already typedef-ed in di_common.h */
 
 /*! Debug Info implementation callbacks. */
 typedef struct OSDI_IMPL_CB

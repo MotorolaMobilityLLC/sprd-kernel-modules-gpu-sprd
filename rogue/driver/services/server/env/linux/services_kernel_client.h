@@ -55,11 +55,14 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "pvrsrv_sync_km.h"
 #include "sync_checkpoint_external.h"
 
+/* included for the define PVRSRV_LINUX_DEV_INIT_ON_PROBE */
+#include "pvr_drm.h"
+
 #ifndef __pvrsrv_defined_struct_enum__
 
 /* sync_external.h */
 
-struct PVRSRV_CLIENT_SYNC_PRIM {
+struct PVRSRV_CLIENT_SYNC_PRIM_TAG {
 	volatile __u32 *pui32LinAddr;
 };
 
@@ -72,17 +75,15 @@ struct PVRSRV_CLIENT_SYNC_PRIM_OP {
 
 #else /* __pvrsrv_defined_struct_enum__ */
 
-struct PVRSRV_CLIENT_SYNC_PRIM;
+struct PVRSRV_CLIENT_SYNC_PRIM_TAG;
 struct PVRSRV_CLIENT_SYNC_PRIM_OP;
-
-enum tag_img_bool;
 
 #endif /* __pvrsrv_defined_struct_enum__ */
 
 struct _PMR_;
 struct _PVRSRV_DEVICE_NODE_;
 struct dma_buf;
-struct SYNC_PRIM_CONTEXT;
+struct SYNC_PRIM_CONTEXT_TAG;
 
 /* pvr_notifier.h */
 
@@ -97,13 +98,15 @@ void PVRSRVCheckStatus(void *hCmdCompCallerHandle);
 
 #define DEBUG_REQUEST_DC               0
 #define DEBUG_REQUEST_SYNCTRACKING     1
-#define DEBUG_REQUEST_SYS              2
-#define DEBUG_REQUEST_ANDROIDSYNC      3
-#define DEBUG_REQUEST_LINUXFENCE       4
-#define DEBUG_REQUEST_SYNCCHECKPOINT   5
-#define DEBUG_REQUEST_HTB              6
-#define DEBUG_REQUEST_APPHINT          7
-#define DEBUG_REQUEST_FALLBACKSYNC     8
+#define DEBUG_REQUEST_SRV              2
+#define DEBUG_REQUEST_SYS              3
+#define DEBUG_REQUEST_RGX              4
+#define DEBUG_REQUEST_ANDROIDSYNC      5
+#define DEBUG_REQUEST_LINUXFENCE       6
+#define DEBUG_REQUEST_SYNCCHECKPOINT   7
+#define DEBUG_REQUEST_HTB              8
+#define DEBUG_REQUEST_APPHINT          9
+#define DEBUG_REQUEST_FALLBACKSYNC     10
 
 #define DEBUG_REQUEST_VERBOSITY_LOW    0
 #define DEBUG_REQUEST_VERBOSITY_MEDIUM 1
@@ -121,12 +124,17 @@ typedef void (*PFN_DBGREQ_NOTIFY) (void *hDebugRequestHandle,
 	void *pvDumpDebugFile);
 #define DBGNOTIFY_PFNS
 #endif
-enum PVRSRV_ERROR_TAG PVRSRVRegisterDbgRequestNotify(void **phNotify,
+enum PVRSRV_ERROR_TAG PVRSRVRegisterDeviceDbgRequestNotify(void **phNotify,
 	struct _PVRSRV_DEVICE_NODE_ *psDevNode,
 	PFN_DBGREQ_NOTIFY pfnDbgRequestNotify,
 	__u32 ui32RequesterID,
 	void *hDbgRequestHandle);
-enum PVRSRV_ERROR_TAG PVRSRVUnregisterDbgRequestNotify(void *hNotify);
+enum PVRSRV_ERROR_TAG PVRSRVUnregisterDeviceDbgRequestNotify(void *hNotify);
+enum PVRSRV_ERROR_TAG PVRSRVRegisterDriverDbgRequestNotify(void **phNotify,
+	PFN_DBGREQ_NOTIFY pfnDbgRequestNotify,
+	__u32 ui32RequesterID,
+	void *hDbgRequestHandle);
+enum PVRSRV_ERROR_TAG PVRSRVUnregisterDriverDbgRequestNotify(void *hNotify);
 
 /* physmem_dmabuf.h */
 
@@ -141,14 +149,14 @@ enum PVRSRV_ERROR_TAG PVRSRVReleaseGlobalEventObjectKM(void *hGlobalEventObject)
 
 enum PVRSRV_ERROR_TAG SyncPrimContextCreate(
 	struct _PVRSRV_DEVICE_NODE_ *psDevConnection,
-	struct SYNC_PRIM_CONTEXT **phSyncPrimContext);
-void SyncPrimContextDestroy(struct SYNC_PRIM_CONTEXT *hSyncPrimContext);
+	struct SYNC_PRIM_CONTEXT_TAG **phSyncPrimContext);
+void SyncPrimContextDestroy(struct SYNC_PRIM_CONTEXT_TAG *hSyncPrimContext);
 
-enum PVRSRV_ERROR_TAG SyncPrimAlloc(struct SYNC_PRIM_CONTEXT *hSyncPrimContext,
-	struct PVRSRV_CLIENT_SYNC_PRIM **ppsSync, const char *pszClassName);
-enum PVRSRV_ERROR_TAG SyncPrimFree(struct PVRSRV_CLIENT_SYNC_PRIM *psSync);
+enum PVRSRV_ERROR_TAG SyncPrimAlloc(struct SYNC_PRIM_CONTEXT_TAG *hSyncPrimContext,
+	struct PVRSRV_CLIENT_SYNC_PRIM_TAG **ppsSync, const char *pszClassName);
+enum PVRSRV_ERROR_TAG SyncPrimFree(struct PVRSRV_CLIENT_SYNC_PRIM_TAG *psSync);
 enum PVRSRV_ERROR_TAG SyncPrimGetFirmwareAddr(
-	struct PVRSRV_CLIENT_SYNC_PRIM *psSync,
+	struct PVRSRV_CLIENT_SYNC_PRIM_TAG *psSync,
 	__u32 *sync_addr);
 
 /* osfunc.h */
@@ -166,7 +174,7 @@ enum PVRSRV_ERROR_TAG PVRSRVCommonDeviceCreate(void *pvOSDevice,
 enum PVRSRV_ERROR_TAG PVRSRVCommonDeviceDestroy(
 	struct _PVRSRV_DEVICE_NODE_ *psDeviceNode);
 const char *PVRSRVGetErrorString(enum PVRSRV_ERROR_TAG eError);
-#if defined(SUPPORT_FWLOAD_ON_PROBE)
+#if (PVRSRV_DEVICE_INIT_MODE == PVRSRV_LINUX_DEV_INIT_ON_PROBE)
 enum PVRSRV_ERROR_TAG PVRSRVCommonDeviceInitialise(
 	struct _PVRSRV_DEVICE_NODE_ *psDeviceNode);
 #endif
@@ -176,6 +184,7 @@ typedef PVRSRV_ERROR (*PFN_SYNC_CHECKPOINT_FENCE_RESOLVE_FN)(PSYNC_CHECKPOINT_CO
 
 #ifndef CHECKPOINT_PFNS
 typedef PVRSRV_ERROR (*PFN_SYNC_CHECKPOINT_FENCE_CREATE_FN)(
+		struct _PVRSRV_DEVICE_NODE_ *device,
 		const char *fence_name,
 		PVRSRV_TIMELINE timeline,
 		PSYNC_CHECKPOINT_CONTEXT psSyncCheckpointContext,
@@ -200,7 +209,7 @@ typedef __u32 (*PFN_SYNC_CHECKPOINT_DUMP_INFO_ON_STALLED_UFOS_FN)(__u32 num_ufos
 #endif
 
 #ifndef CHECKPOINT_PFNS
-typedef enum tag_img_bool (*PFN_SYNC_CHECKPOINT_UFO_HAS_SIGNALLED_FN)(
+typedef bool (*PFN_SYNC_CHECKPOINT_UFO_HAS_SIGNALLED_FN)(
 	__u32 ui32FwAddr, __u32 ui32Value);
 typedef enum PVRSRV_ERROR_TAG (*PFN_SYNC_CHECKPOINT_SIGNAL_WAITERS_FN)(void);
 typedef void(*PFN_SYNC_CHECKPOINT_CHECK_STATE_FN)(void);
@@ -249,8 +258,8 @@ void SyncCheckpointContextUnref(PSYNC_CHECKPOINT_CONTEXT psContext);
 enum PVRSRV_ERROR_TAG SyncCheckpointAlloc(PSYNC_CHECKPOINT_CONTEXT psSyncContext, PVRSRV_TIMELINE timeline, PVRSRV_FENCE fence, const char *pszCheckpointName, PSYNC_CHECKPOINT *ppsSyncCheckpoint);
 void SyncCheckpointSignal(PSYNC_CHECKPOINT psSyncCheckpoint, u32 fence_sync_flags);
 void SyncCheckpointError(PSYNC_CHECKPOINT psSyncCheckpoint, u32 fence_sync_flags);
-enum tag_img_bool SyncCheckpointIsSignalled(PSYNC_CHECKPOINT psSyncCheckpoint, u32 fence_sync_flags);
-enum tag_img_bool SyncCheckpointIsErrored(PSYNC_CHECKPOINT psSyncCheckpoint, u32 fence_sync_flags);
+bool SyncCheckpointIsSignalled(PSYNC_CHECKPOINT psSyncCheckpoint, u32 fence_sync_flags);
+bool SyncCheckpointIsErrored(PSYNC_CHECKPOINT psSyncCheckpoint, u32 fence_sync_flags);
 enum PVRSRV_ERROR_TAG SyncCheckpointTakeRef(PSYNC_CHECKPOINT psSyncCheckpoint);
 enum PVRSRV_ERROR_TAG SyncCheckpointDropRef(PSYNC_CHECKPOINT psSyncCheckpoint);
 void SyncCheckpointFree(PSYNC_CHECKPOINT psSyncCheckpoint);
@@ -261,7 +270,20 @@ __u32 SyncCheckpointGetEnqueuedCount(PSYNC_CHECKPOINT psSyncCheckpoint);
 __u32 SyncCheckpointGetReferenceCount(PSYNC_CHECKPOINT psSyncCheckpoint);
 PVRSRV_TIMELINE SyncCheckpointGetTimeline(PSYNC_CHECKPOINT psSyncCheckpoint);
 const char *SyncCheckpointGetStateString(PSYNC_CHECKPOINT psSyncCheckpoint);
+#if defined(SUPPORT_NATIVE_FENCE_SYNC)
+struct _PVRSRV_DEVICE_NODE_ *SyncCheckpointGetAssociatedDevice(PSYNC_CHECKPOINT_CONTEXT psSyncCheckpointContext);
+#endif
 
+#endif
+
+#if defined(SUPPORT_NATIVE_FENCE_SYNC) || defined(SUPPORT_BUFFER_SYNC)
+/*************************************************************************/ /*!
+@Function       NativeSyncGetFenceStatusWq
+@Description    Called to get the Foreign Fence status workqueue used in
+                Fence sync and Buffer sync.
+@Return         struct workqueue_struct ptr on success, NULL otherwise.
+*/ /**************************************************************************/
+struct workqueue_struct *NativeSyncGetFenceStatusWq(void);
 #endif
 
 #endif /* __SERVICES_KERNEL_CLIENT__ */

@@ -48,7 +48,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #endif
 
 #define IMG_EXPLICIT_INCLUDE_HWDEFS
-#if defined(__KERNEL__)
+#if defined(__KERNEL__) || defined(SUPPORT_SERVICES_SC_UNITTESTS_SERVER)
 #include "rgx_cr_defs_km.h"
 #endif
 #undef IMG_EXPLICIT_INCLUDE_HWDEFS
@@ -81,7 +81,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define RGX_BVNC_KM_V_ST	RGX_BVNC_KM_ST(RGX_BVNC_KM_V)
 
 /* Maximum string size is [bb.vvvp.nnnn.cccc\0], includes null char */
-#define RGX_BVNC_STR_SIZE_MAX (2+1+4+1+4+1+4+1)
+#define RGX_BVNC_STR_SIZE_MAX (2U+1U+4U+1U+4U+1U+4U+1U)
 #define RGX_BVNC_STR_FMTSPEC  "%u.%u.%u.%u"
 #define RGX_BVNC_STRP_FMTSPEC "%u.%up.%u.%u"
 
@@ -90,8 +90,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * RGX Defines
  *****************************************************************************/
 
-#define BVNC_FIELD_MASK     ((1 << BVNC_FIELD_WIDTH) - 1)
-#define C_POSITION          (0)
+#define BVNC_FIELD_MASK     ((1UL << BVNC_FIELD_WIDTH) - 1U)
+#define C_POSITION          (0U)
 #define N_POSITION          ((C_POSITION) + (BVNC_FIELD_WIDTH))
 #define V_POSITION          ((N_POSITION) + (BVNC_FIELD_WIDTH))
 #define B_POSITION          ((V_POSITION) + (BVNC_FIELD_WIDTH))
@@ -126,10 +126,10 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define RGXFW_THREAD_1                                    (1U)
 
 /* META cores (required for the RGX_FEATURE_META) */
-#define MTP218   (1)
-#define MTP219   (2)
-#define LTP218   (3)
-#define LTP217   (4)
+#define MTP218   (1U)
+#define MTP219   (2U)
+#define LTP218   (3U)
+#define LTP217   (4U)
 
 /* META Core memory feature depending on META variants */
 #define RGX_META_COREMEM_32K      (32*1024)
@@ -157,10 +157,14 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #endif
 #endif
 
-#define GET_ROGUE_CACHE_LINE_SIZE(x)    ((((IMG_INT32)(x)) > 0) ? ((x)/8) : (0))
+#define GET_ROGUE_CACHE_LINE_SIZE(x)    ((((IMG_UINT32)(x)) > 0U) ? ((IMG_UINT32)(x)/8U) : (0U))
 
 
+#if defined(SUPPORT_AGP)
+#define MAX_HW_TA3DCONTEXTS	3U
+#else
 #define MAX_HW_TA3DCONTEXTS	2U
+#endif
 
 #define RGX_CR_CLK_CTRL_ALL_ON          (IMG_UINT64_C(0x5555555555555555)&RGX_CR_CLK_CTRL_MASKFULL)
 #define RGX_CR_CLK_CTRL_ALL_AUTO        (IMG_UINT64_C(0xaaaaaaaaaaaaaaaa)&RGX_CR_CLK_CTRL_MASKFULL)
@@ -207,10 +211,10 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 
 #define RGX_BIF_PM_PHYSICAL_PAGE_ALIGNSHIFT		(12U)
-#define RGX_BIF_PM_PHYSICAL_PAGE_SIZE			(1U << RGX_BIF_PM_PHYSICAL_PAGE_ALIGNSHIFT)
+#define RGX_BIF_PM_PHYSICAL_PAGE_SIZE			(1UL << RGX_BIF_PM_PHYSICAL_PAGE_ALIGNSHIFT)
 
 #define RGX_BIF_PM_VIRTUAL_PAGE_ALIGNSHIFT		(14U)
-#define RGX_BIF_PM_VIRTUAL_PAGE_SIZE			(1U << RGX_BIF_PM_VIRTUAL_PAGE_ALIGNSHIFT)
+#define RGX_BIF_PM_VIRTUAL_PAGE_SIZE			(1UL << RGX_BIF_PM_VIRTUAL_PAGE_ALIGNSHIFT)
 
 #define RGX_BIF_PM_FREELIST_BASE_ADDR_ALIGNSIZE	(16U)
 
@@ -243,11 +247,11 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * FW MMU contexts
  */
 #if defined(SUPPORT_TRUSTED_DEVICE) && defined(RGX_FEATURE_META)
-#define MMU_CONTEXT_MAPPING_FWPRIV (0x0) /* FW code/private data */
-#define MMU_CONTEXT_MAPPING_FWIF   (0x7) /* Host/FW data */
+#define MMU_CONTEXT_MAPPING_FWPRIV (0x0U) /* FW code/private data */
+#define MMU_CONTEXT_MAPPING_FWIF   (0x7U) /* Host/FW data */
 #else
-#define MMU_CONTEXT_MAPPING_FWPRIV (0x0)
-#define MMU_CONTEXT_MAPPING_FWIF   (0x0)
+#define MMU_CONTEXT_MAPPING_FWPRIV (0x0U)
+#define MMU_CONTEXT_MAPPING_FWIF   (0x0U)
 #endif
 
 
@@ -322,6 +326,12 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define RGX_VIRTUALISATION_REG_SIZE_PER_OS (RGX_CR_MTS_SCHEDULE1 - RGX_CR_MTS_SCHEDULE)
 
 /*
+ * Register Bank containing registers secured against host access
+ */
+#define RGX_HOST_SECURE_REGBANK_OFFSET				(0xF0000U)
+#define RGX_HOST_SECURE_REGBANK_SIZE				(0x10000U)
+
+/*
  * Macro used to indicate which version of HWPerf is active
  */
 #define RGX_FEATURE_HWPERF_ROGUE
@@ -330,5 +340,10 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * Maximum number of cores supported by TRP
  */
 #define RGX_TRP_MAX_NUM_CORES                           (4U)
+
+/*
+ * Maximum number of cores supported by WGP
+ */
+#define RGX_WGP_MAX_NUM_CORES                           (8U)
 
 #endif /* RGXDEFS_KM_H */

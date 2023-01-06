@@ -123,12 +123,21 @@ static int pvr_devices_register(void)
 	};
 	unsigned int i;
 
+//	DRM_ERROR("%s %d: ericyin pvr_num_devices:%u, MAX_DEVICES:%u\n",
+//			__func__, __LINE__, pvr_num_devices, MAX_DEVICES);
 	BUG_ON(pvr_num_devices == 0 || pvr_num_devices > MAX_DEVICES);
 
 	pvr_devices = kmalloc_array(pvr_num_devices, sizeof(*pvr_devices),
 				    GFP_KERNEL);
 	if (!pvr_devices)
+//	{
+//		DRM_ERROR("%s %d: ericyin -ENOMEM\n", __func__, __LINE__);
 		return -ENOMEM;
+//	}
+//	else
+//	{
+//		DRM_ERROR("%s %d: ericyin succeed\n", __func__, __LINE__);
+//	}
 
 	for (i = 0; i < pvr_num_devices; i++) {
 		pvr_devices[i] = platform_device_register_full(&pvr_dev_info);
@@ -138,8 +147,14 @@ static int pvr_devices_register(void)
 			pvr_devices[i] = NULL;
 			return -ENODEV;
 		}
+//		else
+//		{
+//			DRM_ERROR("%s %d: ericyin register device OK???\n", __func__, __LINE__);
+//		}
 	}
 #endif /* defined(MODULE) && !defined(PVR_LDM_PLATFORM_PRE_REGISTERED) */
+
+//	DRM_ERROR("%s %d: ericyin exit OK\n", __func__, __LINE__);
 
 	return 0;
 }
@@ -166,14 +181,22 @@ static int pvr_probe(struct platform_device *pdev)
 	int ret;
 
 	DRM_DEBUG_DRIVER("device %p\n", &pdev->dev);
+//	DRM_ERROR("%s, %d: ericyin enter, LINUX_VERSION_CODE >= 3.18.0, device %p\n",
+//			__func__, __LINE__, &pdev->dev);
 
 	ddev = drm_dev_alloc(&pvr_drm_platform_driver, &pdev->dev);
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0))
 	if (IS_ERR(ddev))
+//	{
+//		DRM_ERROR("%s, %d: ericyin failed\n", __func__, __LINE__);
 		return PTR_ERR(ddev);
+//	}
 #else
 	if (!ddev)
+//	{
+//		DRM_ERROR("%s, %d: ericyin failed\n", __func__, __LINE__);
 		return -ENOMEM;
+//	}
 #endif
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 5, 0))
@@ -181,6 +204,16 @@ static int pvr_probe(struct platform_device *pdev)
 	ddev->platformdev = pdev;
 #endif
 
+/*
+	if (pvr_drm_platform_driver.load != NULL)
+	{
+		DRM_ERROR("%s, %d: ericyin pvr_drm_platform_driver.load != NULL\n", __func__, __LINE__);
+	}
+	else
+	{
+		DRM_ERROR("%s, %d: ericyin pvr_drm_platform_driver.load = NULL\n", __func__, __LINE__);
+	}
+*/
 	/*
 	 * The load callback, called from drm_dev_register, is deprecated,
 	 * because of potential race conditions. Calling the function here,
@@ -189,11 +222,25 @@ static int pvr_probe(struct platform_device *pdev)
 	BUG_ON(pvr_drm_platform_driver.load != NULL);
 	ret = pvr_drm_load(ddev, 0);
 	if (ret)
+//	{
+//		DRM_ERROR("%s, %d: ericyin pvr_drm_load failed\n", __func__, __LINE__);
 		goto err_drm_dev_put;
+//	}
+//	else
+//	{
+//		DRM_ERROR("%s, %d: ericyin OK???\n", __func__, __LINE__);
+//	}
 
 	ret = drm_dev_register(ddev, 0);
 	if (ret)
+//	{
+//		DRM_ERROR("%s, %d: ericyin drm_dev_register failed\n", __func__, __LINE__);
 		goto err_drm_dev_unload;
+//	}
+//	else
+//	{
+//		DRM_ERROR("%s, %d: ericyin OK???\n", __func__, __LINE__);
+//	}
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 11, 0))
 	DRM_INFO("Initialized %s %d.%d.%d %s on minor %d\n",
@@ -213,6 +260,8 @@ err_drm_dev_put:
 	return	ret;
 #else
 	DRM_DEBUG_DRIVER("device %p\n", &pdev->dev);
+//	DRM_ERROR("%s, %d: ericyin enter, LINUX_VERSION_CODE < 3.18.0, device %p\n",
+//			__func__, __LINE__, &pdev->dev);
 
 	return drm_platform_init(&pvr_drm_platform_driver, pdev);
 #endif
@@ -223,6 +272,7 @@ static int pvr_remove(struct platform_device *pdev)
 	struct drm_device *ddev = platform_get_drvdata(pdev);
 
 	DRM_DEBUG_DRIVER("device %p\n", &pdev->dev);
+//	DRM_ERROR("ericyin enter, device %p\n", &pdev->dev);
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 18, 0))
 	drm_dev_unregister(ddev);
@@ -243,11 +293,11 @@ static int pvr_remove(struct platform_device *pdev)
 static void pvr_shutdown(struct platform_device *pdev)
 {
 	struct drm_device *ddev = platform_get_drvdata(pdev);
-	struct pvr_drm_private *priv = ddev->dev_private;
 
 	DRM_DEBUG_DRIVER("device %p\n", &pdev->dev);
+//	DRM_ERROR("ericyin enter, device %p\n", &pdev->dev);
 
-	PVRSRVDeviceShutdown(priv->dev_node);
+	PVRSRVDeviceShutdown(ddev);
 }
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 9, 0))
@@ -293,6 +343,22 @@ static int __init pvr_init(void)
 	int err;
 
 	DRM_DEBUG_DRIVER("\n");
+//	DRM_ERROR("ericyin pvr_init enter\n");
+//	DRM_ERROR("ericyin LINUX_VERSION_CODE:%d\n", LINUX_VERSION_CODE);
+/*
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 18, 0))
+	DRM_ERROR("ericyin LINUX_VERSION_CODE >= 3.18.0\n");
+#endif
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 5, 0))
+	DRM_ERROR("ericyin LINUX_VERSION_CODE >= 4.5.0\n");
+#endif
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))
+	DRM_ERROR("ericyin LINUX_VERSION_CODE >= 5.4.0\n");
+#endif
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0))
+	DRM_ERROR("ericyin LINUX_VERSION_CODE >= 5.15.0\n");
+#endif
+*/
 
 	pvr_drm_platform_driver = pvr_drm_generic_driver;
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 18, 0)) && \
@@ -302,14 +368,29 @@ static int __init pvr_init(void)
 
 	err = PVRSRVDriverInit();
 	if (err)
+//	{
+//		DRM_ERROR("ericyin pvr_init 1 PVRSRVDriverInit failed\n");
 		return err;
+//	}
+//	else
+//	{
+//		DRM_ERROR("ericyin pvr_init 1 PVRSRVDriverInit OK???\n");
+//	}
 
 	err = platform_driver_register(&pvr_platform_driver);
 	if (err)
+//	{
+//		DRM_ERROR("ericyin pvr_init 2 platform_driver_register failed\n");
 		return err;
+//	}
+//	else
+//	{
+//		DRM_ERROR("ericyin pvr_init 2 platform_driver_register OK???\n");
+//	}
 
-	// return pvr_devices_register();
+	//return pvr_devices_register();
 	return err;
+
 }
 
 static void __exit pvr_exit(void)
@@ -321,6 +402,7 @@ static void __exit pvr_exit(void)
 	PVRSRVDriverDeinit();
 
 	DRM_DEBUG_DRIVER("done\n");
+//	DRM_ERROR("ericyin pvr_exit done\n");
 }
 
 late_initcall(pvr_init);

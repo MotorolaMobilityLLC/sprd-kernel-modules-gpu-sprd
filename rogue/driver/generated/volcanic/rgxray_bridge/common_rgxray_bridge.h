@@ -67,11 +67,13 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 /* Bridge in structure for RGXCreateRayContext */
 typedef struct PVRSRV_BRIDGE_IN_RGXCREATERAYCONTEXT_TAG
 {
+	IMG_UINT64 ui64RobustnessAddress;
 	IMG_HANDLE hPrivData;
 	IMG_BYTE *pui8sStaticRayContextState;
+	IMG_INT32 i32Priority;
 	IMG_UINT32 ui32ContextFlags;
+	IMG_UINT32 ui32MaxDeadlineMS;
 	IMG_UINT32 ui32StaticRayContextStateSize;
-	IMG_UINT32 ui32ui32Priority;
 } __packed PVRSRV_BRIDGE_IN_RGXCREATERAYCONTEXT;
 
 /* Bridge out structure for RGXCreateRayContext */
@@ -104,6 +106,7 @@ typedef struct PVRSRV_BRIDGE_OUT_RGXDESTROYRAYCONTEXT_TAG
 /* Bridge in structure for RGXKickRDM */
 typedef struct PVRSRV_BRIDGE_IN_RGXKICKRDM_TAG
 {
+	IMG_UINT64 ui64ui64DeadlineInus;
 	IMG_HANDLE hRayContext;
 	IMG_UINT32 *pui32ClientUpdateOffset;
 	IMG_UINT32 *pui32ClientUpdateValue;
@@ -112,11 +115,12 @@ typedef struct PVRSRV_BRIDGE_IN_RGXKICKRDM_TAG
 	IMG_HANDLE *phClientUpdateUFOSyncPrimBlock;
 	PVRSRV_FENCE hCheckFenceFd;
 	PVRSRV_TIMELINE hUpdateTimeline;
-	IMG_UINT32 ui32ClientCacheOpSeqNum;
 	IMG_UINT32 ui32ClientUpdateCount;
 	IMG_UINT32 ui32CmdSize;
 	IMG_UINT32 ui32ExtJobRef;
 	IMG_UINT32 ui32PDumpFlags;
+	IMG_UINT32 ui32ui32AccStructSizeInBytes;
+	IMG_UINT32 ui32ui32DispatchSize;
 } __packed PVRSRV_BRIDGE_IN_RGXKICKRDM;
 
 /* Bridge out structure for RGXKickRDM */

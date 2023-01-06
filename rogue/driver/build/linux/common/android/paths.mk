@@ -54,7 +54,7 @@ endif
 
 OUT_DIR ?= $(ANDROID_ROOT)/out
 
-LLVM_LIB_VERSION = 90
+LLVM_LIB_VERSION = 100
 
 # If this is an NDK build, set it up to use a VNDK platform/sysroot from the
 # OUT_DIR, if a suitable directory exists in the default location. The user

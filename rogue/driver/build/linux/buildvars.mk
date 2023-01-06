@@ -275,12 +275,12 @@ ALL_HOST_CFLAGS := \
 # User C++ only
 #
 ALL_CXXFLAGS := \
- -std=gnu++11 \
+ -std=gnu++1y \
  -fno-rtti -fno-exceptions \
  $(COMMON_USER_FLAGS) $(COMMON_FLAGS) $(TESTED_TARGET_USER_FLAGS) \
  $(SYS_CXXFLAGS)
 ALL_HOST_CXXFLAGS := \
- -std=gnu++11 \
+ -std=gnu++1y \
  -fno-rtti -fno-exceptions \
  $(COMMON_USER_FLAGS) $(COMMON_FLAGS) $(TESTED_HOST_USER_FLAGS)
 
@@ -293,7 +293,11 @@ endif
 #
 ifeq ($(cc-is-clang),true)
 __clang_bindir  := $(dir $(shell which clang))
-__clang_version := $(shell clang --version | grep -P -o '(?<=clang version )([0-9][^ ]+)')
+#$(warning __clang_version:$(__clang_version))
+$(warning shell clang --version:$(shell clang --version))
+#__clang_version := $(shell clang --version | grep -P -o '(?<=clang version )([0-9][^ ]+)')
+__clang_version := 14.0.7
+$(warning __clang_version:$(__clang_version))
 __clang_major := $(shell echo $(__clang_version) | cut -f1 -d'.')
 __clang_minor := $(shell echo $(__clang_version) | cut -f2 -d'.')
 ifneq ($(filter -O0,$(ALL_CFLAGS)),)
@@ -305,6 +309,8 @@ ALL_CFLAGS := $(patsubst -O0,-O1,$(ALL_CFLAGS))
 ALL_CXXFLAGS := $(patsubst -O0,-O1,$(ALL_CXXFLAGS))
 endif
 endif
+# Add check for clang >= 13
+__clang_ge_13 := $(shell ((test $(__clang_major) -ge 13) && echo 1 || echo 0))
 endif
 
 # Add GCOV_DIR just for target

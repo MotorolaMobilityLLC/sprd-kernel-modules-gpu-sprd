@@ -60,6 +60,11 @@
 #include "drm_pdp_drv.h"
 #include "pvr_dma_resv.h"
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0))
+extern const struct drm_gem_object_funcs pdp_gem_funcs;
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0) */
+extern const struct vm_operations_struct pdp_gem_vm_ops;
+
 struct pdp_gem_private;
 
 struct pdp_gem_object {
@@ -85,7 +90,8 @@ struct pdp_gem_object {
 
 #define to_pdp_obj(obj) container_of(obj, struct pdp_gem_object, base)
 
-struct pdp_gem_private *pdp_gem_init(struct drm_device *dev);
+struct pdp_gem_private *pdp_gem_init(struct drm_device *dev,
+				     unsigned int instance);
 
 void pdp_gem_cleanup(struct pdp_gem_private *dev_priv);
 
@@ -109,6 +115,8 @@ struct drm_gem_object *pdp_gem_object_create(struct drm_device *dev,
 
 void pdp_gem_object_free_priv(struct pdp_gem_private *gem_priv,
 			      struct drm_gem_object *obj);
+
+void pdp_gem_object_free(struct drm_gem_object *obj);
 
 struct dma_buf *pdp_gem_prime_export(
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0))
@@ -146,5 +154,8 @@ int pdp_gem_object_vm_fault(struct vm_area_struct *vma, struct vm_fault *vmf);
 /* internal interfaces */
 struct dma_resv *pdp_gem_get_resv(struct drm_gem_object *obj);
 u64 pdp_gem_get_dev_addr(struct drm_gem_object *obj);
+
+/* functions provided by clients of PDP GEM */
+struct pdp_gem_private *pdp_gem_get_private(struct drm_device *dev);
 
 #endif /* !defined(__DRM_PDP_GEM_H__) */
