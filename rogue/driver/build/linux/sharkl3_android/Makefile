@@ -1,8 +1,8 @@
 $(warning BSP_SYSTEM_VERSION: $(BSP_SYSTEM_VERSION))
-ifeq ($(BSP_SYSTEM_VERSION), sharkl5)
-$(warning Now building GPU ko for sharkl5 ... ...)
+ifeq ($(BSP_SYSTEM_VERSION), sharkl3)
+$(warning Now building GPU ko for sharkl3 ... ...)
 # pvrsrvkm.o
-CURRENT_PATH := $(shell cd $(BSP_ROOT_DIR)/modules/kernel5.15/gpu/rogue/driver/build/linux/sharkl5_android; pwd)#$(MAKEFILE_PATH)/rogue/driver/build/linux/sharkl5_android
+CURRENT_PATH := $(shell cd $(BSP_ROOT_DIR)/modules/kernel5.15/gpu/rogue/driver/build/linux/sharkl3_android; pwd)#$(MAKEFILE_PATH)/rogue/driver/build/linux/sharkl3_android
 
 $(warning CURRENT_PATH: $(CURRENT_PATH))
 $(warning BSP_PRODUCT_NAME: $(BSP_PRODUCT_NAME))
@@ -31,7 +31,7 @@ ANDROID_ROOT := $(ANDROID_BUILD_TOP)
 export KERNEL_PATH := kernel5.15
 TARGET_KERNEL_ARCH := $(BSP_BOARD_ARCH)
 PRODUCT_OUT := $(BSP_ROOT_DIR)
-MALI_PLATFORM_NAME := sharkl5
+MALI_PLATFORM_NAME := sharkl3
 export PVRSRV_APPHINT_HWRDEBUGDUMPLIMIT := 4
 export HOST_CC := clang
 export HOST_CXX := clang++
@@ -172,9 +172,9 @@ clean:
 else
 .PHONY:modules
 modules:
-	echo "--skip sharkl5 pvrsrvkm modules--"
+	echo "--skip sharkl3 pvrsrvkm modules--"
 modules_install:
-	echo "--skip sharkl5 pvrsrvkm modules_install--"
+	echo "--skip sharkl3 pvrsrvkm modules_install--"
 clean:
-	echo "--skip sharkl5 pvrsrvkm clean--"
+	echo "--skip sharkl3 pvrsrvkm clean--"
 endif

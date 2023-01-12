@@ -55,6 +55,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #endif
 #include "sprd_init.h"
 #include <linux/dma-mapping.h>
+#include "rgxtimecorr.h"
+#include "rgxdebug.h"
 
 static RGX_TIMING_INFORMATION	gsRGXTimingInfo;
 static RGX_DATA					gsRGXData;
@@ -155,7 +157,7 @@ PVRSRV_ERROR SysDevInit(void *pvOSDevice, PVRSRV_DEVICE_CONFIG **ppsDevConfig)
 	/* Device's physical heaps */
 	gsDevices[0].pasPhysHeaps = gsPhysHeapConfig;
 	gsDevices[0].ui32PhysHeapCount = ARRAY_SIZE(gsPhysHeapConfig);
-
+	gsDevices[0].eDefaultHeap = PVRSRV_PHYS_HEAP_GPU_LOCAL;
 	/* No clock frequency either */
 	gsDevices[0].pfnClockFreqGet        = NULL;
 
@@ -229,11 +231,25 @@ PVRSRV_ERROR SysDebugInfo(PVRSRV_DEVICE_CONFIG *psDevConfig,
 				DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,
 				void *pvDumpDebugFile)
 {
+#if defined(NO_HARDWARE)
 	PVR_UNREFERENCED_PARAMETER(psDevConfig);
 	PVR_UNREFERENCED_PARAMETER(pfnDumpDebugPrintf);
 	PVR_UNREFERENCED_PARAMETER(pvDumpDebugFile);
 	return PVRSRV_OK;
+#else
+	PVRSRV_ERROR            eError;
+	IMG_CHAR *pszName;
+
+	pszName = psDevConfig->pszName;
+	PVR_DUMPDEBUG_LOG("------[ rgx_GPU %s Cur_FREQ and PMU_REG_STATE ]------",pszName);
+	eError = RGXDebugPrintGpuCurrentFreq(psDevConfig, pfnDumpDebugPrintf, pvDumpDebugFile);
+	GetGpuPowClkState(psDevConfig->psDevNode, pfnDumpDebugPrintf, pvDumpDebugFile);
+
+	return eError;
+
+#endif
 }
+
 
 /******************************************************************************
  End of file (sysconfig.c)

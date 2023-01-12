@@ -65,6 +65,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include <linux/smp.h>
 #include <trace/events/power.h>
+#include "rgxdebug.h"
 #define VENDOR_FTRACE_MODULE_NAME    "unisoc-gpu"
 
 //#define CREATE_TRACE_POINTS
@@ -81,6 +82,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define GPU_UP_THRESHOLD        40
 #define GPU_DOWN_DIFFERENTIAL   5
 #endif
+
+#define MOVE_BIT_LEFT(x,n) ((unsigned long)x << n)
 
 #if defined(PVR_BOOST)
 int gpu_boost_level = 0;
@@ -131,6 +134,9 @@ struct gpu_dvfs_context {
 	struct gpu_reg_info top_force_reg;
 	struct gpu_reg_info core_force_reg;
 	struct gpu_reg_info core_auto_reg;
+	struct gpu_reg_info gpu_top_state_reg;
+	struct gpu_reg_info gpu_core_state_reg;
+	struct gpu_reg_info clk_gpu_eb_reg;
 #endif
 };
 
@@ -142,6 +148,114 @@ static struct gpu_dvfs_context gpu_dvfs_ctx=
 
 	.sem=&gpu_dvfs_sem,
 };
+
+
+u32 top_force = 0;
+u32 core_force = 0;
+u32 top_pwr = 0;
+u32 core_pwr = 0;
+u32 clk_gpu_eb_pwr = 0;
+
+const u32 top_force_mask = MOVE_BIT_LEFT(1,25);
+const u32 core_force_mask = MOVE_BIT_LEFT(1,25);
+const u32 top_pwr_mask = MOVE_BIT_LEFT(0x1f,22);
+const u32 core_pwr_mask = MOVE_BIT_LEFT(0x1f,5);
+const u32 clk_gpu_eb_mask = MOVE_BIT_LEFT(0x1,0);
+
+
+const u32 top_force_pwr_on = MOVE_BIT_LEFT(0,25);
+const u32 core_force_pwr_on = MOVE_BIT_LEFT(0,25);
+const u32 top_pwr_on = MOVE_BIT_LEFT(0,22);
+const u32 top_pwr_ing = MOVE_BIT_LEFT(6,22);
+const u32 core_pwr_ing =  MOVE_BIT_LEFT(0xf,5);
+const u32 core_pwr_on = MOVE_BIT_LEFT(0,5);
+const u32 clk_gpu_eb_on = MOVE_BIT_LEFT(0x1,0);
+
+void GetGpuPowClkState(PVRSRV_DEVICE_NODE *psDeviceNode,DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,void *pvDumpDebugFile);
+void GetGpuPowClkState(PVRSRV_DEVICE_NODE *psDeviceNode,DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,void *pvDumpDebugFile )
+{
+	regmap_read(gpu_dvfs_ctx.top_force_reg.regmap_ptr, gpu_dvfs_ctx.top_force_reg.args[0], &top_force);
+	regmap_read(gpu_dvfs_ctx.core_force_reg.regmap_ptr, gpu_dvfs_ctx.core_force_reg.args[0], &core_force);
+	regmap_read(gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_top_state_reg.args[0], &top_pwr);
+	regmap_read(gpu_dvfs_ctx.gpu_core_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_core_state_reg.args[0], &core_pwr);
+	regmap_read(gpu_dvfs_ctx.clk_gpu_eb_reg.regmap_ptr, gpu_dvfs_ctx.clk_gpu_eb_reg.args[0], &clk_gpu_eb_pwr);
+
+	top_force = top_force & top_force_mask;
+	core_force = core_force & core_force_mask;
+	top_pwr = top_pwr & top_pwr_mask;
+	core_pwr = core_pwr & core_pwr_mask;
+	clk_gpu_eb_pwr = clk_gpu_eb_pwr &clk_gpu_eb_mask;
+
+	if ((gpu_dvfs_ctx.gpu_power_on == 1) && (gpu_dvfs_ctx.gpu_clock_on == 1))
+	{
+		if ( (top_force == top_force_pwr_on)  && (core_force == core_force_pwr_on))
+		{
+			if ((top_pwr == top_pwr_on) && (core_pwr == core_pwr_on))
+			{
+				PVR_DUMPDEBUG_LOG("gpu_top and gpu_core pwr_on is enabled.");
+			}
+		}
+		else
+		{
+			PVR_DUMPDEBUG_LOG("gpu_top or gpu_core pwr_on not enabled.");
+		}
+	}
+	else
+	{
+		PVR_DUMPDEBUG_LOG("GPU power is off now!!!");
+	}
+	PVR_DUMPDEBUG_LOG("RGX GPU REG STATE:top_force[0x%x], core_force[0x%x], top_pwr[0x%x], core_pwr[0x%x], clk_gpu_eb_pwr[0x%x]",top_force,core_force,top_pwr,core_pwr,clk_gpu_eb_pwr);
+}
+
+void CheckGpuPowClkState(PVRSRV_DEVICE_NODE *psDeviceNode);
+void CheckGpuPowClkState(PVRSRV_DEVICE_NODE *psDeviceNode)
+{
+	regmap_read(gpu_dvfs_ctx.top_force_reg.regmap_ptr, gpu_dvfs_ctx.top_force_reg.args[0], &top_force);
+	regmap_read(gpu_dvfs_ctx.core_force_reg.regmap_ptr, gpu_dvfs_ctx.core_force_reg.args[0], &core_force);
+	regmap_read(gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_top_state_reg.args[0], &top_pwr);
+	regmap_read(gpu_dvfs_ctx.gpu_core_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_core_state_reg.args[0], &core_pwr);
+
+	top_force = top_force & top_force_mask;
+	core_force = core_force & core_force_mask;
+	top_pwr = top_pwr & top_pwr_mask;
+	core_pwr = core_pwr & core_pwr_mask;
+
+	if ((gpu_dvfs_ctx.gpu_power_on == 1) && (gpu_dvfs_ctx.gpu_clock_on == 1))
+	{
+		if ( (top_force == top_force_pwr_on)  && (core_force == core_force_pwr_on))
+		{
+			if ((top_pwr == top_pwr_ing) && (core_pwr == core_pwr_ing))
+			{
+				PVR_DPF((PVR_DBG_ERROR, "top_force[0x%x], core_force[0x%x], top_pwr[0x%x], core_pwr[0x%x]", top_force,core_force,top_pwr,core_pwr));
+
+				PVRSRVDebugRequest(psDeviceNode, DEBUG_REQUEST_VERBOSITY_MAX, NULL, NULL);
+				if (psDeviceNode->pvDevice != NULL)
+				{
+					PVRSRV_RGXDEV_INFO *psDevInfo = psDeviceNode->pvDevice;
+
+					RGXDumpFirmwareTrace(NULL, NULL, psDevInfo);
+				}
+				WARN_ON(1);
+				BUG_ON(1);
+			}
+
+		}
+		else
+		{
+			PVR_DPF((PVR_DBG_ERROR, "gpu_top or gpu_core pwr_on not enabled, top_force[0x%x], core_force[0x%x], top_pwr[0x%x], core_pwr[0x%x]", top_force,core_force,top_pwr,core_pwr));
+			WARN_ON(1);
+		}
+
+	}
+	else
+	{
+		PVR_DPF((PVR_DBG_ERROR, "GPU power is off now!!!"));
+		BUG_ON(1);
+	}
+}
+
+
+
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0))
 static int pmu_glb_set(unsigned long reg, u32 bit)
@@ -231,6 +345,14 @@ static void RgxFreqInit(struct device *dev)
 	gpu_dvfs_ctx.core_auto_reg.regmap_ptr = syscon_regmap_lookup_by_name(dev->of_node,"core_auto_shutdown");
 	PVR_ASSERT(NULL != gpu_dvfs_ctx.core_auto_reg.regmap_ptr);
 	syscon_get_args_by_name(dev->of_node,"core_auto_shutdown", 2, (uint32_t *)gpu_dvfs_ctx.core_auto_reg.args);
+
+	gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr = syscon_regmap_lookup_by_name(dev->of_node,"gpu_top_state");
+	 PVR_ASSERT(NULL != gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr);
+	syscon_get_args_by_name(dev->of_node,"gpu_top_state", 2, (uint32_t *)gpu_dvfs_ctx.gpu_top_state_reg.args);
+
+	gpu_dvfs_ctx.gpu_core_state_reg.regmap_ptr = syscon_regmap_lookup_by_name(dev->of_node,"gpu_core_state");
+	PVR_ASSERT(NULL != gpu_dvfs_ctx.gpu_core_state_reg.regmap_ptr);
+	syscon_get_args_by_name(dev->of_node,"gpu_core_state", 2, (uint32_t *)gpu_dvfs_ctx.gpu_core_state_reg.args);
 #else
 	gpu_dvfs_ctx.top_force_reg.regmap_ptr = syscon_regmap_lookup_by_phandle(dev->of_node,"top_force_shutdown");
 	PVR_ASSERT(NULL != gpu_dvfs_ctx.top_force_reg.regmap_ptr);
@@ -239,6 +361,18 @@ static void RgxFreqInit(struct device *dev)
 	gpu_dvfs_ctx.core_force_reg.regmap_ptr = syscon_regmap_lookup_by_phandle(dev->of_node,"core_force_shutdown");
 	PVR_ASSERT(NULL != gpu_dvfs_ctx.core_force_reg.regmap_ptr);
 	syscon_regmap_lookup_by_phandle_args(dev->of_node,"core_force_shutdown", 2, (uint32_t *)gpu_dvfs_ctx.core_force_reg.args);
+
+	gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr = syscon_regmap_lookup_by_phandle(dev->of_node,"gpu_top_state");
+	PVR_ASSERT(NULL != gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr);
+	syscon_regmap_lookup_by_phandle_args(dev->of_node,"gpu_top_state", 2, (uint32_t *)gpu_dvfs_ctx.gpu_top_state_reg.args);
+
+	gpu_dvfs_ctx.gpu_core_state_reg.regmap_ptr = syscon_regmap_lookup_by_phandle(dev->of_node,"gpu_core_state");
+	PVR_ASSERT(NULL != gpu_dvfs_ctx.gpu_core_state_reg.regmap_ptr);
+	syscon_regmap_lookup_by_phandle_args(dev->of_node,"gpu_core_state", 2, (uint32_t *)gpu_dvfs_ctx.gpu_core_state_reg.args);
+
+	gpu_dvfs_ctx.clk_gpu_eb_reg.regmap_ptr = syscon_regmap_lookup_by_phandle(dev->of_node,"clk_gpu_eb");
+	PVR_ASSERT(NULL != gpu_dvfs_ctx.clk_gpu_eb_reg.regmap_ptr);
+	syscon_regmap_lookup_by_phandle_args(dev->of_node,"clk_gpu_eb", 2, (uint32_t *)gpu_dvfs_ctx.clk_gpu_eb_reg.args);
 
 	gpu_dvfs_ctx.core_auto_reg.regmap_ptr = syscon_regmap_lookup_by_phandle(dev->of_node,"core_auto_shutdown");
 	PVR_ASSERT(NULL != gpu_dvfs_ctx.core_auto_reg.regmap_ptr);
@@ -358,6 +492,7 @@ static int RgxSetFreqVolt(IMG_UINT32 ui32Freq, IMG_UINT32 ui32Volt)
 
 				//set gpu mem clk
 				clk_set_parent(gpu_dvfs_ctx.clk_gpu_soc, gpu_dvfs_ctx.freq_list[index].clk_src);
+				udelay(150);
 			}
 		}
 		gpu_dvfs_ctx.freq_cur = &gpu_dvfs_ctx.freq_list[index];
@@ -389,16 +524,40 @@ static void RgxDVFSInit(PVRSRV_DEVICE_CONFIG* psDevConfig)
 static void RgxPowerOn(void)
 {
 	//GPU power
+	int counter = 0;
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0))
 	pmu_glb_clr(REG_PMU_APB_PD_GPU_TOP_CFG, BIT_PMU_APB_PD_GPU_TOP_FORCE_SHUTDOWN);
 	pmu_glb_clr(REG_PMU_APB_PD_GPU_CORE_CFG, BIT_PMU_APB_PD_GPU_CORE_FORCE_SHUTDOWN);
 	pmu_glb_set(REG_PMU_APB_PD_GPU_CORE_CFG, BIT_PMU_APB_PD_GPU_CORE_AUTO_SHUTDOWN_EN);
 #else
 	regmap_update_bits(gpu_dvfs_ctx.top_force_reg.regmap_ptr, gpu_dvfs_ctx.top_force_reg.args[0], gpu_dvfs_ctx.top_force_reg.args[1], 0);
+
+	regmap_read(gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_top_state_reg.args[0], &top_pwr);
+	top_pwr = top_pwr & top_pwr_mask;
+
+	while( top_pwr == top_pwr_ing )
+	{
+
+		udelay(50);
+		regmap_read(gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_top_state_reg.args[0], &top_pwr);
+		top_pwr = top_pwr & top_pwr_mask;
+		PVR_DPF((PVR_DBG_ERROR, "SPRDDEBUG gpu_top_pwr = 0x%x, counter = %d ", top_pwr, counter));
+		if(counter++ > 200 )
+		{
+			PVR_DPF((PVR_DBG_ERROR, "gpu top power on is timeout ! "));
+			WARN_ON(1);
+			counter = 0;
+			break;
+		}
+
+
+	}
+
 	regmap_update_bits(gpu_dvfs_ctx.core_force_reg.regmap_ptr, gpu_dvfs_ctx.core_force_reg.args[0], gpu_dvfs_ctx.core_force_reg.args[1], 0);
+	udelay(150);
 	regmap_update_bits(gpu_dvfs_ctx.core_auto_reg.regmap_ptr, gpu_dvfs_ctx.core_auto_reg.args[0], gpu_dvfs_ctx.core_auto_reg.args[1], gpu_dvfs_ctx.core_auto_reg.args[1]);
 #endif
-
+	udelay(100);
 	gpu_dvfs_ctx.gpu_power_on = 1;
 }
 
@@ -412,9 +571,10 @@ static void RgxPowerOff(void)
 	pmu_glb_set(REG_PMU_APB_PD_GPU_CORE_CFG, BIT_PMU_APB_PD_GPU_CORE_FORCE_SHUTDOWN);
 	pmu_glb_clr(REG_PMU_APB_PD_GPU_CORE_CFG, BIT_PMU_APB_PD_GPU_CORE_AUTO_SHUTDOWN_EN);
 #else
-	regmap_update_bits(gpu_dvfs_ctx.top_force_reg.regmap_ptr, gpu_dvfs_ctx.top_force_reg.args[0], gpu_dvfs_ctx.top_force_reg.args[1], gpu_dvfs_ctx.top_force_reg.args[1]);
-	regmap_update_bits(gpu_dvfs_ctx.core_force_reg.regmap_ptr, gpu_dvfs_ctx.core_force_reg.args[0], gpu_dvfs_ctx.core_force_reg.args[1], gpu_dvfs_ctx.core_force_reg.args[1]);
+
 	regmap_update_bits(gpu_dvfs_ctx.core_auto_reg.regmap_ptr, gpu_dvfs_ctx.core_auto_reg.args[0], gpu_dvfs_ctx.core_auto_reg.args[1], 0);
+	regmap_update_bits(gpu_dvfs_ctx.core_force_reg.regmap_ptr, gpu_dvfs_ctx.core_force_reg.args[0], gpu_dvfs_ctx.core_force_reg.args[1], gpu_dvfs_ctx.core_force_reg.args[1]);
+	regmap_update_bits(gpu_dvfs_ctx.top_force_reg.regmap_ptr, gpu_dvfs_ctx.top_force_reg.args[0], gpu_dvfs_ctx.top_force_reg.args[1], gpu_dvfs_ctx.top_force_reg.args[1]);
 #endif
 }
 
@@ -432,7 +592,7 @@ static void RgxClockOn(void)
 	//enable gpu clock
 	clk_prepare_enable(gpu_dvfs_ctx.clk_gpu_core);
 	clk_prepare_enable(gpu_dvfs_ctx.clk_gpu_soc);
-	udelay(300);
+	udelay(100);
 
 	//set gpu clock parent
 	clk_set_parent(gpu_dvfs_ctx.clk_gpu_core, gpu_dvfs_ctx.freq_default->clk_src);
@@ -442,6 +602,7 @@ static void RgxClockOn(void)
 	clk_set_parent(gpu_dvfs_ctx.clk_gpu_core, gpu_dvfs_ctx.freq_cur->clk_src);
 	clk_set_parent(gpu_dvfs_ctx.clk_gpu_soc, gpu_dvfs_ctx.freq_cur->clk_src);
 
+	udelay(200);
 	gpu_dvfs_ctx.gpu_clock_on = 1;
 }
 
@@ -463,7 +624,7 @@ static void RgxClockOff(void)
 	}
 }
 
-static PVRSRV_ERROR SprdPrePowerState(IMG_HANDLE hSysData, PVRSRV_SYS_POWER_STATE eNewPowerState, PVRSRV_SYS_POWER_STATE eCurrentPowerState, IMG_BOOL bForced)
+static PVRSRV_ERROR SprdPrePowerState(IMG_HANDLE hSysData, PVRSRV_SYS_POWER_STATE eNewPowerState, PVRSRV_SYS_POWER_STATE eCurrentPowerState, IMG_UINT32 bForced)
 {
 	PVRSRV_ERROR result = PVRSRV_OK;
 
@@ -489,7 +650,7 @@ static PVRSRV_ERROR SprdPrePowerState(IMG_HANDLE hSysData, PVRSRV_SYS_POWER_STAT
 	return (result);
 }
 
-static PVRSRV_ERROR SprdPostPowerState(IMG_HANDLE hSysData, PVRSRV_SYS_POWER_STATE eNewPowerState, PVRSRV_SYS_POWER_STATE eCurrentPowerState, IMG_BOOL bForced)
+static PVRSRV_ERROR SprdPostPowerState(IMG_HANDLE hSysData, PVRSRV_SYS_POWER_STATE eNewPowerState, PVRSRV_SYS_POWER_STATE eCurrentPowerState, IMG_UINT32 bForced)
 {
 	PVRSRV_ERROR result = PVRSRV_OK;
 

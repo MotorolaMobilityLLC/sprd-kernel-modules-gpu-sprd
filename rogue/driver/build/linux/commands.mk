@@ -374,12 +374,20 @@ ifneq ($(CROSS_COMPILE_SECONDARY),)
   ifeq ($(__clang_target),mips64el-linux-android)
    __clang_target := mipsel-linux-android
   endif
-#$(warning __gcc_bindir: $(__gcc_bindir))
-#$(warning CROSS_COMPILE_SECONDARY: $(CROSS_COMPILE_SECONDARY))
-#$(warning CROSS_COMPILE_SECONDARY gcc: $(CROSS_COMPILE_SECONDARY)gcc)
+$(warning __gcc_bindir: $(__gcc_bindir))
+$(warning CROSS_COMPILE_SECONDARY: $(CROSS_COMPILE_SECONDARY))
+$(warning CROSS_COMPILE_SECONDARY gcc: $(CROSS_COMPILE_SECONDARY)gcc)
   __gcc_bindir  := $(dir $(shell which $(CROSS_COMPILE_SECONDARY)gcc))
 $(warning BSP_ROOT_DIR:$(BSP_ROOT_DIR))
-  __gcc_bindir  := $(BSP_ROOT_DIR)/toolchain/prebuilts/gcc/linux-x86/aarch64/gcc-linaro-aarch64-linux-gnu-7.4/bin/
+ifeq ($(BSP_SYSTEM_VERSION), sharkl5)
+  $(warning BSP_SYSTEM_VERSION:$(BSP_SYSTEM_VERSION))
+  __gcc_bindir := $(BSP_ROOT_DIR)/toolchain/prebuilts/gcc/linux-x86/aarch64/gcc-linaro-aarch64-linux-gnu-7.4/bin/
+else
+ifeq ($(BSP_SYSTEM_VERSION), sharkl3)
+  $(warning BSP_SYSTEM_VERSION:$(BSP_SYSTEM_VERSION))
+  __gcc_bindir := $(BSP_ROOT_DIR)/toolchain/prebuilts/gcc/linux-x86/arm/arm-linux-gnueabi-7.4/bin/
+endif
+endif
 $(warning __gcc_bindir: $(__gcc_bindir))
   ifeq ($(wildcard $(__gcc_bindir)),)
 $(warning __gcc_bindir: $(__gcc_bindir))
@@ -461,7 +469,15 @@ $(warning __gcc_bindir: $(__gcc_bindir))
 $(warning CROSS_COMPILE gcc: $(CROSS_COMPILE)gcc)
   __gcc_bindir  := $(dir $(shell which $(CROSS_COMPILE)gcc))
 $(warning BSP_ROOT_DIR:$(BSP_ROOT_DIR))
-  __gcc_bindir  := $(BSP_ROOT_DIR)/toolchain/prebuilts/gcc/linux-x86/aarch64/gcc-linaro-aarch64-linux-gnu-7.4/bin/
+ifeq ($(BSP_SYSTEM_VERSION), sharkl5)
+  $(warning BSP_SYSTEM_VERSION:$(BSP_SYSTEM_VERSION))
+  __gcc_bindir := $(BSP_ROOT_DIR)/toolchain/prebuilts/gcc/linux-x86/aarch64/gcc-linaro-aarch64-linux-gnu-7.4/bin/
+else
+ifeq ($(BSP_SYSTEM_VERSION), sharkl3)
+  $(warning BSP_SYSTEM_VERSION:$(BSP_SYSTEM_VERSION))
+  __gcc_bindir := $(BSP_ROOT_DIR)/toolchain/prebuilts/gcc/linux-x86/arm/arm-linux-gnueabi-7.4/bin/
+endif
+endif
 $(warning __gcc_bindir: $(__gcc_bindir))
   ifeq ($(wildcard $(__gcc_bindir)),)
 $(warning __gcc_bindir: $(__gcc_bindir))
@@ -595,3 +611,6 @@ override ZIP               := $(if $(V),,@)$(ZIP)
 ifeq ($(SUPPORT_NEUTRINO_PLATFORM),1)
 include $(MAKE_TOP)/common/neutrino/commands_neutrino.mk
 endif
+$(warning 222)
+#$(error 222)
+

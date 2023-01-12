@@ -100,6 +100,7 @@ else
 COMMON_USER_FLAGS += $(OPTIM)
 endif
 endif
+$(warning 333)
 
 # GCOV support for user-mode coverage statistics
 #
@@ -121,6 +122,9 @@ COMMON_USER_FLAGS += -g
 COMMON_USER_FLAGS += \
  -Wpointer-arith -Wunused-parameter \
  -Wmissing-format-attribute
+
+$(warning 333)
+
 
 # Additional warnings, and optional warnings.
 #
@@ -152,6 +156,8 @@ TESTED_HOST_USER_FLAGS += \
  $(call host-cc-option,-Qunused-arguments) \
  $(call host-cc-option,-Wlogical-op) \
  $(if $(shell test -t 2 && echo true),$(call host-cc-option,-fcolor-diagnostics))
+
+$(warning 333)
 
 ifeq ($(W),1)
 TESTED_TARGET_USER_FLAGS += \
@@ -194,6 +200,9 @@ TESTED_HOST_USER_FLAGS += \
  $(call host-cc-option,-Wwrite-strings)
 endif
 
+$(warning 333)
+
+
 TESTED_TARGET_USER_FLAGS += \
  $(call cc-optional-warning,-Wunused-but-set-variable) \
  $(call cc-optional-warning,-Wtypedef-redefinition)
@@ -212,6 +221,8 @@ KBUILD_FLAGS := \
 ifeq ($(BUILD),debug)
 KBUILD_FLAGS += -g
 endif
+
+$(warning 333)
 
 TESTED_KBUILD_FLAGS := \
  $(call kernel-cc-option,-Wmissing-include-dirs) \
@@ -288,12 +299,15 @@ ifeq ($(PERFDATA),1)
 ALL_CFLAGS += -funwind-tables
 endif
 
+$(warning 333)
+#$(error 333)
+
 # Workaround for clang is producing wrong code when -O0 is used.
 # Applies only for clang < 3.8
 #
 ifeq ($(cc-is-clang),true)
 __clang_bindir  := $(dir $(shell which clang))
-#$(warning __clang_version:$(__clang_version))
+$(warning __clang_version:$(__clang_version))
 $(warning shell clang --version:$(shell clang --version))
 #__clang_version := $(shell clang --version | grep -P -o '(?<=clang version )([0-9][^ ]+)')
 __clang_version := 14.0.7

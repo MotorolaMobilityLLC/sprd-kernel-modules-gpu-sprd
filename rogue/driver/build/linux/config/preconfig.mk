@@ -118,7 +118,7 @@ ifneq ($(PVR_BUILD_DIR),$(patsubst %_android,%,$(PVR_BUILD_DIR))) # Android buil
  ifneq ($(USE_CLANG),0)
   prefer_clang := true
   $(warning shell clang --version: $(shell clang --version))
-#  $(warning __clang_version: $(__clang_version))
+  $(warning __clang_version: $(__clang_version))
   #__clang_version := $(shell clang --version | grep -P -o '(?<=clang version )([0-9][^ ]+)')
   __clang_version := 14.0.7
   $(warning __clang_version: $(__clang_version))
@@ -465,13 +465,13 @@ else
  HWDEFS_DIR_OCEANIC := $(TOP)/hwdefs/oceanic
  HWDEFS_DIR_VOLCANIC := $(TOP)/hwdefs/volcanic
 
-#$(warning HWDEFS_DIR_ROGUE=$(HWDEFS_DIR_ROGUE))
+$(warning HWDEFS_DIR_ROGUE=$(HWDEFS_DIR_ROGUE))
 
  ALL_KM_BVNCS_ROGUE := \
   $(patsubst rgxcore_km_%.h,%,\
    $(notdir $(shell ls $(HWDEFS_DIR_ROGUE)/km/cores/rgxcore_km_*.h 2> /dev/null)))
 
-#$(warning ALL_KM_BVNCS_ROGUE=$(ALL_KM_BVNCS_ROGUE))
+$(warning ALL_KM_BVNCS_ROGUE=$(ALL_KM_BVNCS_ROGUE))
 # ALL_KM_BVNCS_ROGUE := 22.102.54.38
 
  ALL_KM_BVNCS_OCEANIC := \
@@ -482,7 +482,7 @@ else
    $(notdir $(shell ls $(HWDEFS_DIR_VOLCANIC)/km/cores/rgxcore_km_*.h 2> /dev/null)))
  ALL_KM_BVNCS := $(ALL_KM_BVNCS_ROGUE) $(ALL_KM_BVNCS_OCEANIC) $(ALL_KM_BVNCS_VOLCANIC)
 
-#$(warning RGX_BVNC=$(RGX_BVNC))
+$(warning RGX_BVNC=$(RGX_BVNC))
 
  ifneq ($(filter $(RGX_BVNC),$(ALL_KM_BVNCS_ROGUE)),)
   override PVR_ARCH := rogue
@@ -534,7 +534,7 @@ else
  ALL_KM_BNCS := \
   $(patsubst rgxconfig_km_%.h,%,\
     $(notdir $(shell ls $(HWDEFS_DIR)/km/configs/rgxconfig_km_*.h)))
-#$(warning ALL_KM_BNCS: $(ALL_KM_BNCS))
+$(warning ALL_KM_BNCS: $(ALL_KM_BNCS))
 # ALL_KM_BNCS := 22.V.54.38
  ifeq ($(filter $(RGX_BNC),$(ALL_KM_BNCS)),)
  $(error Error: Invalid Kernel config RGX_BNC=$(RGX_BNC). \

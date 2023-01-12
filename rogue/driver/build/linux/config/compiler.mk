@@ -66,11 +66,11 @@ define calculate-compiler-preferred-target
     $(1)_compiler_preferred_target := i386-linux-gnu
    endif
    ifneq ($$(filter aarch64-poky-linux,$$($(1)_compiler_preferred_target)),)
-#    $(warning 1: $(1))
-#    $(warning 1_compiler_preferred_target: $(1)_compiler_preferred_target)
-#    $(warning $(1)_compiler_preferred_target: $($(1)_compiler_preferred_target))
+    $(warning 1: $(1))
+    $(warning 1_compiler_preferred_target: $(1)_compiler_preferred_target)
+    $(warning $(1)_compiler_preferred_target: $($(1)_compiler_preferred_target))
     $(1)_compiler_preferred_target := aarch64-linux-gnu
-#    $(warning $(1)_compiler_preferred_target: $($(1)_compiler_preferred_target))
+    $(warning $(1)_compiler_preferred_target: $($(1)_compiler_preferred_target))
    endif
    ifneq ($$(filter armv7a-cros-linux-gnueabi armv7l-tizen-linux-gnueabi,$$($(1)_compiler_preferred_target)),)
     $(1)_compiler_preferred_target := arm-linux-gnueabi
@@ -146,7 +146,7 @@ endif
 endif
 endif
 endif
-#$(warning host_compiler_preferred_target: $(host_compiler_preferred_target))
+$(warning host_compiler_preferred_target: $(host_compiler_preferred_target))
 
 # We set HOST_ALL_ARCH this way, as the host architectures may be overridden
 # on the command line.
@@ -203,7 +203,7 @@ ifneq ($(origin KERNEL_CROSS_COMPILE),undefined)
  _kernel_cross_compile := $(_kernel_cross_compile)gcc
  # Then check the compiler.
  $(eval $(call calculate-compiler-preferred-target,target,$(_kernel_cross_compile)))
-# $(warning target_compiler_preferred_target:$(target_compiler_preferred_target))
+ $(warning target_compiler_preferred_target:$(target_compiler_preferred_target))
  $(eval $(call include-compiler-file,$(target_compiler_preferred_target)))
  _kernel_primary_arch := $(TARGET_PRIMARY_ARCH)
 else
@@ -215,29 +215,29 @@ else
  _kernel_primary_arch :=
 endif
 
-#$(warning CC:$(CC))
-#$(warning CROSS_COMPILE:$(CROSS_COMPILE))
-#$(warning _cc:$(_cc))
-#$(warning _cc_secondary:$(_cc_secondary))
-#$(warning CROSS_COMPILE_SECONDARY:$(CROSS_COMPILE_SECONDARY))
-#$(warning CC_SECONDARY:$(CC_SECONDARY))
-#$(warning target:$(target))
+$(warning CC:$(CC))
+$(warning CROSS_COMPILE:$(CROSS_COMPILE))
+$(warning _cc:$(_cc))
+$(warning _cc_secondary:$(_cc_secondary))
+$(warning CROSS_COMPILE_SECONDARY:$(CROSS_COMPILE_SECONDARY))
+$(warning CC_SECONDARY:$(CC_SECONDARY))
+$(warning target:$(target))
 $(eval $(call cross-compiler-name,_cc,$(CROSS_COMPILE),$(CC)))
-#$(warning CC:$(CC))
-#$(warning CROSS_COMPILE:$(CROSS_COMPILE))
-#$(warning _cc:$(_cc))
-#$(warning _cc_secondary:$(_cc_secondary))
-#$(warning CROSS_COMPILE_SECONDARY:$(CROSS_COMPILE_SECONDARY))
-#$(warning CC_SECONDARY:$(CC_SECONDARY))
-#$(warning target:$(target))
+$(warning CC:$(CC))
+$(warning CROSS_COMPILE:$(CROSS_COMPILE))
+$(warning _cc:$(_cc))
+$(warning _cc_secondary:$(_cc_secondary))
+$(warning CROSS_COMPILE_SECONDARY:$(CROSS_COMPILE_SECONDARY))
+$(warning CC_SECONDARY:$(CC_SECONDARY))
+$(warning target:$(target))
 $(eval $(call cross-compiler-name,_cc_secondary,$(if $(CROSS_COMPILE_SECONDARY),$(CROSS_COMPILE_SECONDARY),$(CROSS_COMPILE)),$(CC_SECONDARY)))
-#$(warning CC:$(CC))
-#$(warning CROSS_COMPILE:$(CROSS_COMPILE))
-#$(warning _cc:$(_cc))
-#$(warning _cc_secondary:$(_cc_secondary))
-#$(warning CROSS_COMPILE_SECONDARY:$(CROSS_COMPILE_SECONDARY))
-#$(warning CC_SECONDARY:$(CC_SECONDARY))
-#$(warning target:$(target))
+$(warning CC:$(CC))
+$(warning CROSS_COMPILE:$(CROSS_COMPILE))
+$(warning _cc:$(_cc))
+$(warning _cc_secondary:$(_cc_secondary))
+$(warning CROSS_COMPILE_SECONDARY:$(CROSS_COMPILE_SECONDARY))
+$(warning CC_SECONDARY:$(CC_SECONDARY))
+$(warning target:$(target))
 $(eval $(call calculate-compiler-preferred-target,target,$(_cc)))
 $(warning CC:$(CC))
 $(warning CROSS_COMPILE:$(CROSS_COMPILE))
@@ -247,7 +247,16 @@ $(warning CROSS_COMPILE_SECONDARY:$(CROSS_COMPILE_SECONDARY))
 $(warning CC_SECONDARY:$(CC_SECONDARY))
 $(warning target:$(target))
 $(warning target_compiler_preferred_target:$(target_compiler_preferred_target))
-target_compiler_preferred_target := aarch64-linux-gnu
+ifeq ($(BSP_SYSTEM_VERSION), sharkl5)
+  $(warning BSP_SYSTEM_VERSION:$(BSP_SYSTEM_VERSION))
+  target_compiler_preferred_target := aarch64-linux-gnu
+else
+ifeq ($(BSP_SYSTEM_VERSION), sharkl3)
+  $(warning BSP_SYSTEM_VERSION:$(BSP_SYSTEM_VERSION))
+  target_compiler_preferred_target := arm-linux-gnueabi
+endif
+endif
+
 $(warning target_compiler_preferred_target:$(target_compiler_preferred_target))
 $(eval $(call include-compiler-file,$(target_compiler_preferred_target)))
 
@@ -348,3 +357,5 @@ ifeq ($(SUPPORT_NEUTRINO_PLATFORM),)
   endif
  endif
 endif
+$(warning 111)
+#$(error 111)
