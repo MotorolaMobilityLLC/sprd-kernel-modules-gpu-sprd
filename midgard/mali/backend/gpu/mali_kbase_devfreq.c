@@ -28,8 +28,8 @@
 #include <linux/of.h>
 #include <linux/clk.h>
 #include <linux/devfreq.h>
-#ifdef CONFIG_UNISOC_GPU_COOLING_DEVICE
-#include <linux/unisoc_gpu_cooling.h>
+#ifdef CONFIG_SPRD_GPU_COOLING_DEVICE
+#include <linux/sprd_gpu_device.h>
 #else
 #ifdef CONFIG_DEVFREQ_THERMAL
 #include <linux/devfreq_cooling.h>
@@ -136,7 +136,7 @@ kbase_devfreq_target(struct device *dev, unsigned long *target_freq, u32 flags)
 #endif
 
 	//err = clk_set_rate(kbdev->clock, freq);
-	//err = kbase_platform_set_freq(freq);      //SPRD k54
+	err = kbase_platform_set_freq(freq);      //SPRD k54
 	if (err) {
 		/*dev_err(dev, "Failed to set clock %lu (target %lu)\n",
 				freq, *target_freq);*/
@@ -191,7 +191,7 @@ kbase_devfreq_status(struct device *dev, struct devfreq_dev_status *stat)
 	stat->current_frequency = kbdev->current_nominal_freq;
 	stat->private_data = NULL;
 
-#ifndef CONFIG_UNISOC_GPU_COOLING_DEVICE
+#ifndef CONFIG_SPRD_GPU_COOLING_DEVICE
 #ifdef CONFIG_DEVFREQ_THERMAL
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 3, 0)
 	if (kbdev->devfreq_cooling)
@@ -445,7 +445,7 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 	kbase_platform_limit_max_freq(kbdev->dev);
 #endif
 
-//#ifdef CONFIG_UNISOC_GPU_COOLING_DEVICE
+//#ifdef CONFIG_SPRD_GPU_COOLING_DEVICE
 //	err = create_gpu_cooling_device(kbdev->devfreq, &kbdev->pm.debug_core_mask_all);
 //	if (err) {
 //		dev_err(kbdev->dev,
@@ -476,7 +476,7 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 
 	return 0;
 
-//#if defined(CONFIG_DEVFREQ_THERMAL) || defined(CONFIG_UNISOC_GPU_COOLING_DEVICE)
+//#if defined(CONFIG_DEVFREQ_THERMAL) || defined(CONFIG_SPRD_GPU_COOLING_DEVICE)
 //cooling_failed:
 //	devfreq_unregister_opp_notifier(kbdev->dev, kbdev->devfreq);
 //#endif /* CONFIG_DEVFREQ_THERMAL */
@@ -496,7 +496,7 @@ void kbase_devfreq_term(struct kbase_device *kbdev)
 	dev_dbg(kbdev->dev, "Term Mali devfreq\n");
 	vfree(kbdev->devfreq->data);
 
-//#ifdef CONFIG_UNISOC_GPU_COOLING_DEVICE
+//#ifdef CONFIG_SPRD_GPU_COOLING_DEVICE
 //	destroy_gpu_cooling_device();
 //#else
 //#ifdef CONFIG_DEVFREQ_THERMAL

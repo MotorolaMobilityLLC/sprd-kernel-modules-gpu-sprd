@@ -1123,6 +1123,14 @@ struct kbase_devfreq_opp {
 	u64 core_mask;
 };
 
+#ifdef CONFIG_MALI_DEVFREQ
+struct kbase_devfreq_stats {
+	u64 freq;
+	u64 busy_time;
+	u64 total_time;
+};
+#endif
+
 /* MMU mode flags */
 #define KBASE_MMU_MODE_HAS_NON_CACHEABLE (1ul << 0) /* Has NON_CACHEABLE MEMATTR */
 
@@ -1168,6 +1176,13 @@ struct kbase_mmu_mode const *kbase_mmu_mode_get_aarch64(void);
 
 #define DEVNAME_SIZE	16
 
+struct kbase_process {
+	pid_t tgid;
+	size_t total_gpu_pages;
+	struct list_head kctx_list;
+	struct rb_node kprcs_node;
+	struct rb_root dma_buf_root;
+};
 
 /**
  * struct kbase_device   - Object representing an instance of GPU platform device,
@@ -1431,6 +1446,8 @@ struct kbase_device {
 #endif
 	char devname[DEVNAME_SIZE];
 
+	u32 id;
+
 #ifdef CONFIG_MALI_NO_MALI
 	void *model;
 	struct kmem_cache *irq_slab;
@@ -1511,6 +1528,13 @@ struct kbase_device {
 	struct kbase_devfreq_opp *opp_table;
 	int num_opps;
 	struct kbasep_pm_metrics last_devfreq_metrics;
+
+	struct kbasep_pm_metrics last_frequtil_metrics;
+	u32 enable_freq_stats;
+	u32 freq_num;
+	struct kbase_devfreq_stats *freq_stats;
+	struct kbasep_pm_metrics last_freqstats_metrics;
+
 #ifdef CONFIG_DEVFREQ_THERMAL
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 4, 0)
 	struct devfreq_cooling_device *devfreq_cooling;
@@ -1634,6 +1658,11 @@ struct kbase_device {
 
 	/* See KBASE_JS_*_PRIORITY_MODE for details. */
 	u32 js_ctx_scheduling_mode;
+
+	spinlock_t gpu_mem_usage_lock;
+	size_t total_gpu_pages;
+	struct mutex dma_buf_lock;
+	struct rb_root dma_buf_root;
 
 };
 
@@ -2111,6 +2140,8 @@ struct kbase_context {
 
 	int priority;
 	s16 atoms_count[KBASE_JS_ATOM_SCHED_PRIO_COUNT];
+
+	struct kbase_process *kprcs;
 };
 
 #ifdef CONFIG_MALI_CINSTR_GWT

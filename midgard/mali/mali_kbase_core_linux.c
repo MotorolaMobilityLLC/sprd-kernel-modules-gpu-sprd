@@ -2470,6 +2470,36 @@ static ssize_t kbase_show_gpuinfo(struct device *dev,
 }
 static DEVICE_ATTR(gpuinfo, S_IRUGO, kbase_show_gpuinfo, NULL);
 
+#ifdef SPRD_SUPPORT_DVFS_CURSTATE
+
+/**
+ * show_dvfs_curstate - Show callback for the dvfs current state.
+ * @dev:  The device this sysfs file is for.
+ * @attr: The attributes of the sysfs file.
+ * @buf:  The output buffer to receive the GPU information.
+ *
+ * This function is called to get the current state of  DVFS.
+ *
+ * Return: NA.
+ */
+static ssize_t dvfs_curstate_show(struct device *dev,
+		struct device_attribute *attr, char * const buf)
+{
+	struct kbase_device *kbdev;
+	ssize_t ret=0;
+	char temp[30];
+
+	kbdev = to_kbase_device(dev);
+	if (!kbdev)
+		return -ENODEV;
+	Get_CurState((char*)temp,kbdev);
+	ret = scnprintf(buf, PAGE_SIZE, "%s\n", temp);
+
+	return ret;
+}
+
+static DEVICE_ATTR_RO(dvfs_curstate);
+#endif
 /**
  * set_dvfs_period - Store callback for the dvfs_period sysfs file.
  * @dev:   The device with sysfs file is for
@@ -3503,6 +3533,8 @@ static int kbase_device_debugfs_init(struct kbase_device *kbdev)
 
 	kbase_debug_job_fault_debugfs_init(kbdev);
 	kbasep_gpu_memory_debugfs_init(kbdev);
+	kbasep_gpu_utilisation_debugfs_init(kbdev);
+	kbasep_gpu_stats_debugfs_init(kbdev);
 	kbase_as_fault_debugfs_init(kbdev);
 	/* fops_* variables created by invocations of macro
 	 * MAKE_QUIRK_ACCESSORS() above. */
@@ -3702,6 +3734,9 @@ static struct attribute *kbase_attrs[] = {
 	&dev_attr_js_timeouts.attr,
 	&dev_attr_soft_job_timeout.attr,
 	&dev_attr_gpuinfo.attr,
+#ifdef SPRD_SUPPORT_DVFS_CURSTATE
+	&dev_attr_dvfs_curstate.attr,
+#endif
 	&dev_attr_dvfs_period.attr,
 	&dev_attr_pm_poweroff.attr,
 	&dev_attr_reset_timeout.attr,
@@ -3956,6 +3991,8 @@ static int kbase_platform_device_probe(struct platform_device *pdev)
 
 	scnprintf(kbdev->devname, DEVNAME_SIZE, "%s%d", kbase_drv_name,
 			kbase_dev_nr);
+
+	kbdev->id = kbase_dev_nr;
 
 	kbase_disjoint_init(kbdev);
 

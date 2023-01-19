@@ -48,6 +48,11 @@
 #include <mali_kbase_hwaccess_time.h>
 #include <mali_kbase_mem.h>
 
+#if IS_ENABLED(CONFIG_TRACE_GPU_MEM)
+#include <trace/events/gpu_mem.h>
+#endif
+
+#define DEVICE_TGID ((u32) 0U)
 #define KBASE_MMU_PAGE_ENTRIES 512
 
 /**
@@ -897,6 +902,9 @@ static phys_addr_t kbase_mmu_alloc_pgd(struct kbase_device *kbdev,
 	}
 
 	kbase_atomic_add_pages(1, &kbdev->memdev.used_pages);
+
+	trace_gpu_mem_total(kbdev->id, DEVICE_TGID,
+			    kbdev->total_gpu_pages << PAGE_SHIFT);
 
 	for (i = 0; i < KBASE_MMU_PAGE_ENTRIES; i++)
 		kbdev->mmu_mode->entry_invalidate(&page[i]);

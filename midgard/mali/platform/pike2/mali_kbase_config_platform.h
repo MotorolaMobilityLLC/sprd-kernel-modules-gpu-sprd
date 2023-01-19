@@ -101,3 +101,8 @@ bool kbase_mali_is_powered(void);
 void kbase_platform_set_boost(struct kbase_device *kbdev, int boost_level);
 #endif
 
+#define SPRD_SUPPORT_DVFS_CURSTATE 1
+
+#ifdef SPRD_SUPPORT_DVFS_CURSTATE
+int  Get_CurState(char* buf,struct kbase_device *kbdev);
+#endif

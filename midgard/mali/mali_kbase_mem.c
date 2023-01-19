@@ -41,6 +41,7 @@
 #include <mali_kbase_cache_policy.h>
 #include <mali_kbase_hw.h>
 #include <mali_kbase_tlstream.h>
+#include <mali_kbase_trace_gpu_mem.h>
 
 /* Forward declarations */
 static void free_partial_locked(struct kbase_context *kctx,
@@ -912,6 +913,11 @@ int kbase_mem_init(struct kbase_device *kbdev)
 	/* Initialize memory usage */
 	atomic_set(&memdev->used_pages, 0);
 
+	spin_lock_init(&kbdev->gpu_mem_usage_lock);
+	kbdev->total_gpu_pages = 0;
+	kbdev->dma_buf_root = RB_ROOT;
+	mutex_init(&kbdev->dma_buf_lock);
+
 	ret = kbase_mem_pool_init(&kbdev->mem_pool,
 			KBASE_MEM_POOL_MAX_SIZE_KBDEV,
 			KBASE_MEM_POOL_4KB_PAGE_TABLE_ORDER,
@@ -951,6 +957,11 @@ void kbase_mem_term(struct kbase_device *kbdev)
 
 	kbase_mem_pool_term(&kbdev->mem_pool);
 	kbase_mem_pool_term(&kbdev->lp_mem_pool);
+
+	WARN_ON(kbdev->total_gpu_pages);
+	WARN_ON(!RB_EMPTY_ROOT(&kbdev->dma_buf_root));
+	mutex_destroy(&kbdev->dma_buf_lock);
+
 }
 
 KBASE_EXPORT_TEST_API(kbase_mem_term);
@@ -1854,6 +1865,8 @@ no_new_partial:
 			(u64)new_page_count);
 
 	alloc->nents += nr_pages_requested;
+	kbase_trace_gpu_mem_usage_inc(kctx->kbdev, kctx, nr_pages_requested);
+
 done:
 	return 0;
 
@@ -2182,6 +2195,9 @@ int kbase_free_phy_pages_helper(
 		KBASE_TLSTREAM_AUX_PAGESALLOC(
 				kctx->id,
 				(u64)new_page_count);
+
+		kbase_trace_gpu_mem_usage_dec(kctx->kbdev, kctx, freed);
+
 	}
 
 	return 0;
@@ -2302,6 +2318,7 @@ void kbase_free_phy_pages_helper_locked(struct kbase_mem_phy_alloc *alloc,
 		KBASE_TLSTREAM_AUX_PAGESALLOC(
 				kctx->id,
 				(u64)new_page_count);
+		kbase_trace_gpu_mem_usage_dec(kctx->kbdev, kctx, freed);
 	}
 }
 

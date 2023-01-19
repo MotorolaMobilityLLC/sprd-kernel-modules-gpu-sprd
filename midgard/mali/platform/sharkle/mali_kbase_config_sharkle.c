@@ -43,6 +43,7 @@
 #define DTS_CLK_OFFSET      2
 #define PM_RUNTIME_DELAY_MS 50
 #define UP_THRESHOLD        9/10
+#define FREQ_KHZ    1000
 
 struct gpu_freq_info {
 	struct clk* clk_src;
@@ -68,6 +69,7 @@ struct gpu_dfs_context {
 	struct clk** gpu_clk_src;
 	int gpu_clk_num;
 
+	struct gpu_reg_info gpu_clk_sel_reg;
 	struct gpu_freq_info* freq_list;
 	int freq_list_len;
 
@@ -120,6 +122,61 @@ extern int gpu_freq_max_limit;
 #endif
 extern char* gpu_freq_list;
 
+
+#ifdef CONFIG_MALI_DEVFREQ
+static void InitFreqStats(struct kbase_device *kbdev)
+{
+	int i = 0;
+
+	kbdev->enable_freq_stats = 0;
+	kbdev->freq_num = gpu_dfs_ctx.freq_list_len;
+	kbdev->freq_stats = vmalloc(sizeof(struct kbase_devfreq_stats) * kbdev->freq_num);
+	KBASE_DEBUG_ASSERT(kbdev->freq_stats);
+
+	for (i = 0; i < kbdev->freq_num; i++)
+	{
+		kbdev->freq_stats[i].freq = gpu_dfs_ctx.freq_list[i].freq * FREQ_KHZ;
+		kbdev->freq_stats[i].busy_time = 0;
+		kbdev->freq_stats[i].total_time = 0;
+	}
+}
+
+static void DeinitFreqStats(struct kbase_device *kbdev)
+{
+	if (NULL != kbdev->freq_stats)
+	{
+		vfree(kbdev->freq_stats);
+		kbdev->freq_stats = NULL;
+	}
+}
+#endif
+
+int  Get_CurState(char* buf,struct kbase_device *kbdev)
+{
+	int len = 0;
+	int cur_state =0 ;
+	const int MASK_GPU_APB_CLK_GPU_SEL = 0x7,gpll_600M = 0x4;
+	//const int twpll_512M = 0x3,twpll_384M = 0x2;
+	if ((gpu_dfs_ctx.gpu_power_on == 1) && (gpu_dfs_ctx.gpu_clock_on == 1))
+	{
+		regmap_read(gpu_dfs_ctx.gpu_clk_sel_reg.regmap_ptr, gpu_dfs_ctx.gpu_clk_sel_reg.args[0], &cur_state);
+		cur_state = cur_state & MASK_GPU_APB_CLK_GPU_SEL;
+		if(cur_state == gpll_600M )
+		{
+			len = sprintf(buf,"GPLL %6d kHz \n", kbdev->devfreq->previous_freq );
+		}
+		else
+		{
+			len = sprintf(buf,"0X%x TWPLL %6d kHz \n",cur_state,kbdev->devfreq->previous_freq );
+		}
+	}
+	else
+	{
+		len = sprintf(buf,"GPU power is off now!\n");
+	}
+	return len;
+}
+
 static void gpu_freq_list_show(char* buf)
 {
 	int i=0,len=0;
@@ -140,6 +197,9 @@ static inline void mali_freq_init(struct device *dev)
 	gpu_dfs_ctx.top_reg.regmap_ptr = syscon_regmap_lookup_by_phandle_args(dev->of_node,"top_force_shutdown", 2, (uint32_t *)gpu_dfs_ctx.top_reg.args);  //SPRD k54
 	KBASE_DEBUG_ASSERT(gpu_dfs_ctx.top_reg.regmap_ptr);
 	//syscon_get_args_by_name(dev->of_node,"top_force_shutdown", 2, (uint32_t *)gpu_dfs_ctx.top_reg.args);
+
+	gpu_dfs_ctx.gpu_clk_sel_reg.regmap_ptr = syscon_regmap_lookup_by_phandle_args(dev->of_node,"gpu_clk_sel", 2, (uint32_t *)gpu_dfs_ctx.gpu_clk_sel_reg.args);
+	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.gpu_clk_sel_reg.regmap_ptr);
 
 	gpu_dfs_ctx.gpu_clock_i = of_clk_get(dev->of_node, 0);
 	gpu_dfs_ctx.gpu_clock = of_clk_get(dev->of_node, 1);
@@ -245,6 +305,7 @@ static inline void mali_clock_on(void)
 	clk_set_parent(gpu_dfs_ctx.gpu_clock, gpu_dfs_ctx.freq_default->clk_src);
 
 	KBASE_DEBUG_ASSERT(gpu_dfs_ctx.freq_cur);
+	clk_set_rate(gpu_dfs_ctx.freq_cur->clk_src, gpu_dfs_ctx.freq_cur->freq*1000);
 	clk_set_parent(gpu_dfs_ctx.gpu_clock, gpu_dfs_ctx.freq_cur->clk_src);
 
 	gpu_dfs_ctx.gpu_clock_on = 1;
@@ -277,6 +338,10 @@ static int mali_platform_init(struct kbase_device *kbdev)
 	//gpu freq
 	mali_freq_init(kbdev->dev);
 
+#ifdef CONFIG_MALI_DEVFREQ
+	InitFreqStats(kbdev);
+#endif
+
 	mali_power_on();
 
 	//clock on
@@ -306,6 +371,10 @@ static void mali_platform_term(struct kbase_device *kbdev)
 
 	//power off
 	mali_power_off();
+
+#ifdef CONFIG_MALI_DEVFREQ
+	DeinitFreqStats(kbdev);
+#endif
 
 	//free
 	vfree(gpu_freq_list);
@@ -498,7 +567,17 @@ static void gpu_change_freq(void)
 	{
 		if(gpu_dfs_ctx.freq_next->clk_src != gpu_dfs_ctx.freq_cur->clk_src)
 		{
+			clk_set_rate(gpu_dfs_ctx.freq_next->clk_src, gpu_dfs_ctx.freq_next->freq*1000);
 			clk_set_parent(gpu_dfs_ctx.gpu_clock, gpu_dfs_ctx.freq_next->clk_src);
+		}
+		else
+		{
+			if(gpu_dfs_ctx.freq_next->freq != gpu_dfs_ctx.freq_cur->freq)
+			{
+				clk_set_parent(gpu_dfs_ctx.gpu_clock, gpu_dfs_ctx.freq_default->clk_src);
+				clk_set_rate(gpu_dfs_ctx.freq_next->clk_src, gpu_dfs_ctx.freq_next->freq*1000);
+				clk_set_parent(gpu_dfs_ctx.gpu_clock, gpu_dfs_ctx.freq_next->clk_src);
+			}
 		}
 
 		gpu_dfs_ctx.freq_cur = gpu_dfs_ctx.freq_next;
@@ -643,7 +722,6 @@ int kbase_platform_dvfs_event(struct kbase_device *kbdev, u32 utilisation,
 #endif/*CONFIG_MALI_MIDGARD_DVFS*/
 
 #ifdef CONFIG_MALI_DEVFREQ
-#define FREQ_KHZ    1000
 
 int kbase_platform_get_init_freq(void)
 {

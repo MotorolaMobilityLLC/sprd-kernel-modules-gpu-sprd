@@ -63,6 +63,8 @@
 #include "mali_kbase_utility.h"
 #include "mali_kbase_mem.h"
 #include "mali_kbase_gpu_memory_debugfs.h"
+#include "mali_kbase_gpu_utilisation_debugfs.h"
+#include "mali_kbase_gpu_stats_debugfs.h"
 #include "mali_kbase_mem_profile_debugfs.h"
 #include "mali_kbase_debug_job_fault.h"
 #include "mali_kbase_jd_debugfs.h"
