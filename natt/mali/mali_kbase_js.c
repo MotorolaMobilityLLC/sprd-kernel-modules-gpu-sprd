@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
 /*
  *
- * (C) COPYRIGHT 2011-2021 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2011-2022 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -34,7 +34,7 @@
 
 #include "mali_kbase_jm.h"
 #include "mali_kbase_hwaccess_jm.h"
-#include <priority_control_manager.h>
+#include <linux/priority_control_manager.h>
 
 /*
  * Private types
@@ -623,6 +623,7 @@ void kbasep_js_devdata_term(struct kbase_device *kbdev)
 {
 	struct kbasep_js_device_data *js_devdata;
 	s8 zero_ctx_attr_ref_count[KBASEP_JS_CTX_ATTR_COUNT] = { 0, };
+	CSTD_UNUSED(js_devdata);
 
 	KBASE_DEBUG_ASSERT(kbdev != NULL);
 
@@ -640,14 +641,13 @@ void kbasep_js_devdata_term(struct kbase_device *kbdev)
 
 int kbasep_js_kctx_init(struct kbase_context *const kctx)
 {
-	struct kbase_device *kbdev;
 	struct kbasep_js_kctx_info *js_kctx_info;
 	int i, j;
+	CSTD_UNUSED(js_kctx_info);
 
 	KBASE_DEBUG_ASSERT(kctx != NULL);
 
-	kbdev = kctx->kbdev;
-	KBASE_DEBUG_ASSERT(kbdev != NULL);
+	kbase_ctx_sched_init_ctx(kctx);
 
 	for (i = 0; i < BASE_JM_MAX_NR_SLOTS; ++i)
 		INIT_LIST_HEAD(&kctx->jctx.sched_info.ctx.ctx_list_entry[i]);
@@ -690,6 +690,7 @@ void kbasep_js_kctx_term(struct kbase_context *kctx)
 	int js;
 	bool update_ctx_count = false;
 	unsigned long flags;
+	CSTD_UNUSED(js_kctx_info);
 
 	KBASE_DEBUG_ASSERT(kctx != NULL);
 
@@ -725,6 +726,8 @@ void kbasep_js_kctx_term(struct kbase_context *kctx)
 		kbase_backend_ctx_count_changed(kbdev);
 		mutex_unlock(&kbdev->js_data.runpool_mutex);
 	}
+
+	kbase_ctx_sched_remove_ctx(kctx);
 }
 
 /*
@@ -1839,6 +1842,7 @@ static kbasep_js_release_result kbasep_js_runpool_release_ctx_internal(
 	bool runpool_ctx_attr_change = false;
 	int kctx_as_nr;
 	int new_ref_count;
+	CSTD_UNUSED(kctx_as_nr);
 
 	KBASE_DEBUG_ASSERT(kbdev != NULL);
 	KBASE_DEBUG_ASSERT(kctx != NULL);
@@ -2222,6 +2226,7 @@ static bool kbasep_js_schedule_ctx(struct kbase_device *kbdev,
 #endif
 		/* Cause it to leave at some later point */
 		bool retained;
+		CSTD_UNUSED(retained);
 
 		retained = kbase_ctx_sched_inc_refcount_nolock(kctx);
 		KBASE_DEBUG_ASSERT(retained);
@@ -2567,11 +2572,10 @@ bool kbase_js_dep_resolved_submit(struct kbase_context *kctx,
 	/* If slot will transition from unpullable to pullable then add to
 	 * pullable list
 	 */
-	if (jsctx_rb_none_to_pull(kctx, katom->slot_nr)) {
+	if (jsctx_rb_none_to_pull(kctx, katom->slot_nr))
 		enqueue_required = true;
-	} else {
+	else
 		enqueue_required = false;
-	}
 
 	if ((katom->atom_flags & KBASE_KATOM_FLAG_X_DEP_BLOCKED) ||
 			(katom->pre_dep && (katom->pre_dep->atom_flags &
@@ -2697,9 +2701,9 @@ static void kbase_js_evict_deps(struct kbase_context *kctx,
 			(void *)x_dep);
 
 		/* Fail if it had a data dependency. */
-		if (x_dep->atom_flags & KBASE_KATOM_FLAG_FAIL_BLOCKER) {
+		if (x_dep->atom_flags & KBASE_KATOM_FLAG_FAIL_BLOCKER)
 			x_dep->will_fail_event_code = katom->event_code;
-		}
+
 		if (x_dep->atom_flags & KBASE_KATOM_FLAG_JSCTX_IN_X_DEP_LIST)
 			kbase_js_move_to_tree(x_dep);
 	}
@@ -3955,6 +3959,7 @@ void kbase_js_zap_context(struct kbase_context *kctx)
 	} else {
 		unsigned long flags;
 		bool was_retained;
+		CSTD_UNUSED(was_retained);
 
 		/* Case c: didn't evict, but it is scheduled - it's in the Run
 		 * Pool
@@ -3967,7 +3972,7 @@ void kbase_js_zap_context(struct kbase_context *kctx)
 
 		kbasep_js_clear_submit_allowed(js_devdata, kctx);
 
-		/* Retain and (later) release the context whilst it is is now
+		/* Retain and (later) release the context whilst it is now
 		 * disallowed from submitting jobs - ensures that someone
 		 * somewhere will be removing the context later on
 		 */
@@ -4058,13 +4063,15 @@ base_jd_prio kbase_js_priority_check(struct kbase_device *kbdev, base_jd_prio pr
 {
 	struct priority_control_manager_device *pcm_device = kbdev->pcm_dev;
 	int req_priority, out_priority;
-	base_jd_prio out_jd_priority = priority;
 
-	if (pcm_device)	{
-		req_priority = kbasep_js_atom_prio_to_sched_prio(priority);
-		out_priority = pcm_device->ops.pcm_scheduler_priority_check(pcm_device, current, req_priority);
-		out_jd_priority = kbasep_js_sched_prio_to_atom_prio(out_priority);
-	}
-	return out_jd_priority;
+	req_priority = kbasep_js_atom_prio_to_sched_prio(priority);
+	out_priority = req_priority;
+	/* Does not use pcm defined priority check if PCM not defined or if
+	 * kbasep_js_atom_prio_to_sched_prio returns an error
+	 * (KBASE_JS_ATOM_SCHED_PRIO_INVALID).
+	 */
+	if (pcm_device && (req_priority != KBASE_JS_ATOM_SCHED_PRIO_INVALID))
+		out_priority = pcm_device->ops.pcm_scheduler_priority_check(pcm_device, current,
+									    req_priority);
+	return kbasep_js_sched_prio_to_atom_prio(kbdev, out_priority);
 }
-

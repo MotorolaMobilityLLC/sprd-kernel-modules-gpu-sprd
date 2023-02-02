@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
 /*
  *
- * (C) COPYRIGHT 2014-2021 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2014-2022 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -29,8 +29,8 @@
 #include <linux/of.h>
 #include <linux/clk.h>
 #include <linux/devfreq.h>
-#if IS_ENABLED(CONFIG_UNISOC_GPU_COOLING_DEVICE)
-#include <linux/unisoc_gpu_cooling.h>
+#if IS_ENABLED(CONFIG_SPRD_GPU_COOLING_DEVICE)
+#include <linux/sprd_gpu_device.h>
 #else
 #if IS_ENABLED(CONFIG_DEVFREQ_THERMAL)
 #include <linux/devfreq_cooling.h>
@@ -65,7 +65,7 @@ extern void kbase_gpu_set_freq_stats(struct kbase_device *kbdev);
  * This function will be called only when the opp table which is compatible with
  * "operating-points-v2-mali", is not present in the devicetree for GPU device.
  *
- * Return: Voltage value in milli volts, 0 in case of error.
+ * Return: Voltage value in micro volts, 0 in case of error.
  */
 static unsigned long get_voltage(struct kbase_device *kbdev, unsigned long freq)
 {
@@ -79,7 +79,7 @@ static unsigned long get_voltage(struct kbase_device *kbdev, unsigned long freq)
 	opp = dev_pm_opp_find_freq_exact(kbdev->dev, freq, true);
 
 	if (IS_ERR_OR_NULL(opp))
-		dev_err(kbdev->dev, "Failed to get opp (%ld)\n", PTR_ERR(opp));
+		dev_err(kbdev->dev, "Failed to get opp (%d)\n", PTR_ERR_OR_ZERO(opp));
 	else {
 		voltage = dev_pm_opp_get_voltage(opp);
 #if KERNEL_VERSION(4, 11, 0) <= LINUX_VERSION_CODE
@@ -91,8 +91,8 @@ static unsigned long get_voltage(struct kbase_device *kbdev, unsigned long freq)
 	rcu_read_unlock();
 #endif
 
-	/* Return the voltage in milli volts */
-	return voltage / 1000;
+	/* Return the voltage in micro volts */
+	return voltage;
 }
 
 void kbase_devfreq_opp_translate(struct kbase_device *kbdev, unsigned long freq,
@@ -139,6 +139,9 @@ kbase_devfreq_target(struct device *dev, unsigned long *target_freq, u32 flags)
 	unsigned long nominal_freq;
 	unsigned long voltage;
 	unsigned long freqs[BASE_MAX_NR_CLOCKS_REGULATORS] = {0};
+#if IS_ENABLED(CONFIG_REGULATOR)
+	unsigned long original_freqs[BASE_MAX_NR_CLOCKS_REGULATORS] = {0};
+#endif
 	unsigned long volts[BASE_MAX_NR_CLOCKS_REGULATORS] = {0};
 	unsigned int i;
 	int err;
@@ -174,13 +177,12 @@ kbase_devfreq_target(struct device *dev, unsigned long *target_freq, u32 flags)
 		trace_clock_set_rate("unisoc-gpu-freq", nominal_freq, raw_smp_processor_id());
 		trace_clock_set_rate("unisoc-gpu-utilization", busy_time*100/total_time, raw_smp_processor_id());
 	}
-
 #if KERNEL_VERSION(4, 11, 0) > LINUX_VERSION_CODE
 	rcu_read_unlock();
 #endif
 	if (IS_ERR_OR_NULL(opp)) {
-		dev_err(dev, "Failed to get opp (%ld)\n", PTR_ERR(opp));
-		return PTR_ERR(opp);
+		dev_err(dev, "Failed to get opp (%d)\n", PTR_ERR_OR_ZERO(opp));
+		return IS_ERR(opp) ? PTR_ERR(opp) : -ENODEV;
 	}
 #if KERNEL_VERSION(4, 11, 0) <= LINUX_VERSION_CODE
 	dev_pm_opp_put(opp);
@@ -201,15 +203,16 @@ kbase_devfreq_target(struct device *dev, unsigned long *target_freq, u32 flags)
 	/* Regulators and clocks work in pairs: every clock has a regulator,
 	 * and we never expect to have more regulators than clocks.
 	 *
-	 * We always need to increase the voltage before increasing
-	 * the frequency of a regulator/clock pair, otherwise the clock
-	 * wouldn't have enough power to perform the transition.
+	 * We always need to increase the voltage before increasing the number
+	 * of shader cores and the frequency of a regulator/clock pair,
+	 * otherwise the clock wouldn't have enough power to perform
+	 * the transition.
 	 *
-	 * It's always safer to decrease the frequency before decreasing
-	 * voltage of a regulator/clock pair, otherwise the clock could have
-	 * problems operating if it is deprived of the necessary power
-	 * to sustain its current frequency (even if that happens for a short
-	 * transition interval).
+	 * It's always safer to decrease the number of shader cores and
+	 * the frequency before decreasing voltage of a regulator/clock pair,
+	 * otherwise the clock could have problematic operation if it is
+	 * deprived of the necessary power to sustain its current frequency
+	 * (even if that happens for a short transition interval).
 	 */
 	for (i = 0; i < kbdev->nr_clocks; i++) {
 		if (kbdev->regulators[i] &&
@@ -236,6 +239,9 @@ kbase_devfreq_target(struct device *dev, unsigned long *target_freq, u32 flags)
 
 			err = clk_set_rate(kbdev->clocks[i], freqs[i]);
 			if (!err) {
+#if IS_ENABLED(CONFIG_REGULATOR)
+				original_freqs[i] = kbdev->current_freqs[i];
+#endif
 				kbdev->current_freqs[i] = freqs[i];
 			} else {
 				dev_err(dev, "Failed to set clock %lu (target %lu)\n",
@@ -244,17 +250,17 @@ kbase_devfreq_target(struct device *dev, unsigned long *target_freq, u32 flags)
 			}
 		}
 	}*/
-
 	err = kbase_platform_set_freq_volt(nominal_freq, voltage);
 	if (err) {
 		return err;
 	}
+	kbase_devfreq_set_core_mask(kbdev, core_mask);
 
 #if IS_ENABLED(CONFIG_REGULATOR)
 	for (i = 0; i < kbdev->nr_clocks; i++) {
 		if (kbdev->regulators[i] &&
 				kbdev->current_voltages[i] != volts[i] &&
-				kbdev->current_freqs[i] > freqs[i]) {
+				original_freqs[i] > freqs[i]) {
 			int err;
 
 			err = regulator_set_voltage(kbdev->regulators[i],
@@ -269,8 +275,6 @@ kbase_devfreq_target(struct device *dev, unsigned long *target_freq, u32 flags)
 		}
 	}
 #endif
-
-	kbase_devfreq_set_core_mask(kbdev, core_mask);
 
 	*target_freq = nominal_freq;
 	kbdev->current_nominal_freq = nominal_freq;
@@ -323,6 +327,7 @@ kbase_devfreq_status(struct device *dev, struct devfreq_dev_status *stat)
 		if (ret)
 			printk(KERN_ERR "%s:kbase_platform_set_DVFS_table fail err: %d.\n", __func__, ret);
 	}
+
 	return 0;
 }
 
@@ -371,6 +376,7 @@ static int kbase_devfreq_init_freq_table(struct kbase_device *kbdev,
 				count, i);
 
 	dp->max_state = i;
+
 
 	/* Have the lowest clock as suspend clock.
 	 * It may be overridden by 'opp-mali-errata-1485982'.
@@ -685,13 +691,13 @@ static void kbase_devfreq_work_term(struct kbase_device *kbdev)
 	destroy_workqueue(workq);
 }
 
-
 int kbase_devfreq_init(struct kbase_device *kbdev)
 {
 	struct devfreq_dev_profile *dp;
 	struct devfreq_simple_ondemand_data *data;
 	int err;
 	//unsigned int i;
+	bool free_devfreq_freq_table = true;
 
 	/*if (kbdev->nr_clocks == 0) {
 		dev_err(kbdev->dev, "Clock not available for devfreq\n");
@@ -732,11 +738,17 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 			dp->freq_table[0] / 1000;
 	}
 
-	err = kbase_devfreq_init_core_mask_table(kbdev);
+#if IS_ENABLED(CONFIG_DEVFREQ_THERMAL) && !IS_ENABLED(CONFIG_SPRD_GPU_COOLING_DEVICE)
+	err = kbase_ipa_init(kbdev);
 	if (err) {
-		kbase_devfreq_term_freq_table(kbdev);
-		return err;
+		dev_err(kbdev->dev, "IPA initialization failed");
+		goto ipa_init_failed;
 	}
+#endif
+
+	err = kbase_devfreq_init_core_mask_table(kbdev);
+	if (err)
+		goto init_core_mask_table_failed;
 
 	data = vmalloc(sizeof(struct devfreq_simple_ondemand_data));
 #ifdef DEBUG_GPU_PERFORMANCE
@@ -746,26 +758,24 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 	data->upthreshold = 90;
 	data->downdifferential = 5;
 #endif
+
 	kbdev->devfreq = devfreq_add_device(kbdev->dev, dp,
 				"simple_ondemand", data);
 	if (IS_ERR(kbdev->devfreq)) {
 		err = PTR_ERR(kbdev->devfreq);
 		kbdev->devfreq = NULL;
-		kbase_devfreq_term_core_mask_table(kbdev);
-		kbase_devfreq_term_freq_table(kbdev);
-		dev_err(kbdev->dev, "Fail to add devfreq device(%d)\n", err);
-		return err;
+		dev_err(kbdev->dev, "Fail to add devfreq device(%d)", err);
+		goto devfreq_add_dev_failed;
 	}
+
+	/* Explicit free of freq table isn't needed after devfreq_add_device() */
+	free_devfreq_freq_table = false;
 
 	/* Initialize devfreq suspend/resume workqueue */
 	err = kbase_devfreq_work_init(kbdev);
 	if (err) {
-		if (devfreq_remove_device(kbdev->devfreq))
-			dev_err(kbdev->dev, "Fail to rm devfreq\n");
-		kbdev->devfreq = NULL;
-		kbase_devfreq_term_core_mask_table(kbdev);
-		dev_err(kbdev->dev, "Fail to init devfreq workqueue\n");
-		return err;
+		dev_err(kbdev->dev, "Fail to init devfreq workqueue");
+		goto devfreq_work_init_failed;
 	}
 
 	/* devfreq_add_device only copies a few of kbdev->dev's fields, so
@@ -773,18 +783,17 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 	 */
 	dev_set_drvdata(&kbdev->devfreq->dev, kbdev);
 
-	//The min_freq and max_freq is not defined in kernel5.15/include/linux/devfreq.h, and is exist in kernel5.4 or earlier.
-	//kbdev->devfreq->min_freq = kbase_platform_get_min_freq();
-	//kbdev->devfreq->max_freq = kbase_platform_get_max_freq();
+	//set max and min freq
+	kbdev->devfreq->min_freq = kbase_platform_get_min_freq();
+	kbdev->devfreq->max_freq = kbase_platform_get_max_freq();
 
 	err = devfreq_register_opp_notifier(kbdev->dev, kbdev->devfreq);
 	if (err) {
 		dev_err(kbdev->dev,
-			"Failed to register OPP notifier (%d)\n", err);
+			"Failed to register OPP notifier (%d)", err);
 		goto opp_notifier_failed;
 	}
-
-#if IS_ENABLED(CONFIG_UNISOC_GPU_COOLING_DEVICE)
+#if IS_ENABLED(CONFIG_SPRD_GPU_COOLING_DEVICE)
 	err = create_gpu_cooling_device(kbdev->devfreq, &kbdev->pm.debug_core_mask_all);
 	if (err) {
 		dev_err(kbdev->dev,
@@ -792,23 +801,16 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 		//goto cooling_failed;
 	}
 #else
-
 #if IS_ENABLED(CONFIG_DEVFREQ_THERMAL)
-	err = kbase_ipa_init(kbdev);
-	if (err) {
-		dev_err(kbdev->dev, "IPA initialization failed\n");
-		goto ipa_init_failed;
-	}
-
 	kbdev->devfreq_cooling = of_devfreq_cooling_register_power(
 			kbdev->dev->of_node,
 			kbdev->devfreq,
 			&kbase_ipa_power_model_ops);
 	if (IS_ERR_OR_NULL(kbdev->devfreq_cooling)) {
-		err = PTR_ERR(kbdev->devfreq_cooling);
+		err = PTR_ERR_OR_ZERO(kbdev->devfreq_cooling);
 		dev_err(kbdev->dev,
-			"Failed to register cooling device (%d)\n",
-			err);
+			"Failed to register cooling device (%d)", err);
+		err = err == 0 ? -ENODEV : err;
 		goto cooling_reg_failed;
 	}
 #endif
@@ -818,25 +820,32 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 		dev_err(kbdev->dev,
 			"Failed to get gpu thermal zone\n");
 	}
-
 	return 0;
 
-#if IS_ENABLED(CONFIG_DEVFREQ_THERMAL) && !IS_ENABLED(CONFIG_UNISOC_GPU_COOLING_DEVICE)
+#if IS_ENABLED(CONFIG_DEVFREQ_THERMAL) && !IS_ENABLED(CONFIG_SPRD_GPU_COOLING_DEVICE)
 cooling_reg_failed:
-	kbase_ipa_term(kbdev);
-ipa_init_failed:
 	devfreq_unregister_opp_notifier(kbdev->dev, kbdev->devfreq);
 #endif /* CONFIG_DEVFREQ_THERMAL */
 
 opp_notifier_failed:
 	kbase_devfreq_work_term(kbdev);
 
+devfreq_work_init_failed:
 	if (devfreq_remove_device(kbdev->devfreq))
-		dev_err(kbdev->dev, "Failed to terminate devfreq (%d)\n", err);
+		dev_err(kbdev->dev, "Failed to terminate devfreq (%d)", err);
 
 	kbdev->devfreq = NULL;
 
+devfreq_add_dev_failed:
 	kbase_devfreq_term_core_mask_table(kbdev);
+
+init_core_mask_table_failed:
+#if IS_ENABLED(CONFIG_DEVFREQ_THERMAL) && !IS_ENABLED(CONFIG_SPRD_GPU_COOLING_DEVICE)
+	kbase_ipa_term(kbdev);
+ipa_init_failed:
+#endif
+	if (free_devfreq_freq_table)
+		kbase_devfreq_term_freq_table(kbdev);
 
 	return err;
 }
@@ -847,15 +856,12 @@ void kbase_devfreq_term(struct kbase_device *kbdev)
 
 	dev_dbg(kbdev->dev, "Term Mali devfreq\n");
 
-#if IS_ENABLED(CONFIG_UNISOC_GPU_COOLING_DEVICE)
+#if IS_ENABLED(CONFIG_SPRD_GPU_COOLING_DEVICE)
 	destroy_gpu_cooling_device();
 #else
-
 #if IS_ENABLED(CONFIG_DEVFREQ_THERMAL)
 	if (kbdev->devfreq_cooling)
 		devfreq_cooling_unregister(kbdev->devfreq_cooling);
-
-	kbase_ipa_term(kbdev);
 #endif
 #endif
 
@@ -870,4 +876,8 @@ void kbase_devfreq_term(struct kbase_device *kbdev)
 		kbdev->devfreq = NULL;
 
 	kbase_devfreq_term_core_mask_table(kbdev);
+
+#if IS_ENABLED(CONFIG_DEVFREQ_THERMAL) && !IS_ENABLED(CONFIG_SPRD_GPU_COOLING_DEVICE)
+	kbase_ipa_term(kbdev);
+#endif
 }

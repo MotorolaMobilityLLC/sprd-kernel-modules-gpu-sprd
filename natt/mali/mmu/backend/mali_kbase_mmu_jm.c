@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
 /*
  *
- * (C) COPYRIGHT 2019-2021 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2019-2022 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -29,10 +29,6 @@
 #include <device/mali_kbase_device.h>
 #include <mali_kbase_as_fault_debugfs.h>
 #include <mmu/mali_kbase_mmu_internal.h>
-
-#ifdef SPRD_SUPPORT_FAULT_KEYWORD
-extern ktime_t time[FAULT_KEYWORD_NUM];
-#endif
 
 void kbase_mmu_get_as_setup(struct kbase_mmu_table *mmut,
 		struct kbase_mmu_setup * const setup)
@@ -70,7 +66,7 @@ void kbase_gpu_report_bus_fault_and_kill(struct kbase_context *kctx,
 
 	/* terminal fault, print info about the fault */
 	dev_err(kbdev->dev,
-		"GPU bus fault in AS%d at VA 0x%016llX\n"
+		"GPU bus fault in AS%d at PA 0x%016llX\n"
 		"raw fault status: 0x%X\n"
 		"exception type 0x%X: %s\n"
 		"exception data 0x%X\n"
@@ -80,9 +76,6 @@ void kbase_gpu_report_bus_fault_and_kill(struct kbase_context *kctx,
 		exception_type, kbase_gpu_exception_name(exception_type),
 		exception_data,
 		kctx->pid);
-#ifdef SPRD_SUPPORT_FAULT_KEYWORD
-    time[GPU_BUS_FAULT] = seconds_right_now();
-#endif
 
 	/* switch to UNMAPPED mode, will abort all jobs and stop any hw counter
 	 * dumping AS transaction begin
@@ -101,6 +94,7 @@ void kbase_gpu_report_bus_fault_and_kill(struct kbase_context *kctx,
 				 KBASE_MMU_FAULT_TYPE_BUS_UNEXPECTED);
 	kbase_mmu_hw_enable_fault(kbdev, as,
 				 KBASE_MMU_FAULT_TYPE_BUS_UNEXPECTED);
+
 }
 
 /*
@@ -148,9 +142,6 @@ void kbase_mmu_report_fault_and_kill(struct kbase_context *kctx,
 		access_type, kbase_gpu_access_type_name(fault->status),
 		source_id,
 		kctx->pid);
-#ifdef SPRD_SUPPORT_FAULT_KEYWORD
-	time[UNHANDLED_PAGE_FAULT] = seconds_right_now();
-#endif
 
 	/* hardware counters dump fault handling */
 	spin_lock_irqsave(&kbdev->hwcnt.lock, flags);
@@ -251,13 +242,13 @@ static void kbase_mmu_interrupt_process(struct kbase_device *kbdev,
 		 * hw counters dumping in progress, signal the
 		 * other thread that it failed
 		 */
-  		spin_lock_irqsave(&kbdev->hwcnt.lock, flags);
+		spin_lock_irqsave(&kbdev->hwcnt.lock, flags);
 		if ((kbdev->hwcnt.kctx == kctx) &&
 		    (kbdev->hwcnt.backend.state ==
 					KBASE_INSTR_STATE_DUMPING))
-			kbdev->hwcnt.backend.state =
-						KBASE_INSTR_STATE_FAULT;
-  		spin_unlock_irqrestore(&kbdev->hwcnt.lock, flags);
+			kbdev->hwcnt.backend.state = KBASE_INSTR_STATE_FAULT;
+
+		spin_unlock_irqrestore(&kbdev->hwcnt.lock, flags);
 
 		/*
 		 * Stop the kctx from submitting more jobs and cause it

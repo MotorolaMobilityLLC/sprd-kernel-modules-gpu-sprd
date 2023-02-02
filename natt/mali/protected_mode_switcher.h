@@ -27,33 +27,21 @@ struct protected_mode_device;
 /**
  * struct protected_mode_ops - Callbacks for protected mode switch operations
  *
- * @protected_mode_enable:  Callback to enable protected mode for device
+ * @protected_mode_enable:  Callback to enable protected mode for device, and
+ *                          reset device
+ *                          Returns 0 on success, non-zero on error
  * @protected_mode_disable: Callback to disable protected mode for device
+ *                          Returns 0 on success, non-zero on error
  */
 struct protected_mode_ops {
-	/*
-	 * protected_mode_enable() - Enable protected mode on device
-	 * @dev:	The struct device
-	 *
-	 * Return: 0 on success, non-zero on error
-	 */
 	int (*protected_mode_enable)(
 			struct protected_mode_device *protected_dev);
-
-	/*
-	 * protected_mode_disable() - Disable protected mode on device, and
-	 *                            reset device
-	 * @dev:	The struct device
-	 *
-	 * Return: 0 on success, non-zero on error
-	 */
 	int (*protected_mode_disable)(
 			struct protected_mode_device *protected_dev);
 };
 
 /**
  * struct protected_mode_device - Device structure for protected mode devices
- *
  * @ops:  Callbacks associated with this device
  * @data: Pointer to device private data
  *

@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
  *
- * (C) COPYRIGHT 2017-2021 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2017-2022 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -171,34 +171,6 @@ struct kbase_ioctl_hwcnt_reader_setup {
 	_IOW(KBASE_IOCTL_TYPE, 8, struct kbase_ioctl_hwcnt_reader_setup)
 
 /**
- * struct kbase_ioctl_hwcnt_enable - Enable hardware counter collection
- * @dump_buffer:  GPU address to write counters to
- * @fe_bm:        counters selection bitmask (Front end)
- * @shader_bm:    counters selection bitmask (Shader)
- * @tiler_bm:     counters selection bitmask (Tiler)
- * @mmu_l2_bm:    counters selection bitmask (MMU_L2)
- */
-struct kbase_ioctl_hwcnt_enable {
-	__u64 dump_buffer;
-	__u32 fe_bm;
-	__u32 shader_bm;
-	__u32 tiler_bm;
-	__u32 mmu_l2_bm;
-};
-
-/* This IOCTL is deprecated as of R33, and will be removed in R35. */
-#define KBASE_IOCTL_HWCNT_ENABLE \
-	_IOW(KBASE_IOCTL_TYPE, 9, struct kbase_ioctl_hwcnt_enable)
-
-/* This IOCTL is deprecated as of R33, and will be removed in R35. */
-#define KBASE_IOCTL_HWCNT_DUMP \
-	_IO(KBASE_IOCTL_TYPE, 10)
-
-/* This IOCTL is deprecated as of R33, and will be removed in R35. */
-#define KBASE_IOCTL_HWCNT_CLEAR \
-	_IO(KBASE_IOCTL_TYPE, 11)
-
-/**
  * struct kbase_ioctl_hwcnt_values - Values to set dummy the dummy counters to.
  * @data:    Counter samples for the dummy model.
  * @size:    Size of the counter sample data.
@@ -245,52 +217,6 @@ struct kbase_ioctl_get_ddk_version {
 
 #define KBASE_IOCTL_GET_DDK_VERSION \
 	_IOW(KBASE_IOCTL_TYPE, 13, struct kbase_ioctl_get_ddk_version)
-
-/**
- * struct kbase_ioctl_mem_jit_init_10_2 - Initialize the just-in-time memory
- *                                        allocator (between kernel driver
- *                                        version 10.2--11.4)
- * @va_pages: Number of VA pages to reserve for JIT
- *
- * Note that depending on the VA size of the application and GPU, the value
- * specified in @va_pages may be ignored.
- *
- * New code should use KBASE_IOCTL_MEM_JIT_INIT instead, this is kept for
- * backwards compatibility.
- */
-struct kbase_ioctl_mem_jit_init_10_2 {
-	__u64 va_pages;
-};
-
-#define KBASE_IOCTL_MEM_JIT_INIT_10_2 \
-	_IOW(KBASE_IOCTL_TYPE, 14, struct kbase_ioctl_mem_jit_init_10_2)
-
-/**
- * struct kbase_ioctl_mem_jit_init_11_5 - Initialize the just-in-time memory
- *                                        allocator (between kernel driver
- *                                        version 11.5--11.19)
- * @va_pages: Number of VA pages to reserve for JIT
- * @max_allocations: Maximum number of concurrent allocations
- * @trim_level: Level of JIT allocation trimming to perform on free (0 - 100%)
- * @group_id: Group ID to be used for physical allocations
- * @padding: Currently unused, must be zero
- *
- * Note that depending on the VA size of the application and GPU, the value
- * specified in @va_pages may be ignored.
- *
- * New code should use KBASE_IOCTL_MEM_JIT_INIT instead, this is kept for
- * backwards compatibility.
- */
-struct kbase_ioctl_mem_jit_init_11_5 {
-	__u64 va_pages;
-	__u8 max_allocations;
-	__u8 trim_level;
-	__u8 group_id;
-	__u8 padding[5];
-};
-
-#define KBASE_IOCTL_MEM_JIT_INIT_11_5 \
-	_IOW(KBASE_IOCTL_TYPE, 14, struct kbase_ioctl_mem_jit_init_11_5)
 
 /**
  * struct kbase_ioctl_mem_jit_init - Initialize the just-in-time memory
@@ -543,7 +469,7 @@ struct kbase_ioctl_sticky_resource_map {
 	_IOW(KBASE_IOCTL_TYPE, 29, struct kbase_ioctl_sticky_resource_map)
 
 /**
- * struct kbase_ioctl_sticky_resource_map - Unmap a resource mapped which was
+ * struct kbase_ioctl_sticky_resource_unmap - Unmap a resource mapped which was
  *                                          previously permanently mapped
  * @count: Number of resources
  * @address: Array of __u64 GPU addresses of the external resources to unmap
@@ -591,7 +517,8 @@ union kbase_ioctl_mem_find_gpu_start_and_offset {
 	_IO(KBASE_IOCTL_TYPE, 34)
 
 /**
- * union kbase_ioctl_gwt_dump - Used to collect all GPU write fault addresses.
+ * union kbase_ioctl_cinstr_gwt_dump - Used to collect all GPU write fault
+ *                                     addresses.
  * @in: Input parameters
  * @in.addr_buffer: Address of buffer to hold addresses of gpu modified areas.
  * @in.size_buffer: Address of buffer to hold size of modified areas (in pages)
@@ -726,7 +653,7 @@ struct kbase_ioctl_kinstr_prfcnt_enum_info {
 	_IOWR(KBASE_IOCTL_TYPE, 56, struct kbase_ioctl_kinstr_prfcnt_enum_info)
 
 /**
- * struct kbase_ioctl_hwcnt_reader_setup - Setup HWC dumper/reader
+ * struct kbase_ioctl_kinstr_prfcnt_setup - Setup HWC dumper/reader
  * @in: input parameters.
  * @in.request_item_count: Number of requests in the requests array.
  * @in.request_item_size:  Size in bytes of each request in the requests array.
