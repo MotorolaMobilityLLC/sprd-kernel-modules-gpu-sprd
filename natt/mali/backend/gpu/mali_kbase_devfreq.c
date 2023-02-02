@@ -29,8 +29,9 @@
 #include <linux/of.h>
 #include <linux/clk.h>
 #include <linux/devfreq.h>
-#if IS_ENABLED(CONFIG_SPRD_GPU_COOLING_DEVICE)
-#include <linux/sprd_gpu_device.h>
+#if IS_ENABLED(CONFIG_UNISOC_GPU_COOLING_DEVICE)
+//#include <linux/sprd_gpu_device.h>
+#include <linux/unisoc_gpu_cooling.h>
 #else
 #if IS_ENABLED(CONFIG_DEVFREQ_THERMAL)
 #include <linux/devfreq_cooling.h>
@@ -738,7 +739,7 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 			dp->freq_table[0] / 1000;
 	}
 
-#if IS_ENABLED(CONFIG_DEVFREQ_THERMAL) && !IS_ENABLED(CONFIG_SPRD_GPU_COOLING_DEVICE)
+#if IS_ENABLED(CONFIG_DEVFREQ_THERMAL) && !IS_ENABLED(CONFIG_UNISOC_GPU_COOLING_DEVICE)
 	err = kbase_ipa_init(kbdev);
 	if (err) {
 		dev_err(kbdev->dev, "IPA initialization failed");
@@ -784,8 +785,9 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 	dev_set_drvdata(&kbdev->devfreq->dev, kbdev);
 
 	//set max and min freq
-	kbdev->devfreq->min_freq = kbase_platform_get_min_freq();
-	kbdev->devfreq->max_freq = kbase_platform_get_max_freq();
+	//The min_freq and max_freq is not defined in kernel5.15/include/linux/devfreq.h, and is exist in kernel5.4 or earlier.
+	//kbdev->devfreq->min_freq = kbase_platform_get_min_freq();
+	//kbdev->devfreq->max_freq = kbase_platform_get_max_freq();
 
 	err = devfreq_register_opp_notifier(kbdev->dev, kbdev->devfreq);
 	if (err) {
@@ -793,7 +795,7 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 			"Failed to register OPP notifier (%d)", err);
 		goto opp_notifier_failed;
 	}
-#if IS_ENABLED(CONFIG_SPRD_GPU_COOLING_DEVICE)
+#if IS_ENABLED(CONFIG_UNISOC_GPU_COOLING_DEVICE)
 	err = create_gpu_cooling_device(kbdev->devfreq, &kbdev->pm.debug_core_mask_all);
 	if (err) {
 		dev_err(kbdev->dev,
@@ -822,7 +824,7 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 	}
 	return 0;
 
-#if IS_ENABLED(CONFIG_DEVFREQ_THERMAL) && !IS_ENABLED(CONFIG_SPRD_GPU_COOLING_DEVICE)
+#if IS_ENABLED(CONFIG_DEVFREQ_THERMAL) && !IS_ENABLED(CONFIG_UNISOC_GPU_COOLING_DEVICE)
 cooling_reg_failed:
 	devfreq_unregister_opp_notifier(kbdev->dev, kbdev->devfreq);
 #endif /* CONFIG_DEVFREQ_THERMAL */
@@ -840,7 +842,7 @@ devfreq_add_dev_failed:
 	kbase_devfreq_term_core_mask_table(kbdev);
 
 init_core_mask_table_failed:
-#if IS_ENABLED(CONFIG_DEVFREQ_THERMAL) && !IS_ENABLED(CONFIG_SPRD_GPU_COOLING_DEVICE)
+#if IS_ENABLED(CONFIG_DEVFREQ_THERMAL) && !IS_ENABLED(CONFIG_UNISOC_GPU_COOLING_DEVICE)
 	kbase_ipa_term(kbdev);
 ipa_init_failed:
 #endif
@@ -856,7 +858,7 @@ void kbase_devfreq_term(struct kbase_device *kbdev)
 
 	dev_dbg(kbdev->dev, "Term Mali devfreq\n");
 
-#if IS_ENABLED(CONFIG_SPRD_GPU_COOLING_DEVICE)
+#if IS_ENABLED(CONFIG_UNISOC_GPU_COOLING_DEVICE)
 	destroy_gpu_cooling_device();
 #else
 #if IS_ENABLED(CONFIG_DEVFREQ_THERMAL)
@@ -877,7 +879,7 @@ void kbase_devfreq_term(struct kbase_device *kbdev)
 
 	kbase_devfreq_term_core_mask_table(kbdev);
 
-#if IS_ENABLED(CONFIG_DEVFREQ_THERMAL) && !IS_ENABLED(CONFIG_SPRD_GPU_COOLING_DEVICE)
+#if IS_ENABLED(CONFIG_DEVFREQ_THERMAL) && !IS_ENABLED(CONFIG_UNISOC_GPU_COOLING_DEVICE)
 	kbase_ipa_term(kbdev);
 #endif
 }

@@ -51,7 +51,7 @@
 #include <backend/gpu/mali_kbase_pm_internal.h>
 
 #ifdef SPRD_SUPPORT_FAULT_KEYWORD
-extern time_t time[FAULT_KEYWORD_NUM];
+extern ktime_t time[FAULT_KEYWORD_NUM];
 #endif
 
 /* Threshold used to decide whether to flush full caches or just a physical range */
@@ -203,6 +203,7 @@ static void mmu_invalidate(struct kbase_device *kbdev, struct kbase_context *kct
 		as_nr = kctx ? kctx->as_nr : as_nr;
 		err = kbase_mmu_hw_do_unlock(kbdev, &kbdev->as[as_nr], op_param);
 	}
+	spin_unlock_irqrestore(&kbdev->hwaccess_lock, flags);
 
 	if (err) {
 		dev_err(kbdev->dev,
@@ -211,7 +212,7 @@ static void mmu_invalidate(struct kbase_device *kbdev, struct kbase_context *kct
 			kbase_reset_gpu(kbdev);
 	}
 
-	spin_unlock_irqrestore(&kbdev->hwaccess_lock, flags);
+	//spin_unlock_irqrestore(&kbdev->hwaccess_lock, flags);
 }
 
 /* Perform a flush/invalidate on a particular address space
@@ -229,6 +230,8 @@ static void mmu_flush_invalidate_as(struct kbase_device *kbdev, struct kbase_as 
 	if (kbdev->pm.backend.gpu_powered)
 		err = kbase_mmu_hw_do_flush_locked(kbdev, as, op_param);
 
+	spin_unlock_irqrestore(&kbdev->hwaccess_lock, flags);
+
 	if (err) {
 		/* Flush failed to complete, assume the GPU has hung and
 		 * perform a reset to recover.
@@ -239,7 +242,7 @@ static void mmu_flush_invalidate_as(struct kbase_device *kbdev, struct kbase_as 
 			kbase_reset_gpu_locked(kbdev);
 	}
 
-	spin_unlock_irqrestore(&kbdev->hwaccess_lock, flags);
+	//spin_unlock_irqrestore(&kbdev->hwaccess_lock, flags);
 	mutex_unlock(&kbdev->mmu_hw_mutex);
 	/* AS transaction end */
 }
@@ -325,6 +328,8 @@ static void mmu_flush_invalidate_on_gpu_ctrl(struct kbase_device *kbdev, struct 
 							op_param);
 	}
 
+	spin_unlock_irqrestore(&kbdev->hwaccess_lock, flags);
+
 	if (err) {
 		/* Flush failed to complete, assume the GPU has hung and
 		 * perform a reset to recover.
@@ -336,7 +341,7 @@ static void mmu_flush_invalidate_on_gpu_ctrl(struct kbase_device *kbdev, struct 
 			kbase_reset_gpu(kbdev);
 	}
 
-	spin_unlock_irqrestore(&kbdev->hwaccess_lock, flags);
+	//spin_unlock_irqrestore(&kbdev->hwaccess_lock, flags);
 	mutex_unlock(&kbdev->mmu_hw_mutex);
 }
 

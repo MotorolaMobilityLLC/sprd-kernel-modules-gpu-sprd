@@ -50,7 +50,7 @@
 
 #ifdef SPRD_SUPPORT_FAULT_KEYWORD
 #include <linux/sunrpc/cache.h>
-extern time_t time[FAULT_KEYWORD_NUM];
+extern ktime_t time[FAULT_KEYWORD_NUM];
 #endif
 
 /* Return whether katom will run on the GPU or not. Currently only soft jobs and

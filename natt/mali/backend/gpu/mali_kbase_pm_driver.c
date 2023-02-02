@@ -318,13 +318,6 @@ static void mali_cci_flush_l2(struct kbase_device *kbdev)
 }
 #endif
 
-#ifdef QOGIRN6P_GPU_POLLING
-extern void mali_core_state_check(void);
-#endif
-
-#ifdef QOGIRL6_GPU_POLLING
-extern void gpu_polling_power_on(struct kbase_device *kbdev);
-#endif
 /**
  * kbase_pm_invoke - Invokes an action on a core set
  *
@@ -345,6 +338,7 @@ static void kbase_pm_invoke(struct kbase_device *kbdev,
 	u32 reg;
 	u32 lo = cores & 0xFFFFFFFF;
 	u32 hi = (cores >> 32) & 0xFFFFFFFF;
+	struct kbase_pm_backend_data *backend = &kbdev->pm.backend;
 
 	lockdep_assert_held(&kbdev->hwaccess_lock);
 
@@ -412,16 +406,12 @@ static void kbase_pm_invoke(struct kbase_device *kbdev,
 		if (hi != 0)
 			kbase_reg_write(kbdev, GPU_CONTROL_REG(reg + 4), hi);
 
-		if(action == ACTION_PWRON &&  core_type== KBASE_PM_CORE_SHADER){
-#ifdef QOGIRN6P_GPU_POLLING
-			mali_core_state_check();
-#else
-	#ifdef QOGIRL6_GPU_POLLING
-			gpu_polling_power_on(kbdev);
-	#else
-			udelay(120);
-	#endif
-#endif
+		if(action == ACTION_PWRON && core_type== KBASE_PM_CORE_SHADER){
+			if(backend->callback_power_shader_polling){
+				backend->callback_power_shader_polling(kbdev);
+			}else{
+				udelay(120);
+			}
 		}
 	}
 }

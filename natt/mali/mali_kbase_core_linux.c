@@ -27,7 +27,7 @@
 #ifdef CONFIG_MALI_DEVFREQ
 #include <linux/devfreq.h>
 #include <backend/gpu/mali_kbase_devfreq.h>
-#if IS_ENABLED(CONFIG_DEVFREQ_THERMAL) && !IS_ENABLED(CONFIG_SPRD_GPU_COOLING_DEVICE)
+#if IS_ENABLED(CONFIG_DEVFREQ_THERMAL) && !IS_ENABLED(CONFIG_UNISOC_GPU_COOLING_DEVICE)
 #include <ipa/mali_kbase_ipa_debugfs.h>
 #endif /* CONFIG_DEVFREQ_THERMAL */
 #endif /* CONFIG_MALI_DEVFREQ */
@@ -134,7 +134,7 @@
 					 (((minor) & 0xFFF) << 8) | \
 					 ((0 & 0xFF) << 0))
 
-time_t time[FAULT_KEYWORD_NUM] = {0};
+ktime_t time[FAULT_KEYWORD_NUM] = {0};
 const char fault_keyword[FAULT_KEYWORD_NUM][30] = {
 	{"DONE"},
 	{"TRANSLATION_FAULT"},
@@ -5081,7 +5081,7 @@ static struct dentry *init_debugfs(struct kbase_device *kbdev)
 	kbase_ktrace_debugfs_init(kbdev);
 
 #ifdef CONFIG_MALI_DEVFREQ
-#if IS_ENABLED(CONFIG_DEVFREQ_THERMAL) && !IS_ENABLED(CONFIG_SPRD_GPU_COOLING_DEVICE)
+#if IS_ENABLED(CONFIG_DEVFREQ_THERMAL) && !IS_ENABLED(CONFIG_UNISOC_GPU_COOLING_DEVICE)
 	if (kbdev->devfreq)
 		kbase_ipa_debugfs_init(kbdev);
 #endif /* CONFIG_DEVFREQ_THERMAL */

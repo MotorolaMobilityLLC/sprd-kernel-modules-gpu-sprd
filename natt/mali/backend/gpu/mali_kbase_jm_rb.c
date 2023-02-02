@@ -39,7 +39,7 @@
 
 #ifdef SPRD_SUPPORT_FAULT_KEYWORD
 #include <string.h>
-extern time_t time[FAULT_KEYWORD_NUM];
+extern ktime_t time[FAULT_KEYWORD_NUM];
 #endif
 
 extern void kbase_trace_gpu_work_period(struct kbase_device *kbdev, struct kbase_jd_atom *katom, ktime_t end_timestamp);
@@ -1198,7 +1198,7 @@ void kbase_gpu_complete_hw(struct kbase_device *kbdev, int js,
 {
 	struct kbase_jd_atom *katom = kbase_gpu_inspect(kbdev, js, 0);
 	struct kbase_context *kctx = katom->kctx;
-	time_t now;
+	ktime_t now;
 
 	dev_dbg(kbdev->dev,
 		"Atom %pK completed on hw with code 0x%x and job_tail 0x%llx (s:%d)\n",

@@ -30,6 +30,10 @@
 #include <mali_kbase_as_fault_debugfs.h>
 #include <mmu/mali_kbase_mmu_internal.h>
 
+#ifdef SPRD_SUPPORT_FAULT_KEYWORD
+extern ktime_t time[FAULT_KEYWORD_NUM];
+#endif
+
 void kbase_mmu_get_as_setup(struct kbase_mmu_table *mmut,
 		struct kbase_mmu_setup * const setup)
 {

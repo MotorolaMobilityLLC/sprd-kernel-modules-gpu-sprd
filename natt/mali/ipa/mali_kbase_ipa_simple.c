@@ -21,7 +21,7 @@
 
 #include <uapi/linux/thermal.h>
 #include <linux/thermal.h>
-#if IS_ENABLED(CONFIG_DEVFREQ_THERMAL) && !IS_ENABLED(CONFIG_SPRD_GPU_COOLING_DEVICE)
+#if IS_ENABLED(CONFIG_DEVFREQ_THERMAL) && !IS_ENABLED(CONFIG_UNISOC_GPU_COOLING_DEVICE)
 #include <linux/devfreq_cooling.h>
 #endif
 #include <linux/of.h>
