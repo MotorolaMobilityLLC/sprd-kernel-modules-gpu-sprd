@@ -80,7 +80,9 @@ void kbase_gpu_report_bus_fault_and_kill(struct kbase_context *kctx,
 		exception_type, kbase_gpu_exception_name(exception_type),
 		exception_data,
 		kctx->pid);
-
+#ifdef SPRD_SUPPORT_FAULT_KEYWORD
+    time[GPU_BUS_FAULT] = seconds_right_now();
+#endif
 	/* switch to UNMAPPED mode, will abort all jobs and stop any hw counter
 	 * dumping AS transaction begin
 	 */
@@ -146,7 +148,9 @@ void kbase_mmu_report_fault_and_kill(struct kbase_context *kctx,
 		access_type, kbase_gpu_access_type_name(fault->status),
 		source_id,
 		kctx->pid);
-
+#ifdef SPRD_SUPPORT_FAULT_KEYWORD
+	time[UNHANDLED_PAGE_FAULT] = seconds_right_now();
+#endif
 	/* hardware counters dump fault handling */
 	spin_lock_irqsave(&kbdev->hwcnt.lock, flags);
 	if ((kbdev->hwcnt.kctx) && (kbdev->hwcnt.kctx->as_nr == as_no) &&

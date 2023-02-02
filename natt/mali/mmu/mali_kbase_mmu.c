@@ -230,8 +230,6 @@ static void mmu_flush_invalidate_as(struct kbase_device *kbdev, struct kbase_as 
 	if (kbdev->pm.backend.gpu_powered)
 		err = kbase_mmu_hw_do_flush_locked(kbdev, as, op_param);
 
-	spin_unlock_irqrestore(&kbdev->hwaccess_lock, flags);
-
 	if (err) {
 		/* Flush failed to complete, assume the GPU has hung and
 		 * perform a reset to recover.
@@ -242,7 +240,7 @@ static void mmu_flush_invalidate_as(struct kbase_device *kbdev, struct kbase_as 
 			kbase_reset_gpu_locked(kbdev);
 	}
 
-	//spin_unlock_irqrestore(&kbdev->hwaccess_lock, flags);
+	spin_unlock_irqrestore(&kbdev->hwaccess_lock, flags);
 	mutex_unlock(&kbdev->mmu_hw_mutex);
 	/* AS transaction end */
 }

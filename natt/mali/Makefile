@@ -107,7 +107,7 @@ ifeq ($(CONFIG_MALI_MIDGARD),m)
             # Prevent misuse when CONFIG_MALI_DEBUG=n
             CONFIG_MALI_MIDGARD_ENABLE_TRACE = n
             CONFIG_MALI_SYSTEM_TRACE = n
-            CONFIG_MALI_FENCE_DEBUG = n
+            CONFIG_MALI_FENCE_DEBUG = y
         endif
     else
         # Prevent misuse when CONFIG_MALI_EXPERT=n

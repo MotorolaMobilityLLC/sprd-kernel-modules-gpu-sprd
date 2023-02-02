@@ -23,6 +23,7 @@
 #include <linux/list.h>
 #include <mali_kbase_fence.h>
 #include <mali_kbase.h>
+#include <mali_kbase_fence.h>
 
 static const char *
 #if (KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE)

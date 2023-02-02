@@ -1198,7 +1198,9 @@ void kbase_gpu_complete_hw(struct kbase_device *kbdev, int js,
 {
 	struct kbase_jd_atom *katom = kbase_gpu_inspect(kbdev, js, 0);
 	struct kbase_context *kctx = katom->kctx;
+#ifdef SPRD_SUPPORT_FAULT_KEYWORD
 	ktime_t now;
+#endif
 
 	dev_dbg(kbdev->dev,
 		"Atom %pK completed on hw with code 0x%x and job_tail 0x%llx (s:%d)\n",
