@@ -1609,6 +1609,9 @@ int kbase_jd_init(struct kbase_context *kctx)
 	INIT_LIST_HEAD(&kctx->completed_jobs);
 	atomic_set(&kctx->work_count, 0);
 
+	atomic_set(&kctx->const_exe_count[0], 0);
+	atomic_set(&kctx->const_exe_count[1], 0);
+	atomic_set(&kctx->const_exe_count[2], 0);
 	return 0;
 
  out1:

@@ -3964,6 +3964,8 @@ static int kbase_platform_device_probe(struct platform_device *pdev)
 	}
 	kbdev->inited_subsys |= inited_registers_map;
 
+	kbdev->js_ctx_scheduling_mode = KBASE_JS_PROCESS_LOCAL_PRIORITY_MODE;
+
 	err = power_control_init(pdev);
 	if (err) {
 		dev_err(&pdev->dev, "Power control initialization failed\n");

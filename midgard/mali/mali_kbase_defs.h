@@ -2013,6 +2013,8 @@ struct kbase_context {
 
 	atomic_t flags;
 
+	atomic_t const_exe_count[3];
+
 	atomic_t                setup_complete;
 	atomic_t                setup_in_progress;
 
