@@ -32,6 +32,9 @@
 /* Dump Job slot trace on error (only active if KBASE_KTRACE_ENABLE != 0) */
 #define KBASE_KTRACE_DUMP_ON_JOB_SLOT_ERROR 1
 
+/* Force a low-priority task to run every KBASE_LOW_PRIO_NEED_EXEC_COUNT high-priority tasks. */
+#define KBASE_LOW_PRIO_NEED_EXEC_COUNT 5
+
 /*
  * Number of milliseconds before resetting the GPU when a job cannot be "zapped"
  *  from the hardware. Note that the time is actually

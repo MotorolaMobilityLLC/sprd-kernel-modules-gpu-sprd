@@ -2188,6 +2188,10 @@ int kbase_jd_init(struct kbase_context *kctx)
 	INIT_LIST_HEAD(&kctx->completed_jobs);
 	atomic_set(&kctx->work_count, 0);
 
+	atomic_set(&kctx->const_exe_count[0], 0);
+	atomic_set(&kctx->const_exe_count[1], 0);
+	atomic_set(&kctx->const_exe_count[2], 0);
+
 	/* Check if there are platform rules for maximum priority */
 	if (pcm_device)
 		kctx->jctx.max_priority = pcm_device->ops.pcm_scheduler_priority_check(

@@ -1742,6 +1742,8 @@ struct kbase_context {
 
 	atomic_t flags;
 
+	atomic_t const_exe_count[3];
+
 	struct tagged_addr aliasing_sink_page;
 
 	spinlock_t              mem_partials_lock;

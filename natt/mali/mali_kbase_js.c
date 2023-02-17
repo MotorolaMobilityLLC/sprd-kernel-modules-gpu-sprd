@@ -1080,6 +1080,29 @@ static bool kbase_js_ctx_list_remove_nolock(struct kbase_device *kbdev,
  * Return:  Context to use for specified slot.
  *          NULL if no contexts present for specified slot
  */
+
+static struct kbase_context *kbase_js_ctx_list_head_popped__nolock(
+						struct kbase_device *kbdev,
+						int js, int start_sched_prio)
+{
+	struct kbase_context *kctx;
+	int i;
+
+	lockdep_assert_held(&kbdev->hwaccess_lock);
+
+	for (i = start_sched_prio; i < KBASE_JS_ATOM_SCHED_PRIO_COUNT; i++) {
+		if (list_empty(&kbdev->js_data.ctx_list_pullable[js][i]))
+			continue;
+
+		kctx = list_entry(kbdev->js_data.ctx_list_pullable[js][i].next,
+				struct kbase_context,
+				jctx.sched_info.ctx.ctx_list_entry[js]);
+
+		return kctx;
+	}
+	return NULL;
+}
+
 static struct kbase_context *kbase_js_ctx_list_pop_head_nolock(
 						struct kbase_device *kbdev,
 						int js)
@@ -1097,7 +1120,20 @@ static struct kbase_context *kbase_js_ctx_list_pop_head_nolock(
 				struct kbase_context,
 				jctx.sched_info.ctx.ctx_list_entry[js]);
 
+		if (atomic_read(&kctx->const_exe_count[js]) >= KBASE_LOW_PRIO_NEED_EXEC_COUNT &&
+			kbase_js_ctx_list_head_popped__nolock(kbdev, js, i+1) != NULL) {
+			//printk("%s:%d, js:%d, i:%d, count:%d, tgid:%d, current:%d", __func__, __LINE__, js, i, atomic_read(&kctx->const_exe_count[js]), kctx->tgid, current->pid);
+			atomic_set(&kctx->const_exe_count[js], 0);
+			continue;
+		}
+
+		if (kctx == kbdev->hwaccess.active_kctx[js]) {
+			//printk("%s:%d, js:%d, i:%d, count:%d, tgid:%d, current:%d", __func__, __LINE__, js, i, atomic_read(&kctx->const_exe_count[js]), kctx->tgid, current->pid);
+			atomic_inc(&kctx->const_exe_count[js]);
+		}
+
 		list_del_init(&kctx->jctx.sched_info.ctx.ctx_list_entry[js]);
+
 		dev_dbg(kbdev->dev,
 			"Popped %pK from the pullable queue (s:%d)\n",
 			(void *)kctx, js);

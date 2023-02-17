@@ -257,6 +257,8 @@ int kbase_device_init(struct kbase_device *kbdev)
 	kbase_device_id_init(kbdev);
 	kbase_disjoint_init(kbdev);
 
+	kbdev->js_ctx_scheduling_mode = KBASE_JS_PROCESS_LOCAL_PRIORITY_MODE;
+
 	for (i = 0; i < ARRAY_SIZE(dev_init); i++) {
 		if (dev_init[i].init) {
 			err = dev_init[i].init(kbdev);
