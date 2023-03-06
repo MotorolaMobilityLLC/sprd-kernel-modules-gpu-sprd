@@ -76,6 +76,12 @@
 /** Number of milliseconds before we time out on a GPU soft/hard reset */
 #define RESET_TIMEOUT           500
 
+#define TIMEOUT 1000000000
+#define TIMEOUT_2s 2000000000
+#define TIMEOUT_3s 3000000000
+#define TIMEOUT_4s 4000000000
+#define KTIME_100ms 100000000
+
 /**
  * BASE_JM_MAX_NR_SLOTS - The maximum number of Job Slots to support in the Hardware.
  *
@@ -1948,6 +1954,7 @@ struct kbase_context {
 	atomic_t jd_submit_num;
 	struct job_chain_record jd_submit_list[50];
 	struct poll_status poll_status;
+	ktime_t  last_report_time;
 };
 
 #ifdef CONFIG_MALI_CINSTR_GWT

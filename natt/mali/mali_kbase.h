@@ -133,6 +133,9 @@ struct kbase_device *kbase_device_alloc(void);
  * been setup before calling kbase_device_init
  */
 
+void kbase_atom_dump_execption(struct kbase_jd_atom *katom, bool reset);
+void kbase_get_time_string(char *time_string, ktime_t time);
+
 int kbase_device_misc_init(struct kbase_device *kbdev);
 void kbase_device_misc_term(struct kbase_device *kbdev);
 void kbase_device_free(struct kbase_device *kbdev);

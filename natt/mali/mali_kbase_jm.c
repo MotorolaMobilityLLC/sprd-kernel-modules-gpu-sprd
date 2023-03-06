@@ -58,7 +58,7 @@ static bool kbase_jm_next_job(struct kbase_device *kbdev, int js,
 			return true; /* Context has no jobs on this slot */
 
 		//add katom pull time
-		katom->job_process_timestamp.job_pull_time = ktime_get();
+		katom->jb_proc_ts.time[JS_PULL] = ktime_get();
 
 		kbase_backend_run_atom(kbdev, katom);
 	}

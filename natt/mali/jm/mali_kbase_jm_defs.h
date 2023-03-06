@@ -177,6 +177,7 @@ struct base_job_fault_event {
 struct kbase_jd_atom_dependency {
 	struct kbase_jd_atom *atom;
 	u8 dep_type;
+	ktime_t dep_resolved;
 };
 
 /**
@@ -222,6 +223,7 @@ static inline void kbase_jd_katom_dep_set(
 
 	dep->atom = a;
 	dep->dep_type = type;
+	dep->dep_resolved = 0;
 }
 
 /**
@@ -238,6 +240,7 @@ static inline void kbase_jd_katom_dep_clear(
 
 	dep->atom = NULL;
 	dep->dep_type = BASE_JD_DEP_TYPE_INVALID;
+	dep->dep_resolved = ktime_get();
 }
 
 /**
@@ -400,19 +403,21 @@ struct kbase_work_time_spent {
 	ktime_t queue_work_time;
 	ktime_t done_work_time;
 };
+#define JB_SUBMIT 0
+#define JS_ADD 1
+#define JS_PULL 2
+#define HW_SUBMIT 3
+#define HW_END 4
+#define JS_COMPLETE 5
+#define JD_DONE 6
+#define POST_EVENT 7
+#define WAKE_UP 8
+#define PROCESS_EVENT 9
+#define FENCE_TRIGGER 10
+#define JB_TIME_NUM 11
 
 struct kbase_job_process_timestamp {
-	ktime_t job_submit_time;
-	ktime_t post_event_time;
-	ktime_t wake_up_time;
-	ktime_t js_complete_time;
-	ktime_t hw_job_start_time;
-	ktime_t hw_job_end_time;
-	ktime_t process_event_time;
-	ktime_t fence_trigger_signal_time;
-	ktime_t job_nolock_time;
-	ktime_t job_add_time;
-	ktime_t job_pull_time;
+	ktime_t time[JB_TIME_NUM];
 };
 
 /**
@@ -695,7 +700,7 @@ struct kbase_jd_atom {
 	int user_dep[2];
 	bool fence_info_showed;
 	enum kbase_jd_atom_run_status run_status;
-	struct kbase_job_process_timestamp job_process_timestamp;
+	struct kbase_job_process_timestamp jb_proc_ts;
 	struct kbase_work_time_spent jd_done_work;
 	struct kbase_work_time_spent dma_fence_work;
 	struct kbase_work_time_spent sync_wait_fence_work;
@@ -895,6 +900,8 @@ struct kbase_jd_context {
 	struct workqueue_struct *job_done_wq;
 
 	wait_queue_head_t zero_jobs_wait;
+	wait_queue_head_t dumping_atoms_wait;
+	atomic_t is_dumping;
 	spinlock_t tb_lock;
 	u32 *tb;
 	u32 job_nr;

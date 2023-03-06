@@ -205,7 +205,7 @@ int kbase_job_hw_submit(struct kbase_device *kbdev, struct kbase_jd_atom *katom,
 
 	kctx = katom->kctx;
 	katom->run_status |= KRun_JobHWSubmit;
-	katom->job_process_timestamp.hw_job_start_time = ktime_get();
+	katom->jb_proc_ts.time[HW_SUBMIT] = ktime_get();
 
 	/* Command register must be available */
 	if (WARN(!kbasep_jm_is_js_free(kbdev, js, kctx),

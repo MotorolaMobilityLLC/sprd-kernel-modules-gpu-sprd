@@ -144,7 +144,7 @@ kbase_sync_fence_out_trigger(struct kbase_jd_atom *katom, int result)
 	int res;
 
 	katom->run_status |= kRun_FenceOutTrigger;
-	katom->job_process_timestamp.fence_trigger_signal_time = ktime_get();
+	katom->jb_proc_ts.time[FENCE_TRIGGER] = ktime_get();
 	if (!kbase_fence_out_is_ours(katom)) {
 		/* Not our fence */
 		return BASE_JD_EVENT_JOB_CANCELLED;
@@ -245,7 +245,7 @@ int kbase_sync_fence_in_wait(struct kbase_jd_atom *katom)
 	if (unlikely(err)) {
 		/* We should cause the dependent jobs in the bag to be failed. */
 		katom->event_code = BASE_JD_EVENT_JOB_CANCELLED;
-
+		katom->run_status |= KRun_FenceInAddCallbackFail;
 		/* The completion for FENCE_WAIT softjob can be done right away. */
 		return 0;
 	}

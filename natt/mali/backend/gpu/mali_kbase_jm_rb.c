@@ -1207,7 +1207,7 @@ void kbase_gpu_complete_hw(struct kbase_device *kbdev, int js,
 		(void *)katom, completion_code, job_tail, js);
 
 	katom->run_status |= KRun_GpuCompleteHW;
-	katom->job_process_timestamp.hw_job_end_time = *end_timestamp;
+	katom->jb_proc_ts.time[HW_END] = *end_timestamp;
 	katom->completion_code = completion_code;
 	if ( completion_code == BASE_JD_EVENT_DONE)
 		kbase_trace_gpu_work_period(kbdev, katom, *end_timestamp);

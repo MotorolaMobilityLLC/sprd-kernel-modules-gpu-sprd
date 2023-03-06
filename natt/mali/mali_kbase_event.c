@@ -43,7 +43,7 @@ static struct base_jd_udata kbase_event_process(struct kbase_context *kctx, stru
 
 	if (katom->run_status & KRun_EventWakeup) {
 		katom->run_status |= kRun_EventProcess;
-		katom->job_process_timestamp.process_event_time = ktime_get();
+		katom->jb_proc_ts.time[PROCESS_EVENT] = ktime_get();
 	}
 	katom->status = KBASE_JD_ATOM_STATE_UNUSED;
 	dev_dbg(kbdev->dev, "Atom %pK status to unused\n", (void *)katom);
@@ -181,7 +181,7 @@ void kbase_event_post(struct kbase_context *ctx, struct kbase_jd_atom *atom)
 	}
 
 	atom->run_status |= KRun_EventPost;
-	atom->job_process_timestamp.post_event_time = ktime_get();
+	atom->jb_proc_ts.time[POST_EVENT] = ktime_get();
 
 	if (atom->core_req & BASE_JD_REQ_EVENT_ONLY_ON_FAILURE) {
 		if (atom->event_code == BASE_JD_EVENT_DONE) {
@@ -216,7 +216,7 @@ void kbase_event_post(struct kbase_context *ctx, struct kbase_jd_atom *atom)
 		dev_dbg(kbdev->dev, "Reporting %d events\n", event_count);
 
 		atom->run_status |= KRun_EventWakeup;
-		atom->job_process_timestamp.wake_up_time = ktime_get();
+		atom->jb_proc_ts.time[WAKE_UP] = ktime_get();
 		kbase_event_wakeup(ctx);
 
 		/* Post-completion latency */
