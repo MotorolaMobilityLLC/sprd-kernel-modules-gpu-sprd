@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
  *
- * (C) COPYRIGHT 2010-2021 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2010-2022 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -45,8 +45,7 @@
 #include <linux/workqueue.h>
 #include <linux/interrupt.h>
 #include <linux/time.h>
-
-#include <mali_base_kernel.h>
+#include <mali_base_kernel_uapi.h>
 #include <mali_kbase_linux.h>
 
 /*
@@ -67,13 +66,15 @@
 #include "mali_kbase_gpu_stats_debugfs.h"
 #include "mali_kbase_mem_profile_debugfs.h"
 #include "mali_kbase_gpuprops.h"
-#include <mali_kbase_ioctl.h>
+#include <mali_kbase_ioctl_uapi.h>
 #if !MALI_USE_CSF
 #include "mali_kbase_debug_job_fault.h"
 #include "mali_kbase_jd_debugfs.h"
 #include "mali_kbase_jm.h"
 #include "mali_kbase_js.h"
-#endif /* !MALI_USE_CSF */
+#else /* !MALI_USE_CSF */
+#include "csf/mali_kbase_debug_csf_fault.h"
+#endif /* MALI_USE_CSF */
 
 #include "ipa/mali_kbase_ipa.h"
 
@@ -85,14 +86,7 @@
 
 #if MALI_USE_CSF
 #include "csf/mali_kbase_csf.h"
-#endif
 
-#ifndef u64_to_user_ptr
-/* Introduced in Linux v4.6 */
-#define u64_to_user_ptr(x) ((void __user *)(uintptr_t)x)
-#endif
-
-#if MALI_USE_CSF
 /* Physical memory group ID for CSF user I/O.
  */
 #define KBASE_MEM_GROUP_CSF_IO BASE_MEM_GROUP_DEFAULT
@@ -104,8 +98,8 @@
 
 /* SPRD:The error types of GPU are counted and displayed on the device node.
  */
-#define FAULT_KEYWORD_NUM 13
-//#define SPRD_SUPPORT_FAULT_KEYWORD 1
+#define FAULT_KEYWORD_NUM 16
+#define SPRD_SUPPORT_FAULT_KEYWORD 1
 
 #ifdef SPRD_SUPPORT_FAULT_KEYWORD
 #define DONE 0
@@ -121,6 +115,9 @@
 #define GPU_BUS_FAULT 10
 #define GPU_MMU_BUS_ERROR 11
 #define TRANSLATION_TABLE_BUS_FAULT 12
+#define FENCE_SHOW_INFO 13
+#define FENCE_CANCELLED 14
+#define ATOM_DUMPED 15
 #endif
 
 /* Physical memory group ID for a special page which can alias several regions.
@@ -133,9 +130,9 @@
 
 struct kbase_device *kbase_device_alloc(void);
 /*
-* note: configuration attributes member of kbdev needs to have
-* been setup before calling kbase_device_init
-*/
+ * note: configuration attributes member of kbdev needs to have
+ * been setup before calling kbase_device_init
+ */
 
 int kbase_device_misc_init(struct kbase_device *kbdev);
 void kbase_device_misc_term(struct kbase_device *kbdev);
@@ -257,6 +254,15 @@ int kbase_jd_submit(struct kbase_context *kctx,
 		void __user *user_addr, u32 nr_atoms, u32 stride,
 		bool uk6_atom);
 
+/*
+ * dump/reset atom information
+ */
+void kbase_dump_pm_status(struct kbase_context* kctx);
+void kbase_dump_job_chain_list(struct kbase_context* kctx);
+int kbase_dump_atoms(struct kbase_context *kctx);
+void kbase_atom_dump_execption(struct kbase_jd_atom *katom, bool reset);
+void kbase_atom_dump_reset(struct kbase_jd_atom *katom);
+
 /**
  * kbase_jd_done_worker - Handle a job completion
  * @data: a &struct work_struct
@@ -280,8 +286,26 @@ void kbase_jd_done(struct kbase_jd_atom *katom, int slot_nr, ktime_t *end_timest
 		kbasep_js_atom_done_code done_code);
 void kbase_jd_cancel(struct kbase_device *kbdev, struct kbase_jd_atom *katom);
 void kbase_jd_zap_context(struct kbase_context *kctx);
-bool jd_done_nolock(struct kbase_jd_atom *katom,
-		struct list_head *completed_jobs_ctx);
+
+/*
+ * kbase_jd_done_nolock - Perform the necessary handling of an atom that has completed
+ *                  the execution.
+ *
+ * @katom: Pointer to the atom that completed the execution
+ * @post_immediately: Flag indicating that completion event can be posted
+ *                    immediately for @katom and the other atoms depdendent
+ *                    on @katom which also completed execution. The flag is
+ *                    false only for the case where the function is called by
+ *                    kbase_jd_done_worker() on the completion of atom running
+ *                    on the GPU.
+ *
+ * Note that if this is a soft-job that has had kbase_prepare_soft_job called on it then the caller
+ * is responsible for calling kbase_finish_soft_job *before* calling this function.
+ *
+ * The caller must hold the kbase_jd_context.lock.
+ */
+bool kbase_jd_done_nolock(struct kbase_jd_atom *katom, bool post_immediately);
+
 void kbase_jd_free_external_resources(struct kbase_jd_atom *katom);
 void kbase_jd_dep_clear_locked(struct kbase_jd_atom *katom);
 
@@ -323,19 +347,60 @@ void kbase_job_slot_ctx_priority_check_locked(struct kbase_context *kctx,
  * virtual address space in a growable memory region and the atom currently
  * executing on a job slot is the tiler job chain at the start of a renderpass.
  *
- * Return 0 if successful, otherwise a negative error code.
+ * Return: 0 if successful, otherwise a negative error code.
  */
 int kbase_job_slot_softstop_start_rp(struct kbase_context *kctx,
 		struct kbase_va_region *reg);
 
+/**
+ * kbase_job_slot_softstop - Soft-stop the specified job slot
+ *
+ * @kbdev:         The kbase device
+ * @js:            The job slot to soft-stop
+ * @target_katom:  The job that should be soft-stopped (or NULL for any job)
+ * Context:
+ *   The job slot lock must be held when calling this function.
+ *   The job slot must not already be in the process of being soft-stopped.
+ *
+ * Where possible any job in the next register is evicted before the soft-stop.
+ */
 void kbase_job_slot_softstop(struct kbase_device *kbdev, int js,
 		struct kbase_jd_atom *target_katom);
-void kbase_job_slot_softstop_swflags(struct kbase_device *kbdev, int js,
-		struct kbase_jd_atom *target_katom, u32 sw_flags);
-void kbase_job_slot_hardstop(struct kbase_context *kctx, int js,
-		struct kbase_jd_atom *target_katom);
+
+void kbase_job_slot_softstop_swflags(struct kbase_device *kbdev, unsigned int js,
+				     struct kbase_jd_atom *target_katom, u32 sw_flags);
+
+/**
+ * kbase_job_check_enter_disjoint - potentiall enter disjoint mode
+ * @kbdev: kbase device
+ * @action: the event which has occurred
+ * @core_reqs: core requirements of the atom
+ * @target_katom: the atom which is being affected
+ *
+ * For a certain soft-stop action, work out whether to enter disjoint
+ * state.
+ *
+ * This does not register multiple disjoint events if the atom has already
+ * started a disjoint period
+ *
+ * @core_reqs can be supplied as 0 if the atom had not started on the hardware
+ * (and so a 'real' soft/hard-stop was not required, but it still interrupted
+ * flow, perhaps on another context)
+ *
+ * kbase_job_check_leave_disjoint() should be used to end the disjoint
+ * state when the soft/hard-stop action is complete
+ */
 void kbase_job_check_enter_disjoint(struct kbase_device *kbdev, u32 action,
 		base_jd_core_req core_reqs, struct kbase_jd_atom *target_katom);
+
+/**
+ * kbase_job_check_leave_disjoint - potentially leave disjoint state
+ * @kbdev: kbase device
+ * @target_katom: atom which is finishing
+ *
+ * Work out whether to leave disjoint state when finishing an atom that was
+ * originated by kbase_job_check_enter_disjoint().
+ */
 void kbase_job_check_leave_disjoint(struct kbase_device *kbdev,
 		struct kbase_jd_atom *target_katom);
 
@@ -358,7 +423,7 @@ void kbase_event_wakeup(struct kbase_context *kctx);
  *		allocation is to be validated.
  * @info:	Pointer to struct @base_jit_alloc_info
  *			which is to be validated.
- * @return: 0 if jit allocation is valid; negative error code otherwise
+ * Return: 0 if jit allocation is valid; negative error code otherwise
  */
 int kbasep_jit_alloc_validate(struct kbase_context *kctx,
 					struct base_jit_alloc_info *info);
@@ -398,34 +463,6 @@ static inline void kbase_free_user_buffer(
 	}
 }
 
-/**
-* seconds_right_now() - get the real-time of system running
-*      by seconds.
-*
-*      return the seconds of rigth_now .
-static inline time_t seconds_right_now(void)
-{
-	time_t rigth_now;
-
-	struct timespec64 now;
-	ktime_get_real_ts64(&now);
-	rigth_now = 1000 * now.tv_sec;
-
-	return rigth_now ;
-
-}
-*/
-
-/**
- * kbase_mem_copy_from_extres() - Copy from external resources.
- *
- * @kctx:	kbase context within which the copying is to take place.
- * @buf_data:	Pointer to the information about external resources:
- *		pages pertaining to the external resource, number of
- *		pages to copy.
- */
-int kbase_mem_copy_from_extres(struct kbase_context *kctx,
-		struct kbase_debug_copy_buffer *buf_data);
 #if !MALI_USE_CSF
 int kbase_process_soft_job(struct kbase_jd_atom *katom);
 int kbase_prepare_soft_job(struct kbase_jd_atom *katom);
@@ -433,7 +470,7 @@ void kbase_finish_soft_job(struct kbase_jd_atom *katom);
 void kbase_cancel_soft_job(struct kbase_jd_atom *katom);
 void kbase_resume_suspended_soft_jobs(struct kbase_device *kbdev);
 void kbasep_remove_waiting_soft_job(struct kbase_jd_atom *katom);
-#if defined(CONFIG_SYNC) || defined(CONFIG_SYNC_FILE)
+#if IS_ENABLED(CONFIG_SYNC_FILE)
 void kbase_soft_event_wait_callback(struct kbase_jd_atom *katom);
 #endif
 int kbase_soft_event_update(struct kbase_context *kctx,
@@ -447,7 +484,27 @@ void kbasep_complete_triggered_soft_events(struct kbase_context *kctx, u64 evt);
 void kbasep_as_do_poke(struct work_struct *work);
 
 /**
- * Check whether a system suspend is in progress, or has already been suspended
+* seconds_right_now() - get the real-time of system running
+*      by seconds.
+*
+*      return the seconds of rigth_now .
+*/
+static inline time_t seconds_right_now(void)
+{
+	time_t rigth_now;
+
+	struct timespec64 now;
+	ktime_get_real_ts64(&now);
+	rigth_now = 1000 * now.tv_sec;
+
+	return rigth_now ;
+
+}
+
+/**
+ * kbase_pm_is_suspending - Check whether a system suspend is in progress,
+ * or has already been suspended
+ *
  * @kbdev: The kbase device structure for the device
  *
  * The caller should ensure that either kbdev->pm.active_count_lock is held, or
@@ -516,6 +573,21 @@ static inline bool kbase_pm_is_active(struct kbase_device *kbdev)
 }
 
 /**
+ * kbase_pm_lowest_gpu_freq_init() - Find the lowest frequency that the GPU can
+ *                                run as using the device tree, and save this
+ *                                within kbdev.
+ * @kbdev: Pointer to kbase device.
+ *
+ * This function could be called from kbase_clk_rate_trace_manager_init,
+ * but is left separate as it can be called as soon as
+ * dev_pm_opp_of_add_table() has been called to initialize the OPP table,
+ * which occurs in power_control_init().
+ *
+ * Return: 0 in any case.
+ */
+int kbase_pm_lowest_gpu_freq_init(struct kbase_device *kbdev);
+
+/**
  * kbase_pm_metrics_start - Start the utilization metrics timer
  * @kbdev: Pointer to the kbase device for which to start the utilization
  *         metrics calculation thread.
@@ -575,10 +647,12 @@ int kbase_pm_force_mcu_wakeup_after_sleep(struct kbase_device *kbdev);
 
 #if !MALI_USE_CSF
 /**
- * Return the atom's ID, as was originally supplied by userspace in
+ * kbase_jd_atom_id - Return the atom's ID, as was originally supplied by userspace in
  * base_jd_atom::atom_number
  * @kctx:  KBase context pointer
  * @katom: Atome for which to return ID
+ *
+ * Return: the atom's ID.
  */
 static inline int kbase_jd_atom_id(struct kbase_context *kctx,
 				   const struct kbase_jd_atom *katom)
@@ -609,7 +683,9 @@ static inline struct kbase_jd_atom *kbase_jd_atom_from_id(
 #endif /* !MALI_USE_CSF */
 
 /**
- * Initialize the disjoint state
+ * kbase_disjoint_init - Initialize the disjoint state
+ *
+ * @kbdev: The kbase device
  *
  * The disjoint event count and state are both set to zero.
  *
@@ -631,14 +707,12 @@ static inline struct kbase_jd_atom *kbase_jd_atom_from_id(
  * The disjoint event counter is also incremented immediately whenever a job is soft stopped
  * and during context creation.
  *
- * @kbdev: The kbase device
- *
  * Return: 0 on success and non-zero value on failure.
  */
 void kbase_disjoint_init(struct kbase_device *kbdev);
 
 /**
- * Increase the count of disjoint events
+ * kbase_disjoint_event - Increase the count of disjoint events
  * called when a disjoint event has happened
  *
  * @kbdev: The kbase device
@@ -646,42 +720,44 @@ void kbase_disjoint_init(struct kbase_device *kbdev);
 void kbase_disjoint_event(struct kbase_device *kbdev);
 
 /**
- * Increase the count of disjoint events only if the GPU is in a disjoint state
+ * kbase_disjoint_event_potential - Increase the count of disjoint events
+ * only if the GPU is in a disjoint state
+ *
+ * @kbdev: The kbase device
  *
  * This should be called when something happens which could be disjoint if the GPU
  * is in a disjoint state. The state refcount keeps track of this.
- *
- * @kbdev: The kbase device
  */
 void kbase_disjoint_event_potential(struct kbase_device *kbdev);
 
 /**
- * Returns the count of disjoint events
+ * kbase_disjoint_event_get - Returns the count of disjoint events
  *
  * @kbdev: The kbase device
- * @return the count of disjoint events
+ * Return: the count of disjoint events
  */
 u32 kbase_disjoint_event_get(struct kbase_device *kbdev);
 
 /**
- * Increment the refcount state indicating that the GPU is in a disjoint state.
+ * kbase_disjoint_state_up - Increment the refcount state indicating that
+ * the GPU is in a disjoint state.
+ *
+ * @kbdev: The kbase device
  *
  * Also Increment the disjoint event count (calls @ref kbase_disjoint_event)
  * eventually after the disjoint state has completed @ref kbase_disjoint_state_down
  * should be called
- *
- * @kbdev: The kbase device
  */
 void kbase_disjoint_state_up(struct kbase_device *kbdev);
 
 /**
- * Decrement the refcount state
+ * kbase_disjoint_state_down - Decrement the refcount state
+ *
+ * @kbdev: The kbase device
  *
  * Also Increment the disjoint event count (calls @ref kbase_disjoint_event)
  *
  * Called after @ref kbase_disjoint_state_up once the disjoint state is over
- *
- * @kbdev: The kbase device
  */
 void kbase_disjoint_state_down(struct kbase_device *kbdev);
 
@@ -710,8 +786,8 @@ int kbase_device_pcm_dev_init(struct kbase_device *const kbdev);
 void kbase_device_pcm_dev_term(struct kbase_device *const kbdev);
 
 /**
- * If a job is soft stopped and the number of contexts is >= this value
- * it is reported as a disjoint event
+ * KBASE_DISJOINT_STATE_INTERLEAVED_CONTEXT_COUNT_THRESHOLD - If a job is soft stopped
+ * and the number of contexts is >= this value it is reported as a disjoint event
  */
 #define KBASE_DISJOINT_STATE_INTERLEAVED_CONTEXT_COUNT_THRESHOLD 2
 

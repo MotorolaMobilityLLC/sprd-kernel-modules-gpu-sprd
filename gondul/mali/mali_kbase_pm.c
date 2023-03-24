@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
 /*
  *
- * (C) COPYRIGHT 2010-2021 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2010-2022 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -27,7 +27,7 @@
 #include <gpu/mali_kbase_gpu_regmap.h>
 #include <mali_kbase_vinstr.h>
 #include <mali_kbase_kinstr_prfcnt.h>
-#include <mali_kbase_hwcnt_context.h>
+#include <hwcnt/mali_kbase_hwcnt_context.h>
 
 #include <mali_kbase_pm.h>
 #include <backend/gpu/mali_kbase_pm_internal.h>
@@ -144,7 +144,7 @@ void kbase_pm_context_idle(struct kbase_device *kbdev)
 
 KBASE_EXPORT_TEST_API(kbase_pm_context_idle);
 
-void kbase_pm_driver_suspend(struct kbase_device *kbdev)
+int kbase_pm_driver_suspend(struct kbase_device *kbdev)
 {
 	KBASE_DEBUG_ASSERT(kbdev);
 
@@ -162,7 +162,7 @@ void kbase_pm_driver_suspend(struct kbase_device *kbdev)
 	mutex_lock(&kbdev->pm.lock);
 	if (WARN_ON(kbase_pm_is_suspending(kbdev))) {
 		mutex_unlock(&kbdev->pm.lock);
-		return;
+		return 0;
 	}
 	kbdev->pm.suspending = true;
 	mutex_unlock(&kbdev->pm.lock);
@@ -193,7 +193,12 @@ void kbase_pm_driver_suspend(struct kbase_device *kbdev)
 	 */
 	kbasep_js_suspend(kbdev);
 #else
-	kbase_csf_scheduler_pm_suspend(kbdev);
+	if (kbase_csf_scheduler_pm_suspend(kbdev)) {
+		mutex_lock(&kbdev->pm.lock);
+		kbdev->pm.suspending = false;
+		mutex_unlock(&kbdev->pm.lock);
+		return -1;
+	}
 #endif
 
 	/* Wait for the active count to reach zero. This is not the same as
@@ -209,7 +214,12 @@ void kbase_pm_driver_suspend(struct kbase_device *kbdev)
 	/* NOTE: We synchronize with anything that was just finishing a
 	 * kbase_pm_context_idle() call by locking the pm.lock below
 	 */
-	kbase_hwaccess_pm_suspend(kbdev);
+	if (kbase_hwaccess_pm_suspend(kbdev)) {
+		mutex_lock(&kbdev->pm.lock);
+		kbdev->pm.suspending = false;
+		mutex_unlock(&kbdev->pm.lock);
+		return -1;
+	}
 
 #ifdef CONFIG_MALI_ARBITER_SUPPORT
 	if (kbdev->arb.arb_if) {
@@ -218,6 +228,8 @@ void kbase_pm_driver_suspend(struct kbase_device *kbdev)
 		mutex_unlock(&kbdev->pm.arb_vm_state->vm_state_lock);
 	}
 #endif /* CONFIG_MALI_ARBITER_SUPPORT */
+
+	return 0;
 }
 
 void kbase_pm_driver_resume(struct kbase_device *kbdev, bool arb_gpu_start)
@@ -273,16 +285,19 @@ void kbase_pm_driver_resume(struct kbase_device *kbdev, bool arb_gpu_start)
 	kbase_kinstr_prfcnt_resume(kbdev->kinstr_prfcnt_ctx);
 }
 
-void kbase_pm_suspend(struct kbase_device *kbdev)
+int kbase_pm_suspend(struct kbase_device *kbdev)
 {
+	int result = 0;
 #ifdef CONFIG_MALI_ARBITER_SUPPORT
 	if (kbdev->arb.arb_if)
 		kbase_arbiter_pm_vm_event(kbdev, KBASE_VM_OS_SUSPEND_EVENT);
 	else
-		kbase_pm_driver_suspend(kbdev);
+		result = kbase_pm_driver_suspend(kbdev);
 #else
-	kbase_pm_driver_suspend(kbdev);
+	result = kbase_pm_driver_suspend(kbdev);
 #endif /* CONFIG_MALI_ARBITER_SUPPORT */
+
+	return result;
 }
 
 void kbase_pm_resume(struct kbase_device *kbdev)

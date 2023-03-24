@@ -779,7 +779,6 @@ struct kbase_ioctl_tlstream_stats {
  *         _IOWR(KBASE_IOCTL_EXTRA_TYPE, 0, struct my_ioctl_args)
  */
 
-
 /**********************************
  * Definitions for GPU properties *
  **********************************/

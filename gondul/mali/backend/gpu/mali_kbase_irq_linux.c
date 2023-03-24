@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
 /*
  *
- * (C) COPYRIGHT 2014-2016, 2018-2021 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2014-2016, 2018-2022 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -29,9 +29,9 @@
 #if !defined(CONFIG_MALI_NO_MALI)
 
 /* GPU IRQ Tags */
-#define	JOB_IRQ_TAG	0
-#define MMU_IRQ_TAG	1
-#define GPU_IRQ_TAG	2
+#define JOB_IRQ_TAG 0
+#define MMU_IRQ_TAG 1
+#define GPU_IRQ_TAG 2
 
 static void *kbase_tag(void *ptr, u32 tag)
 {
@@ -70,7 +70,7 @@ static irqreturn_t kbase_job_irq_handler(int irq, void *data)
 		return IRQ_NONE;
 	}
 
-//	dev_dbg(kbdev->dev, "%s: irq %d irqstatus 0x%x\n", __func__, irq, val);
+	//dev_dbg(kbdev->dev, "%s: irq %d irqstatus 0x%x\n", __func__, irq, val);
 
 #if MALI_USE_CSF
 	/* call the csf interrupt handler */
@@ -114,7 +114,7 @@ static irqreturn_t kbase_mmu_irq_handler(int irq, void *data)
 		return IRQ_NONE;
 	}
 
-//	dev_dbg(kbdev->dev, "%s: irq %d irqstatus 0x%x\n", __func__, irq, val);
+	//dev_dbg(kbdev->dev, "%s: irq %d irqstatus 0x%x\n", __func__, irq, val);
 
 	kbase_mmu_interrupt(kbdev, val);
 
@@ -164,7 +164,6 @@ static irq_handler_t kbase_handler_table[] = {
 
 #ifdef CONFIG_MALI_DEBUG
 #define  JOB_IRQ_HANDLER JOB_IRQ_TAG
-#define  MMU_IRQ_HANDLER MMU_IRQ_TAG
 #define  GPU_IRQ_HANDLER GPU_IRQ_TAG
 
 /**
@@ -503,4 +502,4 @@ void kbase_synchronize_irqs(struct kbase_device *kbdev)
 
 KBASE_EXPORT_TEST_API(kbase_synchronize_irqs);
 
-#endif /* !IS_ENABLED(CONFIG_MALI_NO_MALI) */
+#endif /* IS_ENABLED(CONFIG_MALI_REAL_HW) */

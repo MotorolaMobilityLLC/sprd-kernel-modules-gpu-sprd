@@ -41,6 +41,11 @@ static struct base_jd_udata kbase_event_process(struct kbase_context *kctx, stru
 	KBASE_TLSTREAM_TL_NRET_ATOM_CTX(kbdev, katom, kctx);
 	KBASE_TLSTREAM_TL_DEL_ATOM(kbdev, katom);
 
+	if (katom->run_status & KRun_EventWakeup) {
+		katom->run_status |= kRun_EventProcess;
+		katom->job_process_timestamp.process_event_time = ktime_get();
+	}
+
 	katom->status = KBASE_JD_ATOM_STATE_UNUSED;
 	dev_dbg(kbdev->dev, "Atom %pK status to unused\n", (void *)katom);
 	wake_up(&katom->completed);
@@ -176,6 +181,9 @@ void kbase_event_post(struct kbase_context *ctx, struct kbase_jd_atom *atom)
 		return;
 	}
 
+	atom->run_status |= KRun_EventPost;
+	atom->job_process_timestamp.post_event_time = ktime_get();
+
 	if (atom->core_req & BASE_JD_REQ_EVENT_ONLY_ON_FAILURE) {
 		if (atom->event_code == BASE_JD_EVENT_DONE) {
 			dev_dbg(kbdev->dev, "Suppressing event (atom done)\n");
@@ -207,6 +215,9 @@ void kbase_event_post(struct kbase_context *ctx, struct kbase_jd_atom *atom)
 		atomic_add(event_count, &ctx->event_count);
 		mutex_unlock(&ctx->event_mutex);
 		dev_dbg(kbdev->dev, "Reporting %d events\n", event_count);
+
+		atom->run_status |= KRun_EventWakeup;
+		atom->job_process_timestamp.wake_up_time = ktime_get();
 
 		kbase_event_wakeup(ctx);
 

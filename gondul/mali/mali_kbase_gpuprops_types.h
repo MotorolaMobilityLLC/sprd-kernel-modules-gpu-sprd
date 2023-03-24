@@ -26,7 +26,7 @@
 #ifndef _KBASE_GPUPROPS_TYPES_H_
 #define _KBASE_GPUPROPS_TYPES_H_
 
-#include <mali_base_kernel.h>
+#include <mali_base_kernel_uapi.h>
 
 #define KBASE_GPU_SPEED_MHZ    123
 #define KBASE_GPU_PC_SIZE_LOG2 24U

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
 #
-# (C) COPYRIGHT 2012-2021 ARM Limited. All rights reserved.
+# (C) COPYRIGHT 2012-2022 ARM Limited. All rights reserved.
 #
 # This program is free software and is provided to you under the terms of the
 # GNU General Public License version 2 as published by the Free Software
@@ -59,10 +59,8 @@ ifeq ($(CONFIG_MALI_PRFCNT_SET_SELECT_VIA_DEBUG_FS), y)
 endif
 
 ifeq ($(CONFIG_MALI_FENCE_DEBUG), y)
-    ifneq ($(CONFIG_SYNC), y)
-        ifneq ($(CONFIG_SYNC_FILE), y)
-            $(error CONFIG_MALI_FENCE_DEBUG depends on CONFIG_SYNC || CONFIG_SYNC_FILE to be set in Kernel configuration)
-        endif
+    ifneq ($(CONFIG_SYNC_FILE), y)
+        $(error CONFIG_MALI_FENCE_DEBUG depends on CONFIG_SYNC_FILE to be set in Kernel configuration)
     endif
 endif
 
@@ -71,8 +69,7 @@ endif
 #
 
 # Driver version string which is returned to userspace via an ioctl
-MALI_RELEASE_NAME ?= '"r34p0-01eac0"'
-
+MALI_RELEASE_NAME ?= '"r42p0-01eac0"'
 # Set up defaults if not defined by build system
 
 #sprd: The new attribute judgment of R34 conflicts with the r27 patch
@@ -175,7 +172,7 @@ MALI_PLATFORM_DIR := $(shell echo $(CONFIG_MALI_PLATFORM_NAME))
 #
 # Experimental features must default to disabled, e.g.:
 # MALI_EXPERIMENTAL_FEATURE ?= 0
-MALI_INCREMENTAL_RENDERING ?= 0
+MALI_INCREMENTAL_RENDERING_JM ?= 0
 
 #
 # ccflags
@@ -190,8 +187,7 @@ ccflags-y = \
     -DMALI_INSTRUMENTATION_LEVEL=$(MALI_INSTRUMENTATION_LEVEL) \
     -DMALI_RELEASE_NAME=$(MALI_RELEASE_NAME) \
     -DMALI_JIT_PRESSURE_LIMIT_BASE=$(MALI_JIT_PRESSURE_LIMIT_BASE) \
-    -DMALI_INCREMENTAL_RENDERING=$(MALI_INCREMENTAL_RENDERING) \
-    -DMALI_KBASE_BUILD \
+    -DMALI_INCREMENTAL_RENDERING_JM=$(MALI_INCREMENTAL_RENDERING_JM) \
     -DMALI_PLATFORM_DIR=$(MALI_PLATFORM_DIR) \
     -DMALI_GCC_WORKAROUND_MIDCOM_4598=$(MALI_GCC_WORKAROUND_MIDCOM_4598) \
 	-DCONFIG_MALI_BOARD_PLATFORM=\"$(CONFIG_MALI_BOARD_PLATFORM)\"
@@ -245,8 +241,21 @@ endif
 DEFINES += -DDEBUG_GPU_PERFORMANCE
 DEFINES += -DMALI_KBASE_BUILD
 
+ifeq ($(CONFIG_MALI_DEVFREQ),y)
+  ifeq ($(CONFIG_DEVFREQ_THERMAL),y)
+    ifeq ($(CONFIG_SPRD_GPU_COOLING_DEVICE),y)
+		DEFINES +=-DCONFIG_SPRD_GPU_COOLING_DEVICE
+	else ifeq ($(CONFIG_SPRD_GPU_COOLING_DEVICE),m)
+		DEFINES +=-DCONFIG_SPRD_GPU_COOLING_DEVICE
+	else
+		include $(src)/ipa/Kbuild
+    endif
+  endif
+endif
+
 subdir-ccflags-y += $(DEFINES) -I$(KBASE_PATH)   -I$(KBASE_PLATFORM_PATH) -I$(OSK_PATH) -I$(UMP_PATH) -I$(srctree)/include/linux 
 ccflags-y += -fno-PIC
+
 
 ifeq ($(KBUILD_EXTMOD),)
 # in-tree
@@ -271,13 +280,14 @@ subdir-ccflags-y += $(ccflags-y)
 # Kernel Modules
 #
 obj-$(CONFIG_MALI_MIDGARD) += mali_gondul.o
-obj-$(CONFIG_MALI_ARBITRATION) += arbitration/
+obj-$(CONFIG_MALI_ARBITRATION) += ../arbitration/
 obj-$(CONFIG_MALI_KUTF)    += tests/
 
 mali_gondul-y := \
     mali_kbase_cache_policy.o \
     mali_kbase_ccswe.o \
     mali_kbase_mem.o \
+    mali_kbase_mem_migrate.o \
     mali_kbase_mem_pool_group.o \
     mali_kbase_native_mgm.o \
     mali_kbase_ctx_sched.o \
@@ -286,12 +296,6 @@ mali_gondul-y := \
     mali_kbase_config.o \
     mali_kbase_kinstr_prfcnt.o \
     mali_kbase_vinstr.o \
-    mali_kbase_hwcnt.o \
-    mali_kbase_hwcnt_gpu.o \
-    mali_kbase_hwcnt_gpu_narrow.o \
-    mali_kbase_hwcnt_legacy.o \
-    mali_kbase_hwcnt_types.o \
-    mali_kbase_hwcnt_virtualizer.o \
     mali_kbase_softjobs.o \
     mali_kbase_hw.o \
     mali_kbase_debug.o \
@@ -303,6 +307,8 @@ mali_gondul-y := \
     mali_kbase_mem_profile_debugfs.o \
     mali_kbase_disjoint_events.o \
     mali_kbase_debug_mem_view.o \
+    mali_kbase_debug_mem_zones.o \
+    mali_kbase_debug_mem_allocs.o \
     mali_kbase_smc.o \
     mali_kbase_mem_pool.o \
     mali_kbase_mem_pool_debugfs.o \
@@ -313,6 +319,7 @@ mali_gondul-y := \
     mali_kbase_dvfs_debugfs.o \
     mali_power_gpu_frequency_trace.o \
     mali_kbase_trace_gpu_mem.o \
+    mali_power_gpu_work_period_trace.o \
     mali_kbase_pbha.o
 
 mali_gondul-$(CONFIG_DEBUG_FS) += mali_kbase_pbha_debugfs.o
@@ -328,14 +335,9 @@ mali_gondul-$(CONFIG_SYNC_FILE) += \
     mali_kbase_sync_file.o \
     mali_kbase_sync_common.o
 
-ifeq ($(CONFIG_MALI_CSF_SUPPORT),y)
-    mali_gondul-y += \
-        mali_kbase_hwcnt_backend_csf.o \
-        mali_kbase_hwcnt_backend_csf_if_fw.o
-else
+ifneq ($(CONFIG_MALI_CSF_SUPPORT),y)
     mali_gondul-y += \
         mali_kbase_jm.o \
-        mali_kbase_hwcnt_backend_jm.o \
         mali_kbase_dummy_job_wa.o \
         mali_kbase_debug_job_fault.o \
         mali_kbase_event.o \
@@ -344,11 +346,6 @@ else
         mali_kbase_js.o \
         mali_kbase_js_ctx_attr.o \
         mali_kbase_kinstr_jm.o
-
-    mali_gondul-$(CONFIG_MALI_DMA_FENCE) += \
-        mali_kbase_fence_ops.o \
-        mali_kbase_dma_fence.o \
-        mali_kbase_fence.o
 
     mali_gondul-$(CONFIG_SYNC_FILE) += \
         mali_kbase_fence_ops.o \
@@ -364,6 +361,7 @@ INCLUDE_SUBDIR = \
     $(src)/backend/gpu/Kbuild \
     $(src)/mmu/Kbuild \
     $(src)/tl/Kbuild \
+    $(src)/hwcnt/Kbuild \
     $(src)/gpu/Kbuild \
     $(src)/thirdparty/Kbuild \
     $(src)/platform/$(MALI_PLATFORM_DIR)/Kbuild
@@ -376,17 +374,11 @@ ifeq ($(CONFIG_MALI_ARBITER_SUPPORT),y)
     INCLUDE_SUBDIR += $(src)/arbiter/Kbuild
 endif
 
-ifeq ($(CONFIG_MALI_DEVFREQ),y)
-  ifeq ($(CONFIG_DEVFREQ_THERMAL),y)
-    ifeq ($(CONFIG_UNISOC_GPU_COOLING_DEVICE),y)
-               DEFINES +=-DCONFIG_UNISOC_GPU_COOLING_DEVICE
-       else ifeq ($(CONFIG_UNISOC_GPU_COOLING_DEVICE),m)
-               DEFINES +=-DCONFIG_UNISOC_GPU_COOLING_DEVICE
-       else
-               INCLUDE_SUBDIR += $(src)/ipa/Kbuild
-    endif
-  endif
-endif
+#ifeq ($(CONFIG_MALI_DEVFREQ),y)
+#    ifeq ($(CONFIG_DEVFREQ_THERMAL),y)
+#        INCLUDE_SUBDIR += $(src)/ipa/Kbuild
+#    endif
+#endif
 
 ifeq ($(KBUILD_EXTMOD),)
 # in-tree

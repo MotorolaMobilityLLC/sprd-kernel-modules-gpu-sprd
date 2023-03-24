@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
 /*
  *
- * (C) COPYRIGHT 2020-2021 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2020-2022 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -23,6 +23,7 @@
 #include <mali_kbase_mem_linux.h>
 #include <mali_kbase_defs.h>
 #include <mali_kbase_trace_gpu_mem.h>
+#include "mali_power_gpu_work_period_trace.h"
 
 /**
  * struct kbase_dma_buf - Object instantiated when a dma-buf imported allocation
@@ -51,6 +52,8 @@ struct kbase_dma_buf {
  * rb_tree is maintained at kbase_device level and kbase_process level
  * by passing the root of kbase_device or kbase_process we can remove
  * the node from the tree.
+ *
+ * Return: true on success.
  */
 static bool kbase_delete_dma_buf_mapping(struct kbase_context *kctx,
 					 struct dma_buf *dma_buf,
@@ -100,6 +103,8 @@ static bool kbase_delete_dma_buf_mapping(struct kbase_context *kctx,
  * of all unique dma_buf's mapped to gpu memory. So when attach any
  * dma_buf add it the rb_tree's. To add the unique mapping we need
  * check if the mapping is not a duplicate and then add them.
+ *
+ * Return: true on success
  */
 static bool kbase_capture_dma_buf_mapping(struct kbase_context *kctx,
 					  struct dma_buf *dma_buf,
@@ -218,4 +223,48 @@ void kbase_add_dma_buf_usage(struct kbase_context *kctx,
 	spin_unlock(&kbdev->gpu_mem_usage_lock);
 
 	mutex_unlock(&kbdev->dma_buf_lock);
+}
+
+uint64_t LastEndTimeNanoseconds = 0U;
+void kbase_trace_gpu_work_period(struct kbase_device *kbdev, struct kbase_jd_atom *katom, ktime_t end_timestamp)
+{
+
+	const struct cred *cred = current_cred();
+	const uint64_t MaxGpuTimeNanoseconds = 1000000000U;
+	uint64_t start_time, end_time;
+	uint32_t uid;
+	start_time = ktime_to_ns(katom->start_timestamp);
+
+	/*get current process's uid*/
+	uid = cred->uid.val;
+
+	lockdep_assert_held(&kbdev->hwaccess_lock);
+
+	if (start_time < LastEndTimeNanoseconds)
+	{
+		/*if the start_timestamp is later than LastEndTime, then modify start_timestamp*/
+		start_time = LastEndTimeNanoseconds + 1;
+	}
+
+	if (ktime_to_ns(end_timestamp) - start_time > MaxGpuTimeNanoseconds)
+	{
+		/*The period duration must be at most 1 second*/
+		end_time = start_time + MaxGpuTimeNanoseconds - 100;
+	}
+	else
+	{
+		end_time = ktime_to_ns(end_timestamp);
+		/*The period duration must be non-zero.*/
+		if (end_time < start_time)
+			end_time = start_time + 10;
+	}
+
+	if (likely(kbdev))
+	{
+		trace_gpu_work_period(kbdev->id, uid, start_time, end_time +10, end_time - start_time);
+		LastEndTimeNanoseconds = end_time + 10;
+	}
+	//printk(KERN_ERR "mali %s id = %u uid = %u, current->common = %s,current->pid=%u, start_time = %llu, end_time = %llu, duration = %llu, last_end_time =  %llu",
+				//__func__, kbdev->id, uid, current->comm, current->pid,
+										//start_time, end_time, end_time - start_time, LastEndTimeNanoseconds);
 }

@@ -22,7 +22,7 @@
 #ifndef _KBASE_IPA_SIMPLE_H_
 #define _KBASE_IPA_SIMPLE_H_
 
-#if defined(CONFIG_MALI_DEVFREQ) && defined(CONFIG_DEVFREQ_THERMAL) && !defined(CONFIG_UNISOC_GPU_COOLING_DEVICE)
+#if defined(CONFIG_MALI_DEVFREQ) && defined(CONFIG_DEVFREQ_THERMAL) && !defined(CONFIG_SPRD_GPU_COOLING_DEVICE)
 
 extern struct kbase_ipa_model_ops kbase_simple_ipa_model_ops;
 

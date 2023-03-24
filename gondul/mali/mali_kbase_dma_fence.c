@@ -129,6 +129,8 @@ kbase_dma_fence_queue_work(struct kbase_jd_atom *katom)
 	struct kbase_context *kctx = katom->kctx;
 	bool ret;
 
+	katom->run_status |= KRun_DmaFenceQueueWork;
+	katom->dma_fence_work.queue_work_time = ktime_get();
 	INIT_WORK(&katom->work, kbase_dma_fence_work);
 	ret = queue_work(kctx->dma_fence.wq, &katom->work);
 	/* Warn if work was already queued, that should not happen. */
@@ -180,7 +182,8 @@ kbase_dma_fence_work(struct work_struct *pwork)
 
 	katom = container_of(pwork, struct kbase_jd_atom, work);
 	ctx = &katom->kctx->jctx;
-
+	katom->run_status |= KRun_DmaFenceWork;
+	katom->dma_fence_work.done_work_time = ktime_get();
 	mutex_lock(&ctx->lock);
 	if (kbase_fence_dep_count_read(katom) != 0)
 		goto out;
@@ -215,6 +218,7 @@ kbase_dma_fence_cb(struct dma_fence *fence, struct dma_fence_cb *cb)
 				struct kbase_fence_cb,
 				fence_cb);
 	struct kbase_jd_atom *katom = kcb->katom;
+	katom->run_status |= KRun_DmaFenceCb;
 
 	/* If the atom is zapped dep_count will be forced to a negative number
 	 * preventing this callback from ever scheduling work. Which in turn

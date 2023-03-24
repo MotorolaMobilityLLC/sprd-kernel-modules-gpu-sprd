@@ -35,6 +35,8 @@ void kbase_sync_fence_wait_worker(struct work_struct *data)
 	struct kbase_jd_atom *katom;
 
 	katom = container_of(data, struct kbase_jd_atom, work);
+	katom->run_status |= KRun_SyncFenceWaitWorker;
+	katom->sync_wait_fence_work.done_work_time = ktime_get();
 	kbase_soft_event_wait_callback(katom);
 }
 #endif /* !MALI_USE_CSF */

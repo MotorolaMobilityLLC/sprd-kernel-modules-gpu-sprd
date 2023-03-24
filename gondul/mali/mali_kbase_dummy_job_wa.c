@@ -239,7 +239,7 @@ int kbase_dummy_job_wa_execute(struct kbase_device *kbdev, u64 cores)
 	return failed ? -EFAULT : 0;
 }
 
-static ssize_t show_dummy_job_wa_info(struct device * const dev,
+static ssize_t dummy_job_wa_info_show(struct device * const dev,
 		struct device_attribute * const attr, char * const buf)
 {
 	struct kbase_device *const kbdev = dev_get_drvdata(dev);
@@ -254,7 +254,7 @@ static ssize_t show_dummy_job_wa_info(struct device * const dev,
 	return err;
 }
 
-static DEVICE_ATTR(dummy_job_wa_info, 0444, show_dummy_job_wa_info, NULL);
+static DEVICE_ATTR_RO(dummy_job_wa_info);
 
 static bool wa_blob_load_needed(struct kbase_device *kbdev)
 {
@@ -290,7 +290,6 @@ int kbase_dummy_job_wa_load(struct kbase_device *kbdev)
 
 	if (!wa_blob_load_needed(kbdev))
 		return 0;
-
 #if 0
 	/* load the wa */
 	err = request_firmware(&firmware, wa_name, kbdev->dev);
@@ -301,6 +300,7 @@ int kbase_dummy_job_wa_load(struct kbase_device *kbdev)
 		return -ENODEV;
 	}
 #endif
+
 	kctx = kbase_create_context(kbdev, true,
 				    BASE_CONTEXT_CREATE_FLAG_NONE, 0,
 				    NULL);

@@ -27,7 +27,7 @@
 #define _KBASE_CACHE_POLICY_H_
 
 #include "mali_kbase.h"
-#include <mali_base_kernel.h>
+#include <mali_base_kernel_uapi.h>
 
 /**
  * kbase_cache_enabled - Choose the cache policy for a specific region

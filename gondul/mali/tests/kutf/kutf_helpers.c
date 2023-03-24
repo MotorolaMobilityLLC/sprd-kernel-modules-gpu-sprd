@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note
 /*
  *
- * (C) COPYRIGHT 2017, 2020-2021 ARM Limited. All rights reserved.
+ * (C) COPYRIGHT 2017, 2020-2022 ARM Limited. All rights reserved.
  *
  * This program is free software and is provided to you under the terms of the
  * GNU General Public License version 2 as published by the Free Software
@@ -28,10 +28,6 @@
 #include <linux/wait.h>
 #include <linux/uaccess.h>
 #include <linux/export.h>
-#include <linux/io.h>
-#include <linux/delay.h>
-#include "gpu/mali_kbase_gpu_regmap.h"
-#include <device/mali_kbase_device.h>
 
 static DEFINE_SPINLOCK(kutf_input_lock);
 
@@ -132,43 +128,14 @@ void kutf_helper_input_enqueue_end_of_data(struct kutf_context *context)
 	kutf_helper_input_enqueue(context, NULL, 0);
 }
 
-/* Values are taken from juno-fpga.dtsi */
-#define FPGA_SYSCTL_START_ADDR ((resource_size_t)0x6f020000)
-#define FPGA_SYSCTL_SIZE ((size_t)0xCC)
-
-/* Offset of FPGA_SYSCTL_GPU_RESET_REG register */
-#define FPGA_SYSCTL_GPU_RESET_REG 0x64
-#define GPU_RESET_HIGH 0x1
-#define GPU_RESET_LOW 0x0
-
-int kutf_helper_external_reset_gpu(void)
+void kutf_helper_ignore_dmesg(struct device *dev)
 {
-	void __iomem *regs = NULL;
-	void __iomem *gpu_reset_reg = NULL;
-	int error = -ENXIO;
-	int repeat = 100;
-
-	regs = ioremap(FPGA_SYSCTL_START_ADDR, FPGA_SYSCTL_SIZE);
-	if (!regs)
-		return -ENOMEM;
-
-	/* Reset GPU via SYSCTL_GPU_RESET by rising & falling the reset signal */
-	gpu_reset_reg = regs + FPGA_SYSCTL_GPU_RESET_REG;
-	while (error && repeat--) {
-		writel(GPU_RESET_HIGH, gpu_reset_reg);
-		if (readl(gpu_reset_reg) == GPU_RESET_HIGH) {
-			mdelay(100);
-			writel(GPU_RESET_LOW, gpu_reset_reg);
-			mdelay(100);
-
-			/* Succeed in resetting GPU */
-			if (readl(gpu_reset_reg) == GPU_RESET_LOW)
-				error = 0;
-		}
-	}
-
-	iounmap(regs);
-
-	return error;
+	dev_info(dev, "KUTF: Start ignoring dmesg warnings\n");
 }
-EXPORT_SYMBOL(kutf_helper_external_reset_gpu);
+EXPORT_SYMBOL(kutf_helper_ignore_dmesg);
+
+void kutf_helper_stop_ignoring_dmesg(struct device *dev)
+{
+	dev_info(dev, "KUTF: Stop ignoring dmesg warnings\n");
+}
+EXPORT_SYMBOL(kutf_helper_stop_ignoring_dmesg);
