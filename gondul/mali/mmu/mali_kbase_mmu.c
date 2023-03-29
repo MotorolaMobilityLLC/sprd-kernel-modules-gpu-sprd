@@ -51,7 +51,7 @@
 #include <backend/gpu/mali_kbase_pm_internal.h>
 
 #ifdef SPRD_SUPPORT_FAULT_KEYWORD
-extern time_t time[FAULT_KEYWORD_NUM];
+extern ktime_t time[FAULT_KEYWORD_NUM];
 #endif
 
 /* Threshold used to decide whether to flush full caches or just a physical range */

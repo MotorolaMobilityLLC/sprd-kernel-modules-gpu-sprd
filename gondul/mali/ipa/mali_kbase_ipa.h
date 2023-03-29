@@ -22,7 +22,7 @@
 #ifndef _KBASE_IPA_H_
 #define _KBASE_IPA_H_
 
-#if defined(CONFIG_MALI_DEVFREQ) && defined(CONFIG_DEVFREQ_THERMAL) && !defined(CONFIG_SPRD_GPU_COOLING_DEVICE)
+#if defined(CONFIG_MALI_DEVFREQ) && defined(CONFIG_DEVFREQ_THERMAL) && !defined(CONFIG_UNISOC_GPU_COOLING_DEVICE)
 
 struct devfreq;
 

@@ -42,7 +42,7 @@
 #include <linux/cache.h>
 
 #ifdef SPRD_SUPPORT_FAULT_KEYWORD
-extern time_t time[FAULT_KEYWORD_NUM];
+extern ktime_t time[FAULT_KEYWORD_NUM];
 #endif
 #if !MALI_USE_CSF
 /**

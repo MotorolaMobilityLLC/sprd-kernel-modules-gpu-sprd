@@ -489,9 +489,9 @@ void kbasep_as_do_poke(struct work_struct *work);
 *
 *      return the seconds of rigth_now .
 */
-static inline time_t seconds_right_now(void)
+static inline ktime_t seconds_right_now(void)
 {
-	time_t rigth_now;
+	ktime_t rigth_now;
 
 	struct timespec64 now;
 	ktime_get_real_ts64(&now);

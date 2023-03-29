@@ -1136,7 +1136,7 @@ struct kbase_device {
 	struct kbasep_pm_metrics last_freqstats_metrics;
 	struct kbase_devfreq_queue_info devfreq_queue;
 
-#if defined(CONFIG_DEVFREQ_THERMAL) && !defined(CONFIG_SPRD_GPU_COOLING_DEVICE)
+#if defined(CONFIG_DEVFREQ_THERMAL) && !defined(CONFIG_UNISOC_GPU_COOLING_DEVICE)
 	struct thermal_cooling_device *devfreq_cooling;
 	bool ipa_protection_mode_switched;
 	struct {

@@ -21,7 +21,7 @@
 
 #include <uapi/linux/thermal.h>
 #include <linux/thermal.h>
-#if defined(CONFIG_DEVFREQ_THERMAL) && !defined(CONFIG_SPRD_GPU_COOLING_DEVICE)
+#if defined(CONFIG_DEVFREQ_THERMAL) && !defined(CONFIG_UNISOC_GPU_COOLING_DEVICE)
 #include <linux/devfreq_cooling.h>
 #endif
 #include <linux/of.h>
