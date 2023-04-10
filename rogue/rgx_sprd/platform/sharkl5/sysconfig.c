@@ -56,6 +56,9 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "sprd_init.h"
 #include <linux/dma-mapping.h>
 
+#include "rgxtimecorr.h"
+#include "rgxdebug.h"
+
 static RGX_TIMING_INFORMATION	gsRGXTimingInfo;
 static RGX_DATA					gsRGXData;
 static PVRSRV_DEVICE_CONFIG 	gsDevices[1];
@@ -229,10 +232,23 @@ PVRSRV_ERROR SysDebugInfo(PVRSRV_DEVICE_CONFIG *psDevConfig,
 				DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,
 				void *pvDumpDebugFile)
 {
+#if defined(NO_HARDWARE)
 	PVR_UNREFERENCED_PARAMETER(psDevConfig);
 	PVR_UNREFERENCED_PARAMETER(pfnDumpDebugPrintf);
 	PVR_UNREFERENCED_PARAMETER(pvDumpDebugFile);
 	return PVRSRV_OK;
+#else
+	PVRSRV_ERROR            eError;
+	IMG_CHAR *pszName;
+
+	pszName = psDevConfig->pszName;
+	PVR_DUMPDEBUG_LOG("------[ rgx_GPU %s Cur_FREQ and PMU_REG_STATE ]------",pszName);
+	eError = RGXDebugPrintGpuCurrentFreq(psDevConfig, pfnDumpDebugPrintf, pvDumpDebugFile);
+	GetGpuPowClkState(psDevConfig->psDevNode, pfnDumpDebugPrintf, pvDumpDebugFile);
+
+	return eError;
+
+#endif
 }
 
 /******************************************************************************

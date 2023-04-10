@@ -210,18 +210,18 @@ void GetGpuPowClkState(PVRSRV_DEVICE_NODE *psDeviceNode,DUMPDEBUG_PRINTF_FUNC *p
 void CheckGpuPowClkState(PVRSRV_DEVICE_NODE *psDeviceNode);
 void CheckGpuPowClkState(PVRSRV_DEVICE_NODE *psDeviceNode)
 {
-	regmap_read(gpu_dvfs_ctx.top_force_reg.regmap_ptr, gpu_dvfs_ctx.top_force_reg.args[0], &top_force);
-	regmap_read(gpu_dvfs_ctx.core_force_reg.regmap_ptr, gpu_dvfs_ctx.core_force_reg.args[0], &core_force);
-	regmap_read(gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_top_state_reg.args[0], &top_pwr);
-	regmap_read(gpu_dvfs_ctx.gpu_core_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_core_state_reg.args[0], &core_pwr);
-
-	top_force = top_force & top_force_mask;
-	core_force = core_force & core_force_mask;
-	top_pwr = top_pwr & top_pwr_mask;
-	core_pwr = core_pwr & core_pwr_mask;
-
 	if ((gpu_dvfs_ctx.gpu_power_on == 1) && (gpu_dvfs_ctx.gpu_clock_on == 1))
 	{
+		regmap_read(gpu_dvfs_ctx.top_force_reg.regmap_ptr, gpu_dvfs_ctx.top_force_reg.args[0], &top_force);
+		regmap_read(gpu_dvfs_ctx.core_force_reg.regmap_ptr, gpu_dvfs_ctx.core_force_reg.args[0], &core_force);
+		regmap_read(gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_top_state_reg.args[0], &top_pwr);
+		regmap_read(gpu_dvfs_ctx.gpu_core_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_core_state_reg.args[0], &core_pwr);
+
+		top_force = top_force & top_force_mask;
+		core_force = core_force & core_force_mask;
+		top_pwr = top_pwr & top_pwr_mask;
+		core_pwr = core_pwr & core_pwr_mask;
+
 		if ( (top_force == top_force_pwr_on)  && (core_force == core_force_pwr_on))
 		{
 			if ((top_pwr == top_pwr_ing) && (core_pwr == core_pwr_ing))
@@ -541,6 +541,7 @@ static void RgxPowerOn(void)
 		udelay(50);
 		regmap_read(gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_top_state_reg.args[0], &top_pwr);
 		top_pwr = top_pwr & top_pwr_mask;
+		PVR_DPF((PVR_DBG_WARNING, "SPRDDEBUG gpu_top_pwr = 0x%x, counter = %d ", top_pwr, counter));
 		PVR_DPF((PVR_DBG_ERROR, "SPRDDEBUG gpu_top_pwr = 0x%x, counter = %d ", top_pwr, counter));
 		if(counter++ > 200 )
 		{
