@@ -721,7 +721,7 @@ static void mali_power_mode_change(struct kbase_device *kbdev, int power_mode)
 	down(gpu_dvfs_ctx.sem);
 	//dev_info(kbdev->dev, "mali_power_mode_change: %d, gpu_power_state=%d gpu_clock_state=%d",power_mode,gpu_dvfs_ctx.gpu_power_state,gpu_dvfs_ctx.gpu_clock_state);
 	switch (power_mode) {
-	case 0://power on
+	case POWER_ON:
 		if (!atomic_read(&gpu_dvfs_ctx.gpu_power_state)) {
 			mali_power_on();
 			mali_clock_on();
@@ -731,8 +731,8 @@ static void mali_power_mode_change(struct kbase_device *kbdev, int power_mode)
 			mali_clock_on();
 		break;
 
-	case 1://light sleep
-	case 2://deep sleep
+	case LIGHT_SLEEP:
+	case DEEP_SLEEP:
 		if(atomic_read(&gpu_dvfs_ctx.gpu_clock_state))
 			mali_clock_off();
 
