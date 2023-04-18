@@ -152,6 +152,7 @@ struct gpu_dvfs_context {
 	struct sprd_sip_svc_handle *sip;
 	int last_gpu_temperature;
 	int gpu_temperature;
+	u32 pos;
 
 };
 
@@ -161,6 +162,7 @@ static struct gpu_dvfs_context gpu_dvfs_ctx=
 	.last_gpu_temperature = 0,
 	.gpu_temperature = 0,
 	.sem = &gpu_dfs_sem,
+	.pos = 1,
 };
 
 #if 0
@@ -386,7 +388,7 @@ static inline void mali_freq_init(struct device *dev)
 		gpll_1716M = GPLL_686M * 2.5;
 	}
 
-	gpu_dvfs_ctx.sip->gpu_ops.update_voltage_list((gpu_dvfs_ctx.gpu_temperature >= 65000));
+	gpu_dvfs_ctx.sip->gpu_ops.update_voltage_list(gpu_dvfs_ctx.gpu_temperature, gpu_dvfs_ctx.pos);
 
 	of_property_read_u32(dev->of_node, "sprd,dvfs-default", &i);
 	gpu_dvfs_ctx.freq_default = &gpu_dvfs_ctx.freq_list[i];
@@ -503,10 +505,11 @@ int kbase_platform_set_DVFS_table(struct kbase_device *kbdev)
 				printk(KERN_ERR "mali GPU_set_DVFS_table %s gpu_power_state = %d gpu_clock_state = %d,gpu_temperature = %d, last_gpu_temperature = %d.\n",
 						 __func__, atomic_read(&gpu_dvfs_ctx.gpu_power_state), atomic_read(&gpu_dvfs_ctx.gpu_clock_state), gpu_dvfs_ctx.gpu_temperature, gpu_dvfs_ctx.last_gpu_temperature);
 
-			if (gpu_dvfs_ctx.last_gpu_temperature <= 65000 && gpu_dvfs_ctx.gpu_temperature >= 65000)
-				gpu_dvfs_ctx.sip->gpu_ops.update_voltage_list(1U);
-			else
-				gpu_dvfs_ctx.sip->gpu_ops.update_voltage_list(0U);
+			if(gpu_dvfs_ctx.gpu_temperature < 0){
+				gpu_dvfs_ctx.gpu_temperature = - gpu_dvfs_ctx.gpu_temperature;
+				gpu_dvfs_ctx.pos = 0;
+			}
+			gpu_dvfs_ctx.sip->gpu_ops.update_voltage_list(gpu_dvfs_ctx.gpu_temperature, gpu_dvfs_ctx.pos);
 
 			gpu_dvfs_ctx.last_gpu_temperature = gpu_dvfs_ctx.gpu_temperature;
 		}
