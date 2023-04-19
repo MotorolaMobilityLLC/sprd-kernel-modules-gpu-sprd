@@ -173,7 +173,12 @@ static struct gpu_qos_config gpu_qos_cfg=
 };
 #endif
 
+#ifdef CONFIG_MALI_BOOST
 int gpu_boost_level = 0;
+int gpu_boost_level2 = 0;
+module_param(gpu_boost_level2, int, S_IRUSR | S_IWUSR | S_IWGRP | S_IRGRP | S_IROTH); /* rw-rw-r-- */
+MODULE_PARM_DESC(gpu_boost_level2, "GPU gpu_boost_level");
+#endif
 void __iomem *mali_qos_reg_base_mtx_m0;
 void __iomem *mali_qos_reg_base_mtx_m1;
 void __iomem *mali_qos_reg_base_apb_rf;
@@ -958,16 +963,11 @@ void kbase_platform_modify_target_freq(struct device *dev, unsigned long *target
 	int min_index = -1, max_index = -1, modify_flag = 0,user_max_freq, user_min_freq;
 	struct gpu_freq_info *freq_max, *freq_min;
 
-	switch(gpu_boost_level) {
-	case 10:
+	if ((gpu_boost_level == 10) || (gpu_boost_level2 == 10)) {
 		freq_max = freq_min = &gpu_dvfs_ctx.freq_list[gpu_dvfs_ctx.freq_list_len-1];
-		break;
-
-	case 0:
-	default:
+	} else {
 		freq_max = &gpu_dvfs_ctx.freq_list[gpu_dvfs_ctx.freq_list_len-1];
 		freq_min = &gpu_dvfs_ctx.freq_list[0];
-		break;
 	}
 	user_max_freq = dev_pm_qos_read_value(dev, DEV_PM_QOS_MAX_FREQUENCY);
 	user_min_freq = dev_pm_qos_read_value(dev, DEV_PM_QOS_MIN_FREQUENCY);
