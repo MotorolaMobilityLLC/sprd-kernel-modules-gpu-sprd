@@ -416,6 +416,10 @@ static inline void mali_clock_on(void)
 	}
 	clk_prepare_enable(gpu_dvfs_ctx.clk_gpu_i);
 
+	// put register map into normal mode
+	regcache_cache_only(gpu_dvfs_ctx.dvfs_index_cfg.regmap_ptr, false);
+	regcache_cache_only(gpu_dvfs_ctx.gpu_qos_sel.regmap_ptr, false);
+	udelay(100);
 
 	//enable gpu clock
 	clk_prepare_enable(gpu_dvfs_ctx.clk_gpu_core_eb);
@@ -487,6 +491,10 @@ static inline void mali_clock_off(void)
 	clk_disable_unprepare(gpu_dvfs_ctx.clk_gpu_core_eb);
 	clk_disable_unprepare(gpu_dvfs_ctx.clk_gpu_mem_eb);
 	clk_disable_unprepare(gpu_dvfs_ctx.clk_gpu_sys_eb);
+	// put register map into normal mode
+	regcache_cache_only(gpu_dvfs_ctx.dvfs_index_cfg.regmap_ptr, true);
+	regcache_cache_only(gpu_dvfs_ctx.gpu_qos_sel.regmap_ptr, true);
+	udelay(100);
 	clk_disable_unprepare(gpu_dvfs_ctx.clk_gpu_i);
 
 	//disable all clocks
