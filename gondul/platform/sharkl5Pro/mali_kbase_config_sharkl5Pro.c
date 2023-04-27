@@ -503,6 +503,7 @@ static int mali_platform_init(struct kbase_device *kbdev)
 
 #ifdef CONFIG_MALI_DEVFREQ
 	InitFreqStats(kbdev);
+	kbase_pm_statistics_FreqInit(kbdev);
 #endif
 
 	mali_power_on();
@@ -524,6 +525,7 @@ static void mali_platform_term(struct kbase_device *kbdev)
 	mali_power_off();
 
 #ifdef CONFIG_MALI_DEVFREQ
+	kbase_pm_statistics_FreqDeinit(kbdev);
 	DeinitFreqStats(kbdev);
 #endif
 
@@ -575,6 +577,7 @@ static void mali_power_mode_change(struct kbase_device *kbdev, int power_mode)
 		default:
 			break;
 	}
+	kbase_pm_set_statistics(kbdev, power_mode);
 	up(gpu_dvfs_ctx.sem);
 }
 
