@@ -321,7 +321,7 @@ static inline void mali_freq_init(struct device *dev)
 	gpu_dvfs_ctx.core_index7_map.args[0] = REG_GPU_DVFS_APB_RF_GPU_CORE_INDEX7_MAP;
 	gpu_dvfs_ctx.core_index7_map.args[1] = MASK_GPU_DVFS_APB_RF_GPU_CORE_VOL_INDEX7;
 
-	//read gpu bin, get T618 1:FF or 2:TT
+	//read gpu bin, get T618 1:FF or 2:TT, as well as get T619  1:Bin1  2:bin2
 	ret = sprd_gpu_cal_read(dev->of_node, "gpu_bin", &gpu_dvfs_ctx.gpu_binning);
 	//printk(KERN_ERR "Jassmine gpu_binning = %d\n", gpu_dvfs_ctx.gpu_binning);
 	if (ret)
@@ -378,6 +378,7 @@ static inline void mali_freq_init(struct device *dev)
 	}
 	//T606: GPLL max freq is 650M
 	//T616: GPLL max freq is 750M
+	//T619: GPLL max freq is 850M
 	// GPLL max freq is 850M
 	if (!strcmp(auto_efuse, "T606") || !strcmp(auto_efuse, "T612"))
 	{
@@ -407,6 +408,31 @@ static inline void mali_freq_init(struct device *dev)
 		//modify freq list len
 		gpu_dvfs_ctx.freq_list_len = gpu_dvfs_ctx.freq_list_len -1;
 	}
+	else if (!strcmp(auto_efuse, "T619"))
+	{
+
+#define VOLTAGE_OF_GPU_CORE_700000uv 700000
+#define VOLTAGE_OF_GPU_CORE_750000uv 750000
+#define VOLTAGE_OF_GPU_CORE_800000uv 800000
+#define VOLTAGE_OF_GPU_CORE_850000uv 850000
+
+		if (1 == gpu_dvfs_ctx.gpu_binning)
+		{
+			gpu_dvfs_ctx.freq_list[0].volt = VOLTAGE_OF_GPU_CORE_700000uv;
+			gpu_dvfs_ctx.freq_list[1].volt = VOLTAGE_OF_GPU_CORE_700000uv;
+			gpu_dvfs_ctx.freq_list[2].volt = VOLTAGE_OF_GPU_CORE_750000uv;
+			gpu_dvfs_ctx.freq_list[3].volt = VOLTAGE_OF_GPU_CORE_800000uv;
+			gpu_dvfs_ctx.freq_list[4].volt = VOLTAGE_OF_GPU_CORE_800000uv;
+		}
+		else if (2 == gpu_dvfs_ctx.gpu_binning)
+		{
+			gpu_dvfs_ctx.freq_list[0].volt = VOLTAGE_OF_GPU_CORE_700000uv;
+			gpu_dvfs_ctx.freq_list[1].volt = VOLTAGE_OF_GPU_CORE_750000uv;
+			gpu_dvfs_ctx.freq_list[2].volt = VOLTAGE_OF_GPU_CORE_750000uv;
+			gpu_dvfs_ctx.freq_list[3].volt = VOLTAGE_OF_GPU_CORE_850000uv;
+			gpu_dvfs_ctx.freq_list[4].volt = VOLTAGE_OF_GPU_CORE_850000uv;
+		}
+	}
 
 	if (2 == gpu_dvfs_ctx.gpu_binning)
 	{
@@ -417,13 +443,19 @@ static inline void mali_freq_init(struct device *dev)
 		else if (!strcmp(auto_efuse, "T616"))
 		{
 			//BIN2 TT 750M:0.8125v-Gear:3
-			//0.85v，812.5mv/3.125mv/step = 260step， 272的16进制为0x104
+			//0.8125v, 812.5mv/3.125mv/step = 260 steps, 0d260 = 0x104
 			regmap_update_bits(gpu_dvfs_ctx.dvfs_voltage_value1.regmap_ptr, gpu_dvfs_ctx.dvfs_voltage_value1.args[0], gpu_dvfs_ctx.dvfs_voltage_value1.args[1], 0x104);
+		}
+		else if (!strcmp(auto_efuse, "T619"))
+		{
+			//T619 BIN2 768M\850M: 0.85v-Gear: 3
+			//0.85v, 850mv/3.125mv/step = 272 steps, 0d272 = 0x110
+			regmap_update_bits(gpu_dvfs_ctx.dvfs_voltage_value1.regmap_ptr, gpu_dvfs_ctx.dvfs_voltage_value1.args[0], gpu_dvfs_ctx.dvfs_voltage_value1.args[1], 0x110);
 		}
 		else
 		{
 			//BIN2 TT 850M:0.85v-Gear:3
-			//0.85v，850mv/3.125mv/step = 272step， 272的16进制为0x110
+			//0.85v, 850mv/3.125mv/step = 272 steps, 0d272 = 0x110
 			regmap_update_bits(gpu_dvfs_ctx.dvfs_voltage_value1.regmap_ptr, gpu_dvfs_ctx.dvfs_voltage_value1.args[0], gpu_dvfs_ctx.dvfs_voltage_value1.args[1], 0x110);
 		}
 	}
@@ -531,6 +563,54 @@ static inline void mali_clock_on(void)
 			regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0], gpu_dvfs_ctx.core_index5_map.args[1], 3<<14);
 			regmap_update_bits(gpu_dvfs_ctx.core_index6_map.regmap_ptr, gpu_dvfs_ctx.core_index6_map.args[0], gpu_dvfs_ctx.core_index6_map.args[1], 3<<14);
 			regmap_update_bits(gpu_dvfs_ctx.core_index7_map.regmap_ptr, gpu_dvfs_ctx.core_index7_map.args[0], gpu_dvfs_ctx.core_index7_map.args[1], 3<<14);
+		}
+	}
+	else if (!strcmp(auto_efuse, "T619"))
+	{
+
+#define GPU_CORE_VOL_INDEX_OFFSET 14
+#define VOTE_VOLTAGE_OF_GPU_CORE_700mv 0
+#define VOTE_VOLTAGE_OF_GPU_CORE_750mv 1
+#define VOTE_VOLTAGE_OF_GPU_CORE_800mv 2
+#define VOTE_VOLTAGE_OF_GPU_CORE_850mv 3
+
+		if (1 == gpu_dvfs_ctx.gpu_binning)
+		{
+			regmap_update_bits(gpu_dvfs_ctx.core_index0_map.regmap_ptr, gpu_dvfs_ctx.core_index0_map.args[0],
+								gpu_dvfs_ctx.core_index0_map.args[1],	VOTE_VOLTAGE_OF_GPU_CORE_700mv << GPU_CORE_VOL_INDEX_OFFSET);
+			regmap_update_bits(gpu_dvfs_ctx.core_index1_map.regmap_ptr, gpu_dvfs_ctx.core_index1_map.args[0],
+								gpu_dvfs_ctx.core_index1_map.args[1],	VOTE_VOLTAGE_OF_GPU_CORE_700mv << GPU_CORE_VOL_INDEX_OFFSET);
+			regmap_update_bits(gpu_dvfs_ctx.core_index2_map.regmap_ptr, gpu_dvfs_ctx.core_index2_map.args[0],
+								gpu_dvfs_ctx.core_index2_map.args[1],	VOTE_VOLTAGE_OF_GPU_CORE_750mv << GPU_CORE_VOL_INDEX_OFFSET);
+			regmap_update_bits(gpu_dvfs_ctx.core_index3_map.regmap_ptr, gpu_dvfs_ctx.core_index3_map.args[0],
+								gpu_dvfs_ctx.core_index3_map.args[1],	VOTE_VOLTAGE_OF_GPU_CORE_800mv << GPU_CORE_VOL_INDEX_OFFSET);
+			regmap_update_bits(gpu_dvfs_ctx.core_index4_map.regmap_ptr, gpu_dvfs_ctx.core_index4_map.args[0],
+								gpu_dvfs_ctx.core_index4_map.args[1],	VOTE_VOLTAGE_OF_GPU_CORE_800mv << GPU_CORE_VOL_INDEX_OFFSET);
+			regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0],
+								gpu_dvfs_ctx.core_index5_map.args[1],	VOTE_VOLTAGE_OF_GPU_CORE_800mv << GPU_CORE_VOL_INDEX_OFFSET);
+			regmap_update_bits(gpu_dvfs_ctx.core_index6_map.regmap_ptr, gpu_dvfs_ctx.core_index6_map.args[0],
+								gpu_dvfs_ctx.core_index6_map.args[1],	VOTE_VOLTAGE_OF_GPU_CORE_800mv << GPU_CORE_VOL_INDEX_OFFSET);
+			regmap_update_bits(gpu_dvfs_ctx.core_index7_map.regmap_ptr, gpu_dvfs_ctx.core_index7_map.args[0],
+								gpu_dvfs_ctx.core_index7_map.args[1],	VOTE_VOLTAGE_OF_GPU_CORE_800mv << GPU_CORE_VOL_INDEX_OFFSET);
+		}
+		else if (2 == gpu_dvfs_ctx.gpu_binning)
+		{
+			regmap_update_bits(gpu_dvfs_ctx.core_index0_map.regmap_ptr, gpu_dvfs_ctx.core_index0_map.args[0],
+								gpu_dvfs_ctx.core_index0_map.args[1],	VOTE_VOLTAGE_OF_GPU_CORE_700mv << GPU_CORE_VOL_INDEX_OFFSET);
+			regmap_update_bits(gpu_dvfs_ctx.core_index1_map.regmap_ptr, gpu_dvfs_ctx.core_index1_map.args[0],
+								gpu_dvfs_ctx.core_index1_map.args[1],	VOTE_VOLTAGE_OF_GPU_CORE_750mv << GPU_CORE_VOL_INDEX_OFFSET);
+			regmap_update_bits(gpu_dvfs_ctx.core_index2_map.regmap_ptr, gpu_dvfs_ctx.core_index2_map.args[0],
+								gpu_dvfs_ctx.core_index2_map.args[1],	VOTE_VOLTAGE_OF_GPU_CORE_750mv << GPU_CORE_VOL_INDEX_OFFSET);
+			regmap_update_bits(gpu_dvfs_ctx.core_index3_map.regmap_ptr, gpu_dvfs_ctx.core_index3_map.args[0],
+								gpu_dvfs_ctx.core_index3_map.args[1],	VOTE_VOLTAGE_OF_GPU_CORE_850mv << GPU_CORE_VOL_INDEX_OFFSET);
+			regmap_update_bits(gpu_dvfs_ctx.core_index4_map.regmap_ptr, gpu_dvfs_ctx.core_index4_map.args[0],
+								gpu_dvfs_ctx.core_index4_map.args[1],	VOTE_VOLTAGE_OF_GPU_CORE_850mv << GPU_CORE_VOL_INDEX_OFFSET);
+			regmap_update_bits(gpu_dvfs_ctx.core_index5_map.regmap_ptr, gpu_dvfs_ctx.core_index5_map.args[0],
+								gpu_dvfs_ctx.core_index5_map.args[1],	VOTE_VOLTAGE_OF_GPU_CORE_850mv << GPU_CORE_VOL_INDEX_OFFSET);
+			regmap_update_bits(gpu_dvfs_ctx.core_index6_map.regmap_ptr, gpu_dvfs_ctx.core_index6_map.args[0],
+								gpu_dvfs_ctx.core_index6_map.args[1],	VOTE_VOLTAGE_OF_GPU_CORE_850mv << GPU_CORE_VOL_INDEX_OFFSET);
+			regmap_update_bits(gpu_dvfs_ctx.core_index7_map.regmap_ptr, gpu_dvfs_ctx.core_index7_map.args[0],
+								gpu_dvfs_ctx.core_index7_map.args[1],	VOTE_VOLTAGE_OF_GPU_CORE_850mv << GPU_CORE_VOL_INDEX_OFFSET);
 		}
 	}
 	else
