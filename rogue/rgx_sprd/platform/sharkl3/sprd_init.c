@@ -254,9 +254,6 @@ void CheckGpuPowClkState(PVRSRV_DEVICE_NODE *psDeviceNode)
 	}
 }
 
-
-
-
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0))
 static int pmu_glb_set(unsigned long reg, u32 bit)
 {
@@ -347,7 +344,7 @@ static void RgxFreqInit(struct device *dev)
 	syscon_get_args_by_name(dev->of_node,"core_auto_shutdown", 2, (uint32_t *)gpu_dvfs_ctx.core_auto_reg.args);
 
 	gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr = syscon_regmap_lookup_by_name(dev->of_node,"gpu_top_state");
-	 PVR_ASSERT(NULL != gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr);
+	PVR_ASSERT(NULL != gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr);
 	syscon_get_args_by_name(dev->of_node,"gpu_top_state", 2, (uint32_t *)gpu_dvfs_ctx.gpu_top_state_reg.args);
 
 	gpu_dvfs_ctx.gpu_core_state_reg.regmap_ptr = syscon_regmap_lookup_by_name(dev->of_node,"gpu_core_state");
@@ -483,9 +480,9 @@ static int RgxSetFreqVolt(IMG_UINT32 ui32Freq, IMG_UINT32 ui32Volt)
 	if (0 <= index)
 	{
 		down(gpu_dvfs_ctx.sem);
-		if(gpu_dvfs_ctx.gpu_power_on && gpu_dvfs_ctx.gpu_clock_on)
+		if (gpu_dvfs_ctx.gpu_power_on && gpu_dvfs_ctx.gpu_clock_on)
 		{
-			if(ui32Freq != gpu_dvfs_ctx.freq_cur->freq)
+			if (ui32Freq != gpu_dvfs_ctx.freq_cur->freq)
 			{
 				//set gpu core clk
 				clk_set_parent(gpu_dvfs_ctx.clk_gpu_core, gpu_dvfs_ctx.freq_list[index].clk_src);
@@ -543,7 +540,7 @@ static void RgxPowerOn(void)
 		top_pwr = top_pwr & top_pwr_mask;
 		PVR_DPF((PVR_DBG_WARNING, "SPRDDEBUG gpu_top_pwr = 0x%x, counter = %d ", top_pwr, counter));
 		PVR_DPF((PVR_DBG_ERROR, "SPRDDEBUG gpu_top_pwr = 0x%x, counter = %d ", top_pwr, counter));
-		if(counter++ > 200 )
+		if (counter++ > 200)
 		{
 			PVR_DPF((PVR_DBG_ERROR, "gpu top power on is timeout ! "));
 			WARN_ON(1);
@@ -559,6 +556,7 @@ static void RgxPowerOn(void)
 	regmap_update_bits(gpu_dvfs_ctx.core_auto_reg.regmap_ptr, gpu_dvfs_ctx.core_auto_reg.args[0], gpu_dvfs_ctx.core_auto_reg.args[1], gpu_dvfs_ctx.core_auto_reg.args[1]);
 #endif
 	udelay(100);
+
 	gpu_dvfs_ctx.gpu_power_on = 1;
 }
 
@@ -625,7 +623,7 @@ static void RgxClockOff(void)
 	}
 }
 
-static PVRSRV_ERROR SprdPrePowerState(IMG_HANDLE hSysData, PVRSRV_SYS_POWER_STATE eNewPowerState, PVRSRV_SYS_POWER_STATE eCurrentPowerState, IMG_UINT32 bForced)
+static PVRSRV_ERROR SprdPrePowerState(IMG_HANDLE hSysData, PVRSRV_SYS_POWER_STATE eNewPowerState, PVRSRV_SYS_POWER_STATE eCurrentPowerState, PVRSRV_POWER_FLAGS bForced)
 {
 	PVRSRV_ERROR result = PVRSRV_OK;
 
@@ -651,7 +649,7 @@ static PVRSRV_ERROR SprdPrePowerState(IMG_HANDLE hSysData, PVRSRV_SYS_POWER_STAT
 	return (result);
 }
 
-static PVRSRV_ERROR SprdPostPowerState(IMG_HANDLE hSysData, PVRSRV_SYS_POWER_STATE eNewPowerState, PVRSRV_SYS_POWER_STATE eCurrentPowerState, IMG_UINT32 bForced)
+static PVRSRV_ERROR SprdPostPowerState(IMG_HANDLE hSysData, PVRSRV_SYS_POWER_STATE eNewPowerState, PVRSRV_SYS_POWER_STATE eCurrentPowerState, PVRSRV_POWER_FLAGS bForced)
 {
 	PVRSRV_ERROR result = PVRSRV_OK;
 

@@ -55,7 +55,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #endif
 #include "sprd_init.h"
 #include <linux/dma-mapping.h>
-
 #include "rgxtimecorr.h"
 #include "rgxdebug.h"
 
@@ -159,11 +158,12 @@ PVRSRV_ERROR SysDevInit(void *pvOSDevice, PVRSRV_DEVICE_CONFIG **ppsDevConfig)
 	gsDevices[0].pasPhysHeaps = gsPhysHeapConfig;
 	gsDevices[0].ui32PhysHeapCount = ARRAY_SIZE(gsPhysHeapConfig);
 	gsDevices[0].eDefaultHeap = PVRSRV_PHYS_HEAP_GPU_LOCAL;
+
 	/* No clock frequency either */
 	gsDevices[0].pfnClockFreqGet        = NULL;
 
 	gsDevices[0].hDevData               = &gsRGXData;
-	gsDevices[0].bDevicePA0IsValid  = IMG_FALSE;
+	gsDevices[0].bDevicePA0IsValid      = IMG_FALSE;
 
 	/* Setup other system specific stuff */
 #if defined(SUPPORT_ION)

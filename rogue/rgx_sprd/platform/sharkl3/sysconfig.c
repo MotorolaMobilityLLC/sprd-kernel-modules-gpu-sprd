@@ -119,7 +119,7 @@ PVRSRV_ERROR SysDevInit(void *pvOSDevice, PVRSRV_DEVICE_CONFIG **ppsDevConfig)
 {
 	IMG_UINT32 ui32NextPhysHeapID = 0;
 
-	dma_set_mask(pvOSDevice, DMA_BIT_MASK(36));
+	dma_set_mask(pvOSDevice, DMA_BIT_MASK(36));	// avoid kernel panic beacuseof high address
 
 	if (gsDevices[0].pvOSDevice)
 	{
@@ -158,11 +158,12 @@ PVRSRV_ERROR SysDevInit(void *pvOSDevice, PVRSRV_DEVICE_CONFIG **ppsDevConfig)
 	gsDevices[0].pasPhysHeaps = gsPhysHeapConfig;
 	gsDevices[0].ui32PhysHeapCount = ARRAY_SIZE(gsPhysHeapConfig);
 	gsDevices[0].eDefaultHeap = PVRSRV_PHYS_HEAP_GPU_LOCAL;
+
 	/* No clock frequency either */
 	gsDevices[0].pfnClockFreqGet        = NULL;
 
 	gsDevices[0].hDevData               = &gsRGXData;
-	gsDevices[0].bDevicePA0IsValid  = IMG_FALSE;
+	gsDevices[0].bDevicePA0IsValid      = IMG_FALSE;
 
 	/* Setup other system specific stuff */
 #if defined(SUPPORT_ION)
@@ -249,7 +250,6 @@ PVRSRV_ERROR SysDebugInfo(PVRSRV_DEVICE_CONFIG *psDevConfig,
 
 #endif
 }
-
 
 /******************************************************************************
  End of file (sysconfig.c)

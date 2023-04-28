@@ -154,7 +154,6 @@ struct gpu_dvfs_context {
 	struct gpu_reg_info gpu_sys_sw_dvfs_en;
 	struct gpu_reg_info gpu_top_state_reg;
 	struct gpu_reg_info gpu_rgx_dust_state_reg;
-
 #endif
 };
 
@@ -311,10 +310,6 @@ static PVRSRV_ERROR RgxDeviceInit(PVRSRV_DEVICE_CONFIG* psDevConfig, struct plat
 		result = PVRSRV_ERROR_INIT_FAILURE;
 		return (result);
 	}
-//	else
-//	{
-//		PVR_DPF((PVR_DBG_ERROR, "RgxDeviceInit has MEM resource, platform_get_resource OK???"));
-//	}
 
 	/* Device setup information */
 	psDevConfig->sRegsCpuPBase.uiAddr = reg_res->start;
@@ -327,10 +322,6 @@ static PVRSRV_ERROR RgxDeviceInit(PVRSRV_DEVICE_CONFIG* psDevConfig, struct plat
 		result = PVRSRV_ERROR_INIT_FAILURE;
 		return (result);
 	}
-//	else
-//	{
-//		PVR_DPF((PVR_DBG_ERROR, "RgxDeviceInit has IRQ resource, platform_get_resource OK???"));
-//	}
 	psDevConfig->ui32IRQ            = irq_res->start;
 	psDevConfig->eCacheSnoopingMode = PVRSRV_DEVICE_SNOOP_NONE;
 
@@ -352,7 +343,6 @@ static void FillOppTable(void)
 	}
 }
 #endif
-
 
 static void RgxFreqInit(struct device *dev)
 {
@@ -536,7 +526,6 @@ static void RgxFreqInit(struct device *dev)
 		of_property_read_u32_index(dev->of_node, "sprd,dvfs-lists", 4*i+1, &gpu_dvfs_ctx.freq_list[i].volt);
 		of_property_read_u32_index(dev->of_node, "sprd,dvfs-lists", 4*i+3, &gpu_dvfs_ctx.freq_list[i].div);
 	}
-
 
 #if defined(SUPPORT_PDVFS)
 	FillOppTable();
@@ -792,8 +781,9 @@ static void RgxPowerOn(void)
 		udelay(50);
 		regmap_read(gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_top_state_reg.args[0], &top_pwr);
 		top_pwr = top_pwr & top_pwr_mask;
+		PVR_DPF((PVR_DBG_WARNING, "SPRDDEBUG gpu_top_pwr = 0x%x, counter = %d ", top_pwr, counter));
 		PVR_DPF((PVR_DBG_ERROR, "SPRDDEBUG gpu_top_pwr = 0x%x, counter = %d ", top_pwr, counter));
-		if(counter++ > 200 )
+		if (counter++ > 200)
 		{
 			PVR_DPF((PVR_DBG_ERROR, "gpu top power on is timeout ! "));
 			WARN_ON(1);
@@ -829,6 +819,7 @@ static void RgxPowerOff(void)
 	regmap_update_bits(gpu_dvfs_ctx.top_force_reg.regmap_ptr, gpu_dvfs_ctx.top_force_reg.args[0], gpu_dvfs_ctx.top_force_reg.args[1], gpu_dvfs_ctx.top_force_reg.args[1]);
 #endif
 }
+
 static void RgxQosConfig(void)
 {
 	regmap_update_bits(gpu_dvfs_ctx.gpu_qos_sel.regmap_ptr, gpu_dvfs_ctx.gpu_qos_sel.args[0], gpu_dvfs_ctx.gpu_qos_sel.args[1], gpu_dvfs_ctx.gpu_qos_sel.args[1]);
@@ -845,7 +836,6 @@ static void RgxClockOn(void)
 		clk_prepare_enable(gpu_dvfs_ctx.gpu_clk_src[i]);
 	}
 	clk_prepare_enable(gpu_dvfs_ctx.clk_gpu_i);
-
 
 	//enable gpu clock
 	clk_prepare_enable(gpu_dvfs_ctx.clk_gpu_core_eb);
@@ -873,6 +863,7 @@ static void RgxClockOn(void)
 #endif //SUPPORT_PDVFS
 #endif //PVR_HW_DVFS
 	udelay(100);
+
 	//qos
 	RgxQosConfig();
 
@@ -900,7 +891,7 @@ static void RgxClockOff(void)
 	}
 }
 
-static PVRSRV_ERROR SprdPrePowerState(IMG_HANDLE hSysData, PVRSRV_SYS_POWER_STATE eNewPowerState, PVRSRV_SYS_POWER_STATE eCurrentPowerState, IMG_UINT32 bForced)
+static PVRSRV_ERROR SprdPrePowerState(IMG_HANDLE hSysData, PVRSRV_SYS_POWER_STATE eNewPowerState, PVRSRV_SYS_POWER_STATE eCurrentPowerState, PVRSRV_POWER_FLAGS bForced)
 {
 	PVRSRV_ERROR result = PVRSRV_OK;
 
@@ -926,7 +917,7 @@ static PVRSRV_ERROR SprdPrePowerState(IMG_HANDLE hSysData, PVRSRV_SYS_POWER_STAT
 	return (result);
 }
 
-static PVRSRV_ERROR SprdPostPowerState(IMG_HANDLE hSysData, PVRSRV_SYS_POWER_STATE eNewPowerState, PVRSRV_SYS_POWER_STATE eCurrentPowerState, IMG_UINT32 bForced)
+static PVRSRV_ERROR SprdPostPowerState(IMG_HANDLE hSysData, PVRSRV_SYS_POWER_STATE eNewPowerState, PVRSRV_SYS_POWER_STATE eCurrentPowerState, PVRSRV_POWER_FLAGS bForced)
 {
 	PVRSRV_ERROR result = PVRSRV_OK;
 
