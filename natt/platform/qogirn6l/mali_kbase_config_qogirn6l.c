@@ -461,7 +461,13 @@ static inline void mali_check_bridge_trans_idle(void)
 
 int kbase_platform_set_DVFS_table(struct kbase_device *kbdev)
 {
-	thermal_zone_get_temp(kbdev->gpu_tz, &gpu_dvfs_ctx.gpu_temperature);
+	int ret;
+
+	ret = thermal_zone_get_temp(kbdev->gpu_tz, &gpu_dvfs_ctx.gpu_temperature);
+	if (ret){
+		printk(KERN_ERR "failed to get the temp of gpu thmzone.\n");
+		return -1;
+	}
 	down(gpu_dvfs_ctx.sem);
 	if (atomic_read(&gpu_dvfs_ctx.gpu_power_state) && atomic_read(&gpu_dvfs_ctx.gpu_clock_state)
 		&& atomic_read(&gpu_dvfs_ctx.dcdc_gpu_state)) {
