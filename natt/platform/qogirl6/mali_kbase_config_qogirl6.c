@@ -102,6 +102,7 @@ struct gpu_dvfs_context {
 
 	struct gpu_reg_info top_dvfs_cfg_reg;
 	struct gpu_reg_info top_force_reg;
+	struct gpu_reg_info gpu_top_state_reg;
 	struct gpu_reg_info gpu_qos_sel;
 	struct gpu_reg_info gpu_qos;
 	struct gpu_reg_info dvfs_index_cfg;
@@ -215,6 +216,9 @@ static inline void mali_freq_init(struct device *dev)
 	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.top_dvfs_cfg_reg.regmap_ptr);
 	gpu_dvfs_ctx.top_force_reg.regmap_ptr = syscon_regmap_lookup_by_phandle_args(dev->of_node,"top-force-shutdown", 2, (uint32_t *)gpu_dvfs_ctx.top_force_reg.args);
 	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.top_force_reg.regmap_ptr);
+
+	gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr = syscon_regmap_lookup_by_phandle_args(dev->of_node,"gpu_top_state", 2, (uint32_t *)gpu_dvfs_ctx.gpu_top_state_reg.args);
+	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr);
 
 	topdvfs_controller_base_ptr = syscon_regmap_lookup_by_phandle(dev->of_node, "topdvfs-controller");
 	KBASE_DEBUG_ASSERT(topdvfs_controller_base_ptr);
@@ -469,11 +473,49 @@ static inline void mali_freq_init(struct device *dev)
 	gpu_dvfs_ctx.cur_voltage = gpu_dvfs_ctx.freq_cur->volt;
 }
 
+static bool mali_top_pwr_state_check(void)
+{
+    u32 top_state = 0xffff;
+    const u32 top_mask = 0x1f << 16;
+    const u32 top_pwr_on = 0;
+    int cnt_1 = 0, cnt_2 = 0;
+
+    while(1) {
+        udelay(10);
+        //check if the top_state ready or not powered
+        regmap_read(gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_top_state_reg.args[0], &top_state);
+        top_state &= top_mask;
+        if (top_state == top_pwr_on) {
+            if (++cnt_1 >= 5) // need continuous 5 times stability power-on
+                return true;
+        } else {
+            cnt_1 = 0;
+            if(++cnt_2 >= 2000) { // wait 20ms
+                printk(KERN_ERR "%s: gpu_top_pwr_state:0x%x, gpu top power on is timeout!", __func__, top_state);
+                WARN_ON(1);
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
 static inline void mali_power_on(void)
 {
+	bool top_pwr_check_ret = true;
+
 	regmap_update_bits(gpu_dvfs_ctx.top_force_reg.regmap_ptr, gpu_dvfs_ctx.top_force_reg.args[0], gpu_dvfs_ctx.top_force_reg.args[1], ~gpu_dvfs_ctx.top_force_reg.args[1]);
 
 	udelay(100);
+
+	//check if the top power state ready or not
+	top_pwr_check_ret = mali_top_pwr_state_check();
+	if (!top_pwr_check_ret) {
+		printk(KERN_ERR "mali %s: gpu top not power on\n", __func__);
+		WARN_ON(1);
+	}
+
 	gpu_dvfs_ctx.gpu_power_on = 1;
 }
 
@@ -496,6 +538,7 @@ static inline void mali_clock_on(void)
 	int i;
 	struct device_node *hwf;
 	const char *auto_efuse = NULL;
+	bool top_pwr_check_ret = true;
 
 	//enable all clocks
 	for(i=0;i<gpu_dvfs_ctx.gpu_clk_num;i++)
@@ -510,6 +553,13 @@ static inline void mali_clock_on(void)
 	clk_prepare_enable(gpu_dvfs_ctx.clk_gpu_mem_eb);
 	clk_prepare_enable(gpu_dvfs_ctx.clk_gpu_sys_eb);
 	udelay(200);
+
+	//check if the top power state ready or not
+	top_pwr_check_ret = mali_top_pwr_state_check();
+	if (!top_pwr_check_ret) {
+		printk(KERN_ERR "mali %s: gpu top not power on\n", __func__);
+		WARN_ON(1);
+	}
 
 	//set core index map
 	hwf = of_find_node_by_path("/hwfeature/auto");
