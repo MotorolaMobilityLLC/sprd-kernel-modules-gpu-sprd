@@ -299,7 +299,7 @@ static inline void mali_clock_on(void)
 
 	//enable gpu clock
 	clk_prepare_enable(gpu_dfs_ctx.gpu_clock);
-	udelay(300);
+	udelay(400);
 
 	//set gpu clock parent
 	clk_set_parent(gpu_dfs_ctx.gpu_clock, gpu_dfs_ctx.freq_default->clk_src);
@@ -308,6 +308,7 @@ static inline void mali_clock_on(void)
 	clk_set_rate(gpu_dfs_ctx.freq_cur->clk_src, gpu_dfs_ctx.freq_cur->freq*1000);
 	clk_set_parent(gpu_dfs_ctx.gpu_clock, gpu_dfs_ctx.freq_cur->clk_src);
 
+	udelay(200);
 	gpu_dfs_ctx.gpu_clock_on = 1;
 
 	gpu_freq_cur = gpu_dfs_ctx.freq_cur->freq;
