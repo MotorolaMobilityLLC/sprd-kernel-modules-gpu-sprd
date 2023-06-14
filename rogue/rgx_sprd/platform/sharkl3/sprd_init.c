@@ -174,20 +174,20 @@ const u32 clk_gpu_eb_on = MOVE_BIT_LEFT(0x1,0);
 void GetGpuPowClkState(PVRSRV_DEVICE_NODE *psDeviceNode,DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,void *pvDumpDebugFile);
 void GetGpuPowClkState(PVRSRV_DEVICE_NODE *psDeviceNode,DUMPDEBUG_PRINTF_FUNC *pfnDumpDebugPrintf,void *pvDumpDebugFile )
 {
-	regmap_read(gpu_dvfs_ctx.top_force_reg.regmap_ptr, gpu_dvfs_ctx.top_force_reg.args[0], &top_force);
-	regmap_read(gpu_dvfs_ctx.core_force_reg.regmap_ptr, gpu_dvfs_ctx.core_force_reg.args[0], &core_force);
-	regmap_read(gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_top_state_reg.args[0], &top_pwr);
-	regmap_read(gpu_dvfs_ctx.gpu_core_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_core_state_reg.args[0], &core_pwr);
-	regmap_read(gpu_dvfs_ctx.clk_gpu_eb_reg.regmap_ptr, gpu_dvfs_ctx.clk_gpu_eb_reg.args[0], &clk_gpu_eb_pwr);
-
-	top_force = top_force & top_force_mask;
-	core_force = core_force & core_force_mask;
-	top_pwr = top_pwr & top_pwr_mask;
-	core_pwr = core_pwr & core_pwr_mask;
-	clk_gpu_eb_pwr = clk_gpu_eb_pwr &clk_gpu_eb_mask;
-
 	if ((gpu_dvfs_ctx.gpu_power_on == 1) && (gpu_dvfs_ctx.gpu_clock_on == 1))
 	{
+		regmap_read(gpu_dvfs_ctx.top_force_reg.regmap_ptr, gpu_dvfs_ctx.top_force_reg.args[0], &top_force);
+		regmap_read(gpu_dvfs_ctx.core_force_reg.regmap_ptr, gpu_dvfs_ctx.core_force_reg.args[0], &core_force);
+		regmap_read(gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_top_state_reg.args[0], &top_pwr);
+		regmap_read(gpu_dvfs_ctx.gpu_core_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_core_state_reg.args[0], &core_pwr);
+		regmap_read(gpu_dvfs_ctx.clk_gpu_eb_reg.regmap_ptr, gpu_dvfs_ctx.clk_gpu_eb_reg.args[0], &clk_gpu_eb_pwr);
+
+		top_force = top_force & top_force_mask;
+		core_force = core_force & core_force_mask;
+		top_pwr = top_pwr & top_pwr_mask;
+		core_pwr = core_pwr & core_pwr_mask;
+		clk_gpu_eb_pwr = clk_gpu_eb_pwr &clk_gpu_eb_mask;
+
 		if ( (top_force == top_force_pwr_on)  && (core_force == core_force_pwr_on))
 		{
 			if ((top_pwr == top_pwr_on) && (core_pwr == core_pwr_on))
@@ -199,12 +199,12 @@ void GetGpuPowClkState(PVRSRV_DEVICE_NODE *psDeviceNode,DUMPDEBUG_PRINTF_FUNC *p
 		{
 			PVR_DUMPDEBUG_LOG("gpu_top or gpu_core pwr_on not enabled.");
 		}
+		PVR_DUMPDEBUG_LOG("RGX GPU REG STATE:top_force[0x%x], core_force[0x%x], top_pwr[0x%x], core_pwr[0x%x], clk_gpu_eb_pwr[0x%x]",top_force,core_force,top_pwr,core_pwr,clk_gpu_eb_pwr);
 	}
 	else
 	{
 		PVR_DUMPDEBUG_LOG("GPU power is off now!!!");
 	}
-	PVR_DUMPDEBUG_LOG("RGX GPU REG STATE:top_force[0x%x], core_force[0x%x], top_pwr[0x%x], core_pwr[0x%x], clk_gpu_eb_pwr[0x%x]",top_force,core_force,top_pwr,core_pwr,clk_gpu_eb_pwr);
 }
 
 void CheckGpuPowClkState(PVRSRV_DEVICE_NODE *psDeviceNode);
@@ -528,17 +528,17 @@ static void RgxPowerOn(void)
 	pmu_glb_set(REG_PMU_APB_PD_GPU_CORE_CFG, BIT_PMU_APB_PD_GPU_CORE_AUTO_SHUTDOWN_EN);
 #else
 	regmap_update_bits(gpu_dvfs_ctx.top_force_reg.regmap_ptr, gpu_dvfs_ctx.top_force_reg.args[0], gpu_dvfs_ctx.top_force_reg.args[1], 0);
+	udelay(250);
 
 	regmap_read(gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_top_state_reg.args[0], &top_pwr);
 	top_pwr = top_pwr & top_pwr_mask;
 
-	while( top_pwr == top_pwr_ing )
+	while (top_pwr != top_pwr_on)
 	{
 
 		udelay(50);
 		regmap_read(gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_top_state_reg.args[0], &top_pwr);
 		top_pwr = top_pwr & top_pwr_mask;
-		PVR_DPF((PVR_DBG_WARNING, "SPRDDEBUG gpu_top_pwr = 0x%x, counter = %d ", top_pwr, counter));
 		PVR_DPF((PVR_DBG_ERROR, "SPRDDEBUG gpu_top_pwr = 0x%x, counter = %d ", top_pwr, counter));
 		if (counter++ > 200)
 		{
@@ -623,7 +623,7 @@ static void RgxClockOff(void)
 	}
 }
 
-static PVRSRV_ERROR SprdPrePowerState(IMG_HANDLE hSysData, PVRSRV_SYS_POWER_STATE eNewPowerState, PVRSRV_SYS_POWER_STATE eCurrentPowerState, PVRSRV_POWER_FLAGS bForced)
+static PVRSRV_ERROR SprdPostPowerState(IMG_HANDLE hSysData, PVRSRV_SYS_POWER_STATE eNewPowerState, PVRSRV_SYS_POWER_STATE eCurrentPowerState, PVRSRV_POWER_FLAGS bForced)
 {
 	PVRSRV_ERROR result = PVRSRV_OK;
 
@@ -649,7 +649,7 @@ static PVRSRV_ERROR SprdPrePowerState(IMG_HANDLE hSysData, PVRSRV_SYS_POWER_STAT
 	return (result);
 }
 
-static PVRSRV_ERROR SprdPostPowerState(IMG_HANDLE hSysData, PVRSRV_SYS_POWER_STATE eNewPowerState, PVRSRV_SYS_POWER_STATE eCurrentPowerState, PVRSRV_POWER_FLAGS bForced)
+static PVRSRV_ERROR SprdPrePowerState(IMG_HANDLE hSysData, PVRSRV_SYS_POWER_STATE eNewPowerState, PVRSRV_SYS_POWER_STATE eCurrentPowerState, PVRSRV_POWER_FLAGS bForced)
 {
 	PVRSRV_ERROR result = PVRSRV_OK;
 

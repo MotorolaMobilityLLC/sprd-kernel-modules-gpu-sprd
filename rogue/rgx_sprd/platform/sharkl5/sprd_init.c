@@ -771,17 +771,17 @@ static void RgxPowerOn(void)
 	pmu_glb_set(REG_PMU_APB_PD_GPU_CORE_CFG, BIT_PMU_APB_PD_GPU_CORE_AUTO_SHUTDOWN_EN);
 #else
 	regmap_update_bits(gpu_dvfs_ctx.top_force_reg.regmap_ptr, gpu_dvfs_ctx.top_force_reg.args[0], gpu_dvfs_ctx.top_force_reg.args[1], ~gpu_dvfs_ctx.top_force_reg.args[1]);
+	udelay(250);
 
 	regmap_read(gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_top_state_reg.args[0], &top_pwr);
 	top_pwr = top_pwr & top_pwr_mask;
 
-	while( top_pwr == top_pwr_ing )
+	while (top_pwr != top_pwr_on)
 	{
 
 		udelay(50);
 		regmap_read(gpu_dvfs_ctx.gpu_top_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_top_state_reg.args[0], &top_pwr);
 		top_pwr = top_pwr & top_pwr_mask;
-		PVR_DPF((PVR_DBG_WARNING, "SPRDDEBUG gpu_top_pwr = 0x%x, counter = %d ", top_pwr, counter));
 		PVR_DPF((PVR_DBG_ERROR, "SPRDDEBUG gpu_top_pwr = 0x%x, counter = %d ", top_pwr, counter));
 		if (counter++ > 200)
 		{
@@ -891,7 +891,7 @@ static void RgxClockOff(void)
 	}
 }
 
-static PVRSRV_ERROR SprdPrePowerState(IMG_HANDLE hSysData, PVRSRV_SYS_POWER_STATE eNewPowerState, PVRSRV_SYS_POWER_STATE eCurrentPowerState, PVRSRV_POWER_FLAGS bForced)
+static PVRSRV_ERROR SprdPostPowerState(IMG_HANDLE hSysData, PVRSRV_SYS_POWER_STATE eNewPowerState, PVRSRV_SYS_POWER_STATE eCurrentPowerState, PVRSRV_POWER_FLAGS bForced)
 {
 	PVRSRV_ERROR result = PVRSRV_OK;
 
@@ -917,7 +917,7 @@ static PVRSRV_ERROR SprdPrePowerState(IMG_HANDLE hSysData, PVRSRV_SYS_POWER_STAT
 	return (result);
 }
 
-static PVRSRV_ERROR SprdPostPowerState(IMG_HANDLE hSysData, PVRSRV_SYS_POWER_STATE eNewPowerState, PVRSRV_SYS_POWER_STATE eCurrentPowerState, PVRSRV_POWER_FLAGS bForced)
+static PVRSRV_ERROR SprdPrePowerState(IMG_HANDLE hSysData, PVRSRV_SYS_POWER_STATE eNewPowerState, PVRSRV_SYS_POWER_STATE eCurrentPowerState, PVRSRV_POWER_FLAGS bForced)
 {
 	PVRSRV_ERROR result = PVRSRV_OK;
 
