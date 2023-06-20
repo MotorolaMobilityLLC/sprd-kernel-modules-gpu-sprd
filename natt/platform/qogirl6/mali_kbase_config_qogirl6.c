@@ -204,12 +204,31 @@ static int sprd_gpu_cal_read(struct device_node *np, const char *cell_id, u32 *v
 	return 0;
 }
 
+char* sprd_get_efuse(void)
+{
+	struct device_node *sprd_hwf;
+	char *sprd_efuse = "UNKNOWN";
+
+	//adjust freq list
+	sprd_hwf = of_find_node_by_path("/hwfeature/auto");
+	if (sprd_hwf) {
+		sprd_efuse = (char*)of_get_property(sprd_hwf, "efuse", NULL);
+		if (!sprd_efuse)
+		{
+			sprd_efuse = "UNKNOWN";
+		}
+		//pr_info ("find  in %s was %s\n", __func__, auto_efuse);
+	}
+
+	return sprd_efuse;
+}
+
 static inline void mali_freq_init(struct device *dev)
 {
 	int i = 0, clk_cnt = 0, ret = 0;
 	struct device_node *qos_node = NULL;
-	struct device_node *hwf;
-	const char *auto_efuse = NULL;
+	//struct device_node *hwf;
+	char *auto_efuse = "UNKNOWN";
 	struct regmap* topdvfs_controller_base_ptr = NULL;
 
 	gpu_dvfs_ctx.top_dvfs_cfg_reg.regmap_ptr = syscon_regmap_lookup_by_phandle_args(dev->of_node,"top_dvfs_cfg", 2, (uint32_t *)gpu_dvfs_ctx.top_dvfs_cfg_reg.args);
@@ -374,12 +393,8 @@ static inline void mali_freq_init(struct device *dev)
 		gpu_dvfs_ctx.freq_list[i].dvfs_index = i;
 	}
 
-	//adjust freq list
-	hwf = of_find_node_by_path("/hwfeature/auto");
-	if (hwf) {
-		auto_efuse = (char*)of_get_property(hwf, "efuse", NULL);
-		//pr_info ("find  in %s was %s\n", __func__, auto_efuse);
-	}
+	auto_efuse = sprd_get_efuse();
+
 	//T606: GPLL max freq is 650M
 	//T616: GPLL max freq is 750M
 	//T619: GPLL max freq is 850M
@@ -536,8 +551,8 @@ static void maliQosConfig(void)
 static inline void mali_clock_on(void)
 {
 	int i;
-	struct device_node *hwf;
-	const char *auto_efuse = NULL;
+	//struct device_node *hwf;
+	char *auto_efuse = "UNKNOWN";
 	bool top_pwr_check_ret = true;
 
 	//enable all clocks
@@ -561,12 +576,7 @@ static inline void mali_clock_on(void)
 		WARN_ON(1);
 	}
 
-	//set core index map
-	hwf = of_find_node_by_path("/hwfeature/auto");
-	if (hwf) {
-		auto_efuse = (char*)of_get_property(hwf, "efuse", NULL);
-		//pr_info ("find  in %s was %s\n", __func__, auto_efuse);
-	}
+	auto_efuse = sprd_get_efuse();
 
 	//default voltage 384M:0.7v 512M:0.75v 614.4M:0.75v 768M:0.8v 850M:0.8v
 	//Gear 0: 0.7v 1:0.75v 2:0.8v
@@ -937,14 +947,10 @@ int kbase_platform_get_max_freq(void)
 
 void kbase_platform_limit_max_freq(struct device *dev)
 {
-	struct device_node *hwf;
-	const char *auto_efuse = NULL;
+	//struct device_node *hwf;
+	char *auto_efuse = "UNKNOWN";
 
-	hwf = of_find_node_by_path("/hwfeature/auto");
-	if (hwf) {
-		auto_efuse = (char*)of_get_property(hwf, "efuse", NULL);
-		//pr_info ("find  in %s was %s\n", __func__, auto_efuse);
-	}
+	auto_efuse = sprd_get_efuse();
 
 	//T606: GPLL max freq is 650M
 	//T616: GPLL max freq is 750M
