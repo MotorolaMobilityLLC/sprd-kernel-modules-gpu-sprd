@@ -37,7 +37,7 @@
 #include <linux/of.h>
 #endif
 #include <linux/regulator/consumer.h>
-
+#include <mali_kbase_ioctl.h>
 //#include <linux/smp.h>
 //#include <trace/events/power.h>
 #include <linux/nvmem-consumer.h>
@@ -135,6 +135,13 @@ static struct gpu_qos_config gpu_qos_cfg=
 	.arqos_threshold = 0,
 	.awqos_threshold = 0,
 };
+
+#ifdef CONFIG_MALI_BOOST
+int gpu_boost_level = 0;
+int gpu_boost_level2 = 0;
+module_param(gpu_boost_level2, int, S_IRUSR | S_IWUSR | S_IWGRP | S_IRGRP | S_IROTH); /* rw-rw-r-- */
+MODULE_PARM_DESC(gpu_boost_level2, "GPU gpu_boost_level");
+#endif
 
 bool read_memrepaied(void)
 {
@@ -771,3 +778,87 @@ int kbase_platform_set_freq_volt(int freq, int volt)
 	return 0;
 }
 //#endif
+
+#ifdef CONFIG_MALI_BOOST
+void kbase_platform_modify_target_freq(struct device *dev, unsigned long *target_freq)
+{
+	int min_index = -1, max_index = -1, modify_flag = 0, user_max_freq, user_min_freq;
+	struct gpu_freq_info *freq_max, *freq_min;
+
+	if ((gpu_boost_level == 10) || (gpu_boost_level2 == 10)) {
+		freq_max = freq_min = &gpu_dvfs_ctx.freq_list[gpu_dvfs_ctx.freq_list_len-1];
+	} else {
+		freq_max = &gpu_dvfs_ctx.freq_list[gpu_dvfs_ctx.freq_list_len-1];
+		freq_min = &gpu_dvfs_ctx.freq_list[0];
+	}
+
+	user_max_freq = dev_pm_qos_read_value(dev, DEV_PM_QOS_MAX_FREQUENCY);
+	user_min_freq = dev_pm_qos_read_value(dev, DEV_PM_QOS_MIN_FREQUENCY);
+	//limit min freq
+	min_index = freq_search(gpu_dvfs_ctx.freq_list, gpu_dvfs_ctx.freq_list_len, user_min_freq/FREQ_KHZ);
+	if ((0 <= min_index) &&
+		(freq_min->freq < gpu_dvfs_ctx.freq_list[min_index].freq))
+	{
+		freq_min = &gpu_dvfs_ctx.freq_list[min_index];
+		if (freq_min->freq > freq_max->freq)
+		{
+			freq_max = freq_min;
+		}
+	}
+
+	//limit max freq
+	max_index = freq_search(gpu_dvfs_ctx.freq_list, gpu_dvfs_ctx.freq_list_len, user_max_freq/FREQ_KHZ);
+	if ((0 <= max_index) &&
+		(freq_max->freq > gpu_dvfs_ctx.freq_list[max_index].freq))
+	{
+		freq_max = &gpu_dvfs_ctx.freq_list[max_index];
+		if (freq_max->freq < freq_min->freq)
+		{
+			freq_min = freq_max;
+		}
+	}
+
+	//gpu_boost_level = 0;
+
+	//set target frequency
+	if (*target_freq < (unsigned long)freq_min->freq*FREQ_KHZ)
+	{
+		*target_freq = (unsigned long)freq_min->freq*FREQ_KHZ;
+		modify_flag = 1;
+	}
+	if (*target_freq > (unsigned long)freq_max->freq*FREQ_KHZ)
+	{
+		*target_freq = (unsigned long)freq_max->freq*FREQ_KHZ;
+		modify_flag = 1;
+	}
+
+	if (1 == modify_flag)
+	{
+		printk(KERN_ERR "GPU_DVFS %s gpu_boost_level:%d min_freq=%dMHz max_freq=%dMHz target_freq=%dMHz \n",
+			__func__, gpu_boost_level, freq_min->freq / FREQ_KHZ, freq_max->freq / FREQ_KHZ, *target_freq / (FREQ_KHZ * FREQ_KHZ));
+	}
+}
+#endif
+
+#ifdef CONFIG_MALI_BOOST
+
+int boost_tgid = 0;
+int boost_pid = 0;
+
+void kbase_platform_set_boost(struct kbase_device *kbdev, struct kbase_context *kctx, int boost_level)
+{
+	if (boost_level == 0 || boost_level == 10)
+	{
+		if (boost_level == 0 && kctx->tgid == boost_tgid && kctx->pid != boost_pid)
+		{
+			printk(KERN_INFO "GPU_DVFS %s boost_level = %d, gpu_boost_level = %d, tgid = %d, pid = %d, previous tgid = %d, previous pid = %d",
+					__func__, boost_level, gpu_boost_level, kctx->tgid, kctx->pid, boost_tgid, boost_pid);
+			return;
+		}
+		gpu_boost_level = boost_level;
+		//printk(KERN_INFO "GPU_DVFS %s gpu_boost_level =%d \n", __func__, gpu_boost_level);
+	}
+	boost_tgid = kctx->tgid;
+	boost_pid = kctx->pid;
+}
+#endif

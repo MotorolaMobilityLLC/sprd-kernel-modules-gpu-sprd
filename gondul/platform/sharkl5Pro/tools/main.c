@@ -42,7 +42,7 @@ void generate_cipher_data(FILE* fp,char* src,int src_len,char* key,int key_len)
 	strcpy(buf, src);
 	printf("%s -> ",src);
 	xor_decipher(buf,src_len,key,key_len);
-	printf("%s (%d)-> ",buf, strlen(buf));
+	printf("%s (%ld)-> ",buf, strlen(buf));
 	fputs(buf,fp);fputc('\n',fp);
 	xor_decipher(buf,src_len,key,key_len);
 	printf("%s\n",buf);
@@ -60,13 +60,15 @@ int main()
 			.level = 10,
 			.data_list =
 			{
-				"com.glbenchmark.glbenchmark",
-				"net.kishonti.gfxbench.gl",
-				"com.antutu.benchmark",
-				"se.nena.nenamark",
-				"com.rightware.Basemark",
-				"com.aurorasoftworks.quadrant",
-				"com.ludashi.benchmark"
+				"com.tencent.tmgp.sgame",
+				"com.redlinegames.attackhole",
+				"com.crazy.block.robo.monster.cliffs.craft",
+				"com.block.juggle",
+				"com.dts.freefireth",
+				"magic.friends.rainbow",
+				"com.levelinfinite.sgameGlobal",
+				"com.tencent.lolm",
+				"com.riotgames.league.wildrift",
 			}
 		},
 
@@ -75,8 +77,6 @@ int main()
 			.level = 9,
 			.data_list =
 			{
-				"/system/bin/surfaceflinger",
-				"android.openglperf.cts"
 			}
 		},
 

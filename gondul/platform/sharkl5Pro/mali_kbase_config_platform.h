@@ -93,3 +93,8 @@ int kbase_platform_get_max_freq(void);
 int kbase_platform_set_freq_volt(int freq, int volt);
 #endif
 void kbase_platform_limit_max_freq(struct device *dev);
+
+#ifdef CONFIG_MALI_BOOST
+void kbase_platform_modify_target_freq(struct device *dev, unsigned long *target_freq);
+void kbase_platform_set_boost(struct kbase_device *kbdev,struct kbase_context *kctx, int boost_level);
+#endif
