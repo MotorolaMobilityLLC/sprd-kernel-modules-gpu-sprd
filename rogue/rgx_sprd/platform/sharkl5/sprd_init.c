@@ -344,6 +344,16 @@ static void FillOppTable(void)
 }
 #endif
 
+void pvr_limit_max_freq(struct device *dev)
+{
+
+}
+
+int pvr_set_DVFS_table(struct device *dev,IMG_DVFS_DEVICE *psDVFSDevice,int *ui32Freq)
+{
+	return 0;
+}
+
 static void RgxFreqInit(struct device *dev)
 {
 	int i = 0, clk_cnt = 0;

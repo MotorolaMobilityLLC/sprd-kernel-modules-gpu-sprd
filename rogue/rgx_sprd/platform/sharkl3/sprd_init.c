@@ -62,10 +62,12 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "img_types.h"
 #include "sprd_init.h"
 #include <linux/vmalloc.h>
+#include <linux/nvmem-consumer.h>
 
 #include <linux/smp.h>
 #include <trace/events/power.h>
 #include "rgxdebug.h"
+
 #define VENDOR_FTRACE_MODULE_NAME    "unisoc-gpu"
 
 //#define CREATE_TRACE_POINTS
@@ -76,6 +78,9 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #define DTS_CLK_OFFSET          3
 #define FREQ_KHZ                1000
+
+#define GPLL_600M               600000000
+#define GPLL_550M               550000000
 
 #if defined(SUPPORT_LINUX_DVFS) || defined(SUPPORT_PDVFS)
 #define GPU_POLL_MS             50
@@ -114,9 +119,13 @@ struct gpu_dvfs_context {
 	struct clk*  clk_gpu_soc;
 	struct clk** gpu_clk_src;
 	int gpu_clk_num;
+	int gpu_temperature;
+	int last_gpu_temperature;
 
 	struct gpu_freq_info* freq_list;
 	int freq_list_len;
+	const char* auto_efuse;
+	u32 gpu_binning;
 
 #if defined(SUPPORT_PDVFS)
 	IMG_OPP  *pasOPPTable;
@@ -146,6 +155,8 @@ static struct gpu_dvfs_context gpu_dvfs_ctx=
 	.gpu_clock_on=0,
 	.gpu_power_on=0,
 
+	.last_gpu_temperature = 0,
+	.gpu_temperature = 0,
 	.sem=&gpu_dvfs_sem,
 };
 
@@ -323,9 +334,36 @@ static void FillOppTable(void)
 }
 #endif
 
+static int sprd_gpu_cal_read(struct device_node *np, const char *cell_id, u32 *val)
+{
+	struct nvmem_cell *cell;
+	void *buf;
+	size_t len;
+
+	cell = of_nvmem_cell_get(np, cell_id);
+	if (IS_ERR(cell))
+		return PTR_ERR(cell);
+
+	buf = nvmem_cell_read(cell, &len);
+	if (IS_ERR(buf))
+	{
+		nvmem_cell_put(cell);
+		return PTR_ERR(buf);
+	}
+
+	memcpy(val, buf, min(len, sizeof(u32)));
+
+	kfree(buf);
+	nvmem_cell_put(cell);
+
+	return 0;
+}
+
 static void RgxFreqInit(struct device *dev)
 {
-	int i = 0, clk_cnt = 0;
+	int i = 0, clk_cnt = 0, ret = 0;
+
+	struct device_node *hwf;
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0))
 	gpu_dvfs_ctx.pmu_apb_reg_base = syscon_regmap_lookup_by_phandle(dev->of_node,"sprd,syscon-pmu-apb");
@@ -412,6 +450,30 @@ static void RgxFreqInit(struct device *dev)
 		of_property_read_u32_index(dev->of_node, "sprd,dvfs-lists", 4*i+1, &gpu_dvfs_ctx.freq_list[i].volt);
 		of_property_read_u32_index(dev->of_node, "sprd,dvfs-lists", 4*i+3, &gpu_dvfs_ctx.freq_list[i].div);
 	}
+	clk_set_rate(gpu_dvfs_ctx.freq_list[i].clk_src, GPLL_600M);
+
+	//read gpu_bin, 3:FF, 1:TT
+	ret = sprd_gpu_cal_read(dev->of_node, "gpu_bin", &gpu_dvfs_ctx.gpu_binning);
+	if (ret)
+	{
+		pr_warn("gpu binning read fail.\n");
+	}
+
+	hwf = of_find_node_by_path("/hwfeature/auto");
+	if (hwf) {
+		gpu_dvfs_ctx.auto_efuse = of_get_property(hwf, "efuse", NULL);
+		pr_info ("find  in %s was %s\n", __func__, gpu_dvfs_ctx.auto_efuse);
+	}
+
+	if (!strcmp(gpu_dvfs_ctx.auto_efuse, "L3")||!strcmp(gpu_dvfs_ctx.auto_efuse, "L3R"))
+	{
+		clk_set_rate(gpu_dvfs_ctx.freq_list[i].clk_src, GPLL_550M);
+		//remove 600M
+		memset(&gpu_dvfs_ctx.freq_list[gpu_dvfs_ctx.freq_list_len-1], 0, sizeof(struct gpu_freq_info));
+		//modify freq list len
+		gpu_dvfs_ctx.freq_list_len = gpu_dvfs_ctx.freq_list_len -1;
+		i =i-1 ;
+	}
 
 #if defined(SUPPORT_PDVFS)
 	FillOppTable();
@@ -423,8 +485,46 @@ static void RgxFreqInit(struct device *dev)
 
 	gpu_dvfs_ctx.freq_cur = gpu_dvfs_ctx.freq_default;
 	gpu_dvfs_ctx.cur_voltage = gpu_dvfs_ctx.freq_cur->volt;
+
 }
 
+void pvr_limit_max_freq(struct device *dev)
+{
+	//L3E: GPU max freq is 600M
+	//L3/L3R: GPU max freq is 550M
+	//default table:256M 384M, 550M
+	if (!strcmp(gpu_dvfs_ctx.auto_efuse, "L3")||!strcmp(gpu_dvfs_ctx.auto_efuse, "L3R"))
+	{
+		//remove 600M
+		dev_pm_opp_disable(dev, GPLL_600M);
+	}
+}
+
+int pvr_set_DVFS_table(struct device *dev,IMG_DVFS_DEVICE *psDVFSDevice,int *ui32Freq)
+{
+	int ret =0;
+	//get gpu temperature
+	ret = thermal_zone_get_temp(psDVFSDevice->gpu_tz, &gpu_dvfs_ctx.gpu_temperature);
+	if (!strcmp(gpu_dvfs_ctx.auto_efuse, "L3")||!strcmp(gpu_dvfs_ctx.auto_efuse, "L3R"))
+	{
+		return 0;
+	}
+
+	if(gpu_dvfs_ctx.gpu_temperature < 10000)
+	{
+		if(gpu_dvfs_ctx.gpu_binning == 1)
+		{
+			if(*ui32Freq == GPLL_600M)
+				*ui32Freq = GPLL_550M;
+		}
+	}
+
+	gpu_dvfs_ctx.last_gpu_temperature = gpu_dvfs_ctx.gpu_temperature;
+	PVR_DPF((PVR_DBG_WARNING, "get gpu temperature :%d.\n", gpu_dvfs_ctx.gpu_temperature));
+
+	return 0;
+
+}
 static void RgxTimingInfoInit(RGX_TIMING_INFORMATION* psRGXTimingInfo)
 {
 	PVR_ASSERT(NULL != psRGXTimingInfo);
@@ -474,9 +574,9 @@ static int RgxSetFreqVolt(IMG_UINT32 ui32Freq, IMG_UINT32 ui32Volt)
 
 	ui32Freq = ui32Freq/FREQ_KHZ;
 	index = RgxFreqSearch(gpu_dvfs_ctx.freq_list, gpu_dvfs_ctx.freq_list_len, ui32Freq);
-	PVR_DPF((PVR_DBG_WARNING, "GPU DVFS %s index=%d cur_freq=%d cur_voltage=%d --> ui32Freq=%d ui32Volt=%d gpu_power_on=%d gpu_clock_on=%d \n",
+	PVR_DPF((PVR_DBG_WARNING, "GPU DVFS %s index=%d cur_freq=%d cur_voltage=%d --> ui32Freq=%d ui32Volt=%d gpu_power_on=%d gpu_clock_on=%d freq_list_len= %d  gpu_dvfs_ctx.freq_list[index]== %lu  gpu_dvfs_ctx.gpu_binning == %d \n",
 		__func__, index, gpu_dvfs_ctx.freq_cur->freq, gpu_dvfs_ctx.cur_voltage, ui32Freq, ui32Volt,
-		gpu_dvfs_ctx.gpu_power_on, gpu_dvfs_ctx.gpu_clock_on));
+		gpu_dvfs_ctx.gpu_power_on, gpu_dvfs_ctx.gpu_clock_on,gpu_dvfs_ctx.freq_list_len,clk_get_rate(gpu_dvfs_ctx.freq_list[index].clk_src),gpu_dvfs_ctx.gpu_binning));
 	if (0 <= index)
 	{
 		down(gpu_dvfs_ctx.sem);
@@ -484,6 +584,14 @@ static int RgxSetFreqVolt(IMG_UINT32 ui32Freq, IMG_UINT32 ui32Volt)
 		{
 			if (ui32Freq != gpu_dvfs_ctx.freq_cur->freq)
 			{
+				if(ui32Freq == GPLL_550M/FREQ_KHZ)
+				{
+					clk_set_rate(gpu_dvfs_ctx.freq_list[index].clk_src, GPLL_550M);
+				}
+				else if(ui32Freq == GPLL_600M/FREQ_KHZ)
+				{
+					clk_set_rate(gpu_dvfs_ctx.freq_list[index].clk_src, GPLL_600M);
+				}
 				//set gpu core clk
 				clk_set_parent(gpu_dvfs_ctx.clk_gpu_core, gpu_dvfs_ctx.freq_list[index].clk_src);
 
