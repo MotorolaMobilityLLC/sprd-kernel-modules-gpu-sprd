@@ -39,6 +39,7 @@
 #include <hotplug/mali_kbase_hotplug.h>
 #endif /* CONFIG_MALI_HOTPLUG */
 #include <linux/regulator/consumer.h>
+#include <mali_kbase_ioctl.h>
 
 #define DTS_CLK_OFFSET      2
 #define PM_RUNTIME_DELAY_MS 50
@@ -122,6 +123,12 @@ extern int gpu_freq_max_limit;
 #endif
 extern char* gpu_freq_list;
 
+#ifdef CONFIG_MALI_BOOST
+int gpu_boost_level = 0;
+int gpu_boost_level2 = 0;
+module_param(gpu_boost_level2, int, S_IRUSR | S_IWUSR | S_IWGRP | S_IRGRP | S_IROTH); /* rw-rw-r-- */
+MODULE_PARM_DESC(gpu_boost_level2, "GPU gpu_boost_level");
+#endif
 
 #ifdef CONFIG_MALI_DEVFREQ
 static void InitFreqStats(struct kbase_device *kbdev)
@@ -757,8 +764,8 @@ void kbase_platform_limit_min_freq(struct device *dev)
 #ifdef CONFIG_MALI_BOOST
 void kbase_platform_modify_target_freq(struct device *dev, unsigned long *target_freq)
 {
-	int min_index = -1, max_index = -1;
-	struct kbase_device *kbdev = dev_get_drvdata(dev);
+	int min_index = -1, max_index = -1, user_max_freq, user_min_freq;
+	//struct kbase_device *kbdev = dev_get_drvdata(dev);
 
 	switch(gpu_boost_level)
 	{
@@ -789,8 +796,10 @@ void kbase_platform_modify_target_freq(struct device *dev, unsigned long *target
 		break;
 	}
 
+	user_max_freq = dev_pm_qos_read_value(dev, DEV_PM_QOS_MAX_FREQUENCY);
+	user_min_freq = dev_pm_qos_read_value(dev, DEV_PM_QOS_MIN_FREQUENCY);
 	//limit min freq
-	min_index = freq_search(gpu_dfs_ctx.freq_list, gpu_dfs_ctx.freq_list_len, kbdev->devfreq->min_freq/FREQ_KHZ);
+	min_index = freq_search(gpu_dfs_ctx.freq_list, gpu_dfs_ctx.freq_list_len, user_min_freq/FREQ_KHZ);
 	if ((0 <= min_index) &&
 		(gpu_dfs_ctx.freq_min->freq < gpu_dfs_ctx.freq_list[min_index].freq))
 	{
@@ -802,7 +811,7 @@ void kbase_platform_modify_target_freq(struct device *dev, unsigned long *target
 	}
 
 	//limit max freq
-	max_index = freq_search(gpu_dfs_ctx.freq_list, gpu_dfs_ctx.freq_list_len, kbdev->devfreq->max_freq/FREQ_KHZ);
+	max_index = freq_search(gpu_dfs_ctx.freq_list, gpu_dfs_ctx.freq_list_len, user_max_freq/FREQ_KHZ);
 	if ((0 <= max_index) &&
 		(gpu_dfs_ctx.freq_max->freq > gpu_dfs_ctx.freq_list[max_index].freq))
 	{
@@ -812,12 +821,7 @@ void kbase_platform_modify_target_freq(struct device *dev, unsigned long *target
 			gpu_dfs_ctx.freq_min = gpu_dfs_ctx.freq_max;
 		}
 	}
-
-	KBASE_DEBUG_PRINT(3, "GPU_DVFS kbase_platform_modify_target_freq gpu_boost_level:%d min_freq=%d max_freq=%d target_freq=%lu\n",
-		gpu_boost_level, gpu_dfs_ctx.freq_min->freq, gpu_dfs_ctx.freq_max->freq, *target_freq);
-
-	gpu_boost_level = 0;
-
+	//gpu_boost_level = 0;
 	//set target frequency
 	if (*target_freq < gpu_dfs_ctx.freq_min->freq*FREQ_KHZ)
 	{
@@ -827,6 +831,8 @@ void kbase_platform_modify_target_freq(struct device *dev, unsigned long *target
 	{
 		*target_freq = gpu_dfs_ctx.freq_max->freq*FREQ_KHZ;
 	}
+	KBASE_DEBUG_PRINT(3, "GPU_DVFS kbase_platform_modify_target_freq gpu_boost_level:%d min_freq=%d max_freq=%d target_freq=%lu\n",
+		gpu_boost_level, gpu_dfs_ctx.freq_min->freq, gpu_dfs_ctx.freq_max->freq, *target_freq);
 }
 #endif
 #endif
@@ -848,10 +854,9 @@ bool kbase_mali_is_powered(void)
 #ifdef CONFIG_MALI_BOOST
 void kbase_platform_set_boost(struct kbase_device *kbdev, int boost_level)
 {
-	if (gpu_boost_level < boost_level)
-	{
+	if (boost_level == 0 || boost_level == 10) {
 		gpu_boost_level = boost_level;
-		KBASE_DEBUG_PRINT(3, "kbase_platform_set_boost gpu_boost_level =%d\n", gpu_boost_level);
+		KBASE_DEBUG_PRINT(3, "GPU_DVFS kbase_platform_set_boost gpu_boost_level =%d\n", gpu_boost_level);
 	}
 }
 #endif
