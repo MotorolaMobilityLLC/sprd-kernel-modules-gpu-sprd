@@ -33,9 +33,8 @@
 #ifdef KBASE_PM_RUNTIME
 #include <linux/pm_runtime.h>
 #endif
-#ifdef CONFIG_OF
 #include <linux/of.h>
-#endif
+#include <linux/of_platform.h>
 #include <linux/regulator/consumer.h>
 
 #include <linux/smp.h>
@@ -96,7 +95,6 @@ struct gpu_reg_info {
 struct gpu_dvfs_context {
 	atomic_t gpu_clock_state;
 	atomic_t gpu_power_state;
-	atomic_t dcdc_gpu_state;
 
 	int cur_voltage;
 
@@ -130,6 +128,7 @@ struct gpu_dvfs_context {
 
 	struct gpu_reg_info gpll_cfg_force_off_reg;
 	struct gpu_reg_info gpll_cfg_force_on_reg;
+	struct gpu_reg_info dcdc_gpu_pd;
 #if 0
 	struct gpu_reg_info gpu_qos_sel;
 	struct gpu_reg_info gpu_qos;
@@ -145,7 +144,7 @@ struct gpu_dvfs_context {
 
 	struct reset_control* gpu_soft_rst;
 
-	struct regulator *gpu_reg_ptr;
+	//struct regulator *gpu_reg_ptr;
 
 	u32 chip_id;
 	u32 gpu_bin;
@@ -211,9 +210,37 @@ static void DeinitFreqStats(struct kbase_device *kbdev)
 
 #endif
 
+static void gpu_pmic_get_regmap(void)
+{
+	struct device_node *regmap_np;
+	struct platform_device *regmap_pdev;
+
+	regmap_np = of_find_compatible_node(NULL, NULL, "sprd,ump962x-syscon");
+	if(!regmap_np) {
+		pr_err("%s: unable to get pmic syscon node\n",__func__);
+		return;
+	}
+
+	regmap_pdev = of_find_device_by_node(regmap_np);
+	if(!regmap_pdev) {
+		of_node_put(regmap_np);
+		pr_err("%s: unable to get pmic syscon platform device\n",__func__);
+		return;
+	}
+	gpu_dvfs_ctx.dcdc_gpu_pd.regmap_ptr = dev_get_regmap(regmap_pdev->dev.parent, NULL);
+	if (!gpu_dvfs_ctx.dcdc_gpu_pd.regmap_ptr) {
+		pr_err("%s: unable to get pmic regmap device\n",__func__);
+	}
+
+	of_node_put(regmap_np);
+	put_device(&regmap_pdev->dev);
+
+	return;
+}
+
 static inline void mali_freq_init(struct device *dev)
 {
-	int i = 0, clk_cnt = 0;
+	int i = 0, clk_cnt = 0, ret;
 	//struct device_node *qos_node = NULL;
 
 	gpu_dvfs_ctx.sip = sprd_sip_svc_get_handle();
@@ -221,8 +248,8 @@ static inline void mali_freq_init(struct device *dev)
 	gpu_dvfs_ctx.sip->gpu_ops.get_id(&gpu_dvfs_ctx.chip_id, &gpu_dvfs_ctx.gpu_bin);
 	pr_info (" %s chip_id:%d,gpu_bin:%d\n", __func__, gpu_dvfs_ctx.chip_id, gpu_dvfs_ctx.gpu_bin);
 
-	gpu_dvfs_ctx.gpu_reg_ptr = devm_regulator_get(dev, "gpu");
-	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.gpu_reg_ptr);
+	//gpu_dvfs_ctx.gpu_reg_ptr = devm_regulator_get(dev, "gpu");
+	//KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.gpu_reg_ptr);
 
 	gpu_dvfs_ctx.gpu_soft_rst = devm_reset_control_get(dev, "gpu_soft_rst");
 	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.gpu_soft_rst);
@@ -232,6 +259,10 @@ static inline void mali_freq_init(struct device *dev)
 
 	gpu_dvfs_ctx.gpu_sw_dvfs_ctrl_reg.regmap_ptr = syscon_regmap_lookup_by_phandle_args(dev->of_node,"gpu_sw_dvfs_ctrl", 2, (uint32_t *)gpu_dvfs_ctx.gpu_sw_dvfs_ctrl_reg.args);
 	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.gpu_sw_dvfs_ctrl_reg.regmap_ptr);
+
+	gpu_dvfs_ctx.dcdc_gpu_pd.regmap_ptr = syscon_regmap_lookup_by_phandle_args(dev->of_node,"dcdc_gpu_pd", 2, (uint32_t *)gpu_dvfs_ctx.dcdc_gpu_pd.args);
+	gpu_pmic_get_regmap();//write real pmic syscon
+	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.dcdc_gpu_pd.regmap_ptr);
 
 	//enable gpu hw dvfs
 	regmap_update_bits(gpu_dvfs_ctx.top_dvfs_cfg_reg.regmap_ptr, gpu_dvfs_ctx.top_dvfs_cfg_reg.args[0], gpu_dvfs_ctx.top_dvfs_cfg_reg.args[1], ~gpu_dvfs_ctx.top_dvfs_cfg_reg.args[1]);
@@ -354,8 +385,10 @@ static inline void mali_freq_init(struct device *dev)
 	for(i = 0; i < gpu_dvfs_ctx.freq_list_len; i++) {
 		gpu_dvfs_ctx.freq_list[i].clk_src = gpu_dvfs_ctx.gpu_clk_src[i];
 		KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.freq_list[i].clk_src);
-		of_property_read_u32_index(dev->of_node, "operating-points", 2*i,   &gpu_dvfs_ctx.freq_list[i].freq);
-		of_property_read_u32_index(dev->of_node, "operating-points", 2*i+1, &gpu_dvfs_ctx.freq_list[i].volt);
+		ret = of_property_read_u32_index(dev->of_node, "operating-points", 2*i,   &gpu_dvfs_ctx.freq_list[i].freq);
+		if(ret)pr_err("%s get operating-points %d read failed %d",__func__, 2*i,ret);
+		ret = of_property_read_u32_index(dev->of_node, "operating-points", 2*i+1, &gpu_dvfs_ctx.freq_list[i].volt);
+		if(ret)pr_err("%s get operating-points %d read failed %d",__func__, 2*i+1,ret);
 		gpu_dvfs_ctx.freq_list[i].dvfs_index = i;
 	}
 
@@ -390,7 +423,8 @@ static inline void mali_freq_init(struct device *dev)
 
 	gpu_dvfs_ctx.sip->gpu_ops.update_voltage_list(gpu_dvfs_ctx.gpu_temperature, gpu_dvfs_ctx.pos);
 
-	of_property_read_u32(dev->of_node, "sprd,dvfs-default", &i);
+	ret = of_property_read_u32(dev->of_node, "sprd,dvfs-default", &i);
+	if(ret)pr_err("%s get dvfs-default failed %d",__func__,ret);
 	gpu_dvfs_ctx.freq_default = &gpu_dvfs_ctx.freq_list[i];
 	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.freq_default);
 
@@ -398,7 +432,6 @@ static inline void mali_freq_init(struct device *dev)
 	gpu_dvfs_ctx.freq_cur = &gpu_dvfs_ctx.freq_list[GPU_MIN_FREQ_INDEX];
 	gpu_dvfs_ctx.cur_voltage = gpu_dvfs_ctx.freq_cur->volt;
 
-	atomic_set(&gpu_dvfs_ctx.dcdc_gpu_state, 0);
 	atomic_set(&gpu_dvfs_ctx.gpu_power_state, 0);
 	atomic_set(&gpu_dvfs_ctx.gpu_clock_state, 0);
 }
@@ -499,8 +532,7 @@ int kbase_platform_set_DVFS_table(struct kbase_device *kbdev)
 		return -1;
 	}
 	down(gpu_dvfs_ctx.sem);
-	if (atomic_read(&gpu_dvfs_ctx.gpu_power_state) && atomic_read(&gpu_dvfs_ctx.gpu_clock_state)
-		&& atomic_read(&gpu_dvfs_ctx.dcdc_gpu_state)) {
+	if (atomic_read(&gpu_dvfs_ctx.gpu_power_state) && atomic_read(&gpu_dvfs_ctx.gpu_clock_state)) {
 		if ((gpu_dvfs_ctx.last_gpu_temperature <= 65000 && gpu_dvfs_ctx.gpu_temperature >= 65000) ||
 			(gpu_dvfs_ctx.last_gpu_temperature >= 65000 && gpu_dvfs_ctx.gpu_temperature <= 65000)) {
 			if (mali_top_state_check() != 0) {
@@ -544,8 +576,6 @@ static void gpu_reset_deassert(struct reset_control* rst_ctrl)
 }
 static inline void mali_power_on(void)
 {
-	int ret = 0;
-
 	//gpll force off: 0:not force off; 1:force off
 	regmap_update_bits(gpu_dvfs_ctx.gpll_cfg_force_off_reg.regmap_ptr, gpu_dvfs_ctx.gpll_cfg_force_off_reg.args[0], gpu_dvfs_ctx.gpll_cfg_force_off_reg.args[1], ~gpu_dvfs_ctx.gpll_cfg_force_off_reg.args[1]);
 	udelay(100);
@@ -553,15 +583,17 @@ static inline void mali_power_on(void)
 	regmap_update_bits(gpu_dvfs_ctx.gpll_cfg_force_on_reg.regmap_ptr, gpu_dvfs_ctx.gpll_cfg_force_on_reg.args[0], gpu_dvfs_ctx.gpll_cfg_force_on_reg.args[1], gpu_dvfs_ctx.gpll_cfg_force_on_reg.args[1]);
 	udelay(150);
 
+	//dcdcgpu_on [3] 0: enable 1: power down
+	regmap_update_bits(gpu_dvfs_ctx.dcdc_gpu_pd.regmap_ptr, gpu_dvfs_ctx.dcdc_gpu_pd.args[0], gpu_dvfs_ctx.dcdc_gpu_pd.args[1], ~gpu_dvfs_ctx.dcdc_gpu_pd.args[1]);
+	udelay(400);
+	/*
 	//gpu regulator enable
-	if (!regulator_is_enabled(gpu_dvfs_ctx.gpu_reg_ptr)) {
-		ret = regulator_enable(gpu_dvfs_ctx.gpu_reg_ptr);
-		if (ret) {
-			printk(KERN_ERR "%s failed to enable vddgpu, error =%d\n", __func__, ret);
-		}
+	if (!regulator_is_enabled(gpu_dvfs_ctx.gpu_reg_ptr))
+	{
+		regulator_enable(gpu_dvfs_ctx.gpu_reg_ptr);
 		udelay(400);
-	}
-	atomic_inc(&gpu_dvfs_ctx.dcdc_gpu_state);
+ 	}
+	*/
 
 	regmap_update_bits(gpu_dvfs_ctx.top_force_reg.regmap_ptr, gpu_dvfs_ctx.top_force_reg.args[0], gpu_dvfs_ctx.top_force_reg.args[1], ~gpu_dvfs_ctx.top_force_reg.args[1]);
 
@@ -584,6 +616,17 @@ static inline void mali_power_off(void)
 
 	regmap_update_bits(gpu_dvfs_ctx.top_force_reg.regmap_ptr, gpu_dvfs_ctx.top_force_reg.args[0], gpu_dvfs_ctx.top_force_reg.args[1], gpu_dvfs_ctx.top_force_reg.args[1]);
 
+	//dcdcgpu_on [3] 0: enable 1: power down
+	regmap_update_bits(gpu_dvfs_ctx.dcdc_gpu_pd.regmap_ptr, gpu_dvfs_ctx.dcdc_gpu_pd.args[0], gpu_dvfs_ctx.dcdc_gpu_pd.args[1], gpu_dvfs_ctx.dcdc_gpu_pd.args[1]);
+	udelay(10);
+	/*
+	//gpu regulator disable
+	if (regulator_is_enabled(gpu_dvfs_ctx.gpu_reg_ptr))
+	{
+		regulator_disable(gpu_dvfs_ctx.gpu_reg_ptr);
+		udelay(10);
+	}
+	*/
 	//gpll force off: 0:not force off; 1:force off
 	regmap_update_bits(gpu_dvfs_ctx.gpll_cfg_force_off_reg.regmap_ptr, gpu_dvfs_ctx.gpll_cfg_force_off_reg.args[0], gpu_dvfs_ctx.gpll_cfg_force_off_reg.args[1], gpu_dvfs_ctx.gpll_cfg_force_off_reg.args[1]);
 	//gpll force on: 0:not force on; 1:force on
@@ -597,27 +640,6 @@ static void maliQosConfig(void)
 	regmap_update_bits(gpu_dvfs_ctx.gpu_qos.regmap_ptr, gpu_dvfs_ctx.gpu_qos.args[0], gpu_dvfs_ctx.gpu_qos.args[1], ((gpu_qos_cfg.awqos_threshold << 12) | (gpu_qos_cfg.arqos_threshold << 8) | (gpu_qos_cfg.awqos << 4) | gpu_qos_cfg.arqos));
 }
 #endif
-
-void mali_poweroff_second_part(void)
-{
-	int ret = 0;
-	down(gpu_dvfs_ctx.sem);
-	if (atomic_read(&gpu_dvfs_ctx.gpu_power_state) == 0) {
-		//gpu regulator disable
-		if (regulator_is_enabled(gpu_dvfs_ctx.gpu_reg_ptr)) {
-			ret = regulator_disable(gpu_dvfs_ctx.gpu_reg_ptr);
-			if (ret) {
-				printk(KERN_ERR "%s failed to disable vddgpu, error =%d\n", __func__, ret);
-			}
-			udelay(10);
-		}
-		atomic_dec(&gpu_dvfs_ctx.dcdc_gpu_state);
-	} else {
-		printk(KERN_ERR "%s failed to disable vddgpu, gpu_power_state = %d, gpu_clock_state = %d\n",
-				__func__, atomic_read(&gpu_dvfs_ctx.gpu_power_state), atomic_read(&gpu_dvfs_ctx.gpu_clock_state));
-	}
-	up(gpu_dvfs_ctx.sem);
-}
 
 static inline void mali_clock_on(void)
 {
@@ -777,12 +799,6 @@ static void pm_callback_power_off(struct kbase_device *kbdev)
 	mali_power_mode_change(kbdev, 1);
 }
 
-static void pm_callback_second_part(struct kbase_device *kbdev)
-{
-	CSTD_UNUSED(kbdev);
-	mali_poweroff_second_part();
-}
-
 static int pm_callback_power_on(struct kbase_device *kbdev)
 {
 	mali_power_mode_change(kbdev, 0);
@@ -835,7 +851,6 @@ struct kbase_pm_callback_conf pm_qogirn6pro_callbacks = {
 	.power_on_callback = pm_callback_power_on,
 	.power_suspend_callback = pm_callback_power_suspend,
 	.power_resume_callback = pm_callback_power_resume,
-	.power_off_second_part_callback = pm_callback_second_part,
 	.power_shader_polling_callback = pm_callback_shader_polling,
 #ifdef KBASE_PM_RUNTIME
 	.power_runtime_init_callback = pm_callback_power_runtime_init,
@@ -932,19 +947,19 @@ void kbase_platform_limit_max_freq(struct device *dev)
 
 int kbase_platform_set_freq_volt(int freq, int volt)
 {
-	int index = -1;
+	int index;
 	freq = freq/FREQ_KHZ;
 	index = freq_search(gpu_dvfs_ctx.freq_list, gpu_dvfs_ctx.freq_list_len, freq);
-	printk(KERN_ERR "mali GPU_DVFS %s index = %d cur_freq = %d MHz cur_volt = %d mV --> freq = %d MHz volt = %d mV gpu_power_state = %d gpu_clock_state = %d dcdc_state:%d, gpu_temperature = %u.%lu, chip_id = %d, gpu_binning = %d.\n",
+	printk(KERN_ERR "mali GPU_DVFS %s index = %d cur_freq = %d MHz cur_volt = %d mV --> freq = %d MHz volt = %d mV gpu_power_state = %d gpu_clock_state = %d , gpu_temperature = %u.%lu, chip_id = %d, gpu_binning = %d.\n",
 		__func__, index, gpu_dvfs_ctx.freq_cur->freq / FREQ_KHZ, gpu_dvfs_ctx.cur_voltage / VOLT_KMV, freq / FREQ_KHZ, volt / VOLT_KMV,
-		atomic_read(&gpu_dvfs_ctx.gpu_power_state), atomic_read(&gpu_dvfs_ctx.gpu_clock_state), atomic_read(&gpu_dvfs_ctx.dcdc_gpu_state), (unsigned)gpu_dvfs_ctx.gpu_temperature / 1000,
+		atomic_read(&gpu_dvfs_ctx.gpu_power_state), atomic_read(&gpu_dvfs_ctx.gpu_clock_state), (unsigned)gpu_dvfs_ctx.gpu_temperature / 1000,
 		(unsigned long)gpu_dvfs_ctx.gpu_temperature % 1000, gpu_dvfs_ctx.chip_id, gpu_dvfs_ctx.gpu_bin);
 
 	if (0 <= index) {
 		down(gpu_dvfs_ctx.sem);
 
 		//set frequency
-		if (atomic_read(&gpu_dvfs_ctx.gpu_power_state) && atomic_read(&gpu_dvfs_ctx.gpu_clock_state) && atomic_read(&gpu_dvfs_ctx.dcdc_gpu_state))
+		if (atomic_read(&gpu_dvfs_ctx.gpu_power_state) && atomic_read(&gpu_dvfs_ctx.gpu_clock_state) )
 		{
 			//T770 the clk src of 680MHz and 780MHz are both clk_gpll
 			//set gpll VCO 1950M(780M*2.5)
@@ -969,7 +984,7 @@ int kbase_platform_set_freq_volt(int freq, int volt)
 #ifdef CONFIG_MALI_BOOST
 void kbase_platform_modify_target_freq(struct device *dev, unsigned long *target_freq)
 {
-	int min_index = -1, max_index = -1, modify_flag = 0,user_max_freq, user_min_freq;
+	int min_index, max_index, modify_flag = 0,user_max_freq, user_min_freq;
 	struct gpu_freq_info *freq_max, *freq_min;
 
 	if ((gpu_boost_level == 10) || (gpu_boost_level2 == 10)) {
