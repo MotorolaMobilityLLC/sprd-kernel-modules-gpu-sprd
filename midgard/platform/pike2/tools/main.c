@@ -60,23 +60,13 @@ int main()
 			.level = 10,
 			.data_list =
 			{
-				"video.alibaba.mage.show.tube",
-                "com.glbenchmark.glbenchmark",
-                "net.kishonti.gfxbench.gl",
-                "com.antutu.benchmark",
-                "com.antutu.ABenchMark",
-                "se.nena.nenamark",
-                "com.rightware.Basemark",
-                "com.aurorasoftworks.quadrant",
-                "com.ludashi.benchmark",
-                "com.futuremark.pcmark.android.benchmark",
-                "com.futuremark.pcmark.android.benchmark:workload",
-                "com.rightware.BasemarkOSII"
-                "/system/bin/surfaceflinger",
-                "android.openglperf.cts",
-                "com.android.server.cts.device.graphicsstats",
-                "com.drawelements.deqp",
-                "com.drawelements.deqp:testercore",
+				"/vendor/bin/hw/android.hardware.camera.provider@2.4-service",
+				"com.futuremark.pcmark.android.benchmark",
+				"com.futuremark.pcmark.android.benchmark:workload",
+				"com.jingdong.app.mall",
+				"com.instagram.android",
+				"com.taobao.taobao",
+				"com.google.android.apps.photosgo",
 			}
 		},
 

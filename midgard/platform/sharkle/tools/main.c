@@ -60,17 +60,13 @@ int main()
 			.level = 10,
 			.data_list =
 			{
-				"com.glbenchmark.glbenchmark",
-				"net.kishonti.gfxbench.gl",
-				"com.antutu.benchmark",
-				"com.antutu.ABenchMark",
-				"se.nena.nenamark",
-				"com.rightware.Basemark",
-				"com.aurorasoftworks.quadrant",
-				"com.ludashi.benchmark",
+				"/vendor/bin/hw/android.hardware.camera.provider@2.4-service",
 				"com.futuremark.pcmark.android.benchmark",
 				"com.futuremark.pcmark.android.benchmark:workload",
-				"com.rightware.BasemarkOSII"
+				"com.jingdong.app.mall",
+				"com.instagram.android",
+				"com.taobao.taobao",
+				"com.google.android.apps.photosgo",
 			}
 		},
 
@@ -79,9 +75,6 @@ int main()
 			.level = 9,
 			.data_list =
 			{
-				"/system/bin/surfaceflinger",
-				"android.openglperf.cts",
-				"com.android.server.cts.device.graphicsstats"
 			}
 		},
 
