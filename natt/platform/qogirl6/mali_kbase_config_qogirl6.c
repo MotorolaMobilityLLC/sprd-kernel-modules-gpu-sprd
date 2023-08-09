@@ -1095,15 +1095,15 @@ bool is_shader_ready(struct kbase_device *kbdev)
 {
 	//PMU APB
 	//printk(KERN_ERR "SPRDDEBUG read pd_gpu_co_state\n");
-	//regmap_read(gpu_dvfs_ctx.gpu_core0_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_core0_state_reg.args[0], &pd_gpu_co_state);
-	//pd_gpu_co_state = pd_gpu_co_state & PD_GPU_CO_STATE_MASK;
-	pd_gpu_co_state = GPU_CO_STATE_ACTIVE & PD_GPU_CO_STATE_MASK;
+	regmap_read(gpu_dvfs_ctx.gpu_core0_state_reg.regmap_ptr, gpu_dvfs_ctx.gpu_core0_state_reg.args[0], &pd_gpu_co_state);
+	pd_gpu_co_state = pd_gpu_co_state & PD_GPU_CO_STATE_MASK;
+	//pd_gpu_co_state = GPU_CO_STATE_ACTIVE & PD_GPU_CO_STATE_MASK;
 
 	//GPU APB
 	//printk(KERN_ERR "SPRDDEBUG read cur_st_st0\n");
-	//regmap_read(gpu_dvfs_ctx.cur_st_st0_reg.regmap_ptr, gpu_dvfs_ctx.cur_st_st0_reg.args[0], &cur_st_st0);
-	//cur_st_st0 = cur_st_st0 & CUR_ST_ST0_MASK;
-	cur_st_st0 = CUR_ST_ST0_READY & CUR_ST_ST0_MASK;
+	regmap_read(gpu_dvfs_ctx.cur_st_st0_reg.regmap_ptr, gpu_dvfs_ctx.cur_st_st0_reg.args[0], &cur_st_st0);
+	cur_st_st0 = cur_st_st0 & CUR_ST_ST0_MASK;
+	//cur_st_st0 = CUR_ST_ST0_READY & CUR_ST_ST0_MASK;
 
 	//printk(KERN_ERR "SPRDDEBUG read SHADER_READY\n");
 	SHADER_READY_LO1 = kbase_reg_read(kbdev,GPU_CONTROL_REG(SHADER_READY_LO));
@@ -1151,6 +1151,7 @@ void gpu_polling_power_on(struct kbase_device *kbdev)
 
 static void pm_callback_shader_polling(struct kbase_device *kbdev)
 {
+	udelay(120);
 	gpu_polling_power_on(kbdev);
 }
 
