@@ -330,7 +330,7 @@ static inline void mali_freq_init(struct device *dev)
 	//T750 table: 384M, 512M, 680M
 	//T765 table: 384M, 512M, 680M, 850M
 	//default table: 384M, 512M, 680M, 850M
-	if (gpu_dvfs_ctx.chip_id == 1)
+	if (gpu_dvfs_ctx.chip_id == 1 || gpu_dvfs_ctx.chip_id == 3)
 	{
 		//remove 850M
 		memset(&gpu_dvfs_ctx.freq_list[gpu_dvfs_ctx.freq_list_len-1], 0, sizeof(struct gpu_freq_info));
@@ -882,7 +882,7 @@ void kbase_platform_limit_max_freq(struct device *dev)
 	//T765: GPU max freq is 850M
 	//default table:384M, 512M, 680M, 850M
 
-	if (gpu_dvfs_ctx.chip_id == 1)
+	if (gpu_dvfs_ctx.chip_id == 1 || gpu_dvfs_ctx.chip_id == 3)
 	{
 		//default table:384M, 512M, 680M
 		//remove 850M
