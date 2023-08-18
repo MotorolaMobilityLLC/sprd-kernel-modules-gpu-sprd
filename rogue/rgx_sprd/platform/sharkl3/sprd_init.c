@@ -450,7 +450,7 @@ static void RgxFreqInit(struct device *dev)
 		of_property_read_u32_index(dev->of_node, "sprd,dvfs-lists", 4*i+1, &gpu_dvfs_ctx.freq_list[i].volt);
 		of_property_read_u32_index(dev->of_node, "sprd,dvfs-lists", 4*i+3, &gpu_dvfs_ctx.freq_list[i].div);
 	}
-	clk_set_rate(gpu_dvfs_ctx.freq_list[i].clk_src, GPLL_600M);
+	clk_set_rate(gpu_dvfs_ctx.freq_list[gpu_dvfs_ctx.freq_list_len-1].clk_src, GPLL_600M);
 
 	//read gpu_bin, 3:FF, 1:TT
 	ret = sprd_gpu_cal_read(dev->of_node, "gpu_bin", &gpu_dvfs_ctx.gpu_binning);
@@ -467,12 +467,12 @@ static void RgxFreqInit(struct device *dev)
 
 	if (!strcmp(gpu_dvfs_ctx.auto_efuse, "L3")||!strcmp(gpu_dvfs_ctx.auto_efuse, "L3R"))
 	{
-		clk_set_rate(gpu_dvfs_ctx.freq_list[i].clk_src, GPLL_550M);
+		clk_set_rate(gpu_dvfs_ctx.freq_list[gpu_dvfs_ctx.freq_list_len-1].clk_src, GPLL_550M);
 		//remove 600M
 		memset(&gpu_dvfs_ctx.freq_list[gpu_dvfs_ctx.freq_list_len-1], 0, sizeof(struct gpu_freq_info));
 		//modify freq list len
 		gpu_dvfs_ctx.freq_list_len = gpu_dvfs_ctx.freq_list_len -1;
-		i =i-1 ;
+		i = i-1 ;
 	}
 
 #if defined(SUPPORT_PDVFS)
