@@ -1,3 +1,7 @@
+/*
+ * SPDX-FileCopyrightText: 2021 Unisoc (Shanghai) Technologies Co., Ltd
+ * SPDX-License-Identifier: GPL-2.0-only
+*/
 //SUBSYS: gpu_sys, sheet:gpu_sys
 
 #ifndef __GPU_SYS_QOS_H__

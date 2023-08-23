@@ -1,17 +1,7 @@
 /*
- *
- * (C) COPYRIGHT ARM Limited. All rights reserved.
- *
- * This program is free software and is provided to you under the terms of the
- * GNU General Public License version 2 as published by the Free Software
- * Foundation, and any use by you of this program is subject to the terms
- * of such GNU licence.
- *
- * A copy of the licence is included with the program, and can also be obtained
- * from Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- * Boston, MA  02110-1301, USA.
- *
- */
+ * SPDX-FileCopyrightText: 2021 Unisoc (Shanghai) Technologies Co., Ltd
+ * SPDX-License-Identifier: GPL-2.0-only
+*/
 
 
 
@@ -129,6 +119,7 @@ struct gpu_dvfs_context {
 	struct gpu_reg_info gpll_cfg_force_off_reg;
 	struct gpu_reg_info gpll_cfg_force_on_reg;
 	struct gpu_reg_info dcdc_gpu_pd;
+	struct gpu_reg_info bridge_trans_idle_reg;
 #if 0
 	struct gpu_reg_info gpu_qos_sel;
 	struct gpu_reg_info gpu_qos;
@@ -312,6 +303,8 @@ static inline void mali_freq_init(struct device *dev)
 	gpu_dvfs_ctx.gpu_dvfs_apb_base_ptr = syscon_regmap_lookup_by_phandle(dev->of_node, "sprd,gpu-dvfs-apb-syscon");
 	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.gpu_dvfs_apb_base_ptr);
 
+	gpu_dvfs_ctx.bridge_trans_idle_reg.regmap_ptr = gpu_dvfs_ctx.gpu_apb_base_ptr;
+	gpu_dvfs_ctx.bridge_trans_idle_reg.args[0] = REG_GPU_APB_RF_ASYBC_BRIDGE_TOP_W;
 #if 0
 	//qos
 	gpu_dvfs_ctx.gpu_qos_sel.regmap_ptr = gpu_dvfs_ctx.gpu_apb_base_ptr;
@@ -521,6 +514,31 @@ static inline int mali_top_state_check(void)
 	return res;
 }
 
+static inline void mali_check_bridge_trans_idle(void)
+{
+	u32 bridge_trans_idle_bit = 0;
+	int counter = 0;
+
+	regmap_read(gpu_dvfs_ctx.bridge_trans_idle_reg.regmap_ptr, gpu_dvfs_ctx.bridge_trans_idle_reg.args[0], &bridge_trans_idle_bit);
+	bridge_trans_idle_bit = ((bridge_trans_idle_bit & MASK_GPU_APB_RF_BRIDGE_TRANS_IDLE) >> 1);
+
+	while(bridge_trans_idle_bit == 0)
+	{
+		udelay(10);
+		regmap_read(gpu_dvfs_ctx.bridge_trans_idle_reg.regmap_ptr, gpu_dvfs_ctx.bridge_trans_idle_reg.args[0], &bridge_trans_idle_bit);
+		bridge_trans_idle_bit = ((bridge_trans_idle_bit & MASK_GPU_APB_RF_BRIDGE_TRANS_IDLE) >> 1);
+		printk(KERN_ERR "SPRDDEBUG mali gpu bridge_trans_idle_bit is FALSE:0(not idle), cannot clock off and power off, counter = %d\n ", counter);
+		if(counter++ > 200)
+		{
+			printk(KERN_ERR "gpu polling mali_check_bridge_trans_idle timeout !");
+			WARN_ON(1);
+			return;
+		}
+	}
+
+	udelay(10);
+	return;
+}
 
 int kbase_platform_set_DVFS_table(struct kbase_device *kbdev)
 {
@@ -692,6 +710,8 @@ static inline void mali_clock_on(void)
 static inline void mali_clock_off(void)
 {
 	int i;
+
+	mali_check_bridge_trans_idle();
 
 	atomic_dec(&gpu_dvfs_ctx.gpu_clock_state);
 

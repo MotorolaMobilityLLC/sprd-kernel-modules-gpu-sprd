@@ -1,15 +1,7 @@
 /*
- * Copyright (C) 2020 Unigroup Spreadtrum & RDA Technologies Co., Ltd.
- *
- * This file is dual-licensed: you can use it either under the terms
- * of the GPL or the X11 license, at your option. Note that this dual
- * licensing only applies to this file, and not this project as a
- * whole.
- *
- ********************************************************************
- * Auto generated c code from ASIC Documentation, PLEASE DONOT EDIT *
- ********************************************************************
- */
+ * SPDX-FileCopyrightText: 2021 Unisoc (Shanghai) Technologies Co., Ltd
+ * SPDX-License-Identifier: GPL-2.0-only
+*/
 
 #ifndef __GPU_QOGIRN6PRO_REGS_H
 #define __GPU_QOGIRN6PRO_REGS_H
@@ -27,4 +19,5 @@
 #define REG_GPU_DVFS_APB_RF_GPU_FREQ_UPD_TYPE_CFG0   0x09ac
 
 #define REG_GPU_APB_RF_GPU_NIC400_QOS                0x0010
+#define REG_GPU_APB_RF_ASYBC_BRIDGE_TOP_W            0x0024
 #endif /* __GPU_QOGIRN6PRO_REGS_H */

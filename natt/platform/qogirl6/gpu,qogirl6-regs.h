@@ -1,15 +1,7 @@
 /*
- * Copyright (C) 2020 Unigroup Spreadtrum & RDA Technologies Co., Ltd.
- *
- * This file is dual-licensed: you can use it either under the terms
- * of the GPL or the X11 license, at your option. Note that this dual
- * licensing only applies to this file, and not this project as a
- * whole.
- *
- ********************************************************************
- * Auto generated c code from ASIC Documentation, PLEASE DONOT EDIT *
- ********************************************************************
- */
+ * SPDX-FileCopyrightText: 2021 Unisoc (Shanghai) Technologies Co., Ltd
+ * SPDX-License-Identifier: GPL-2.0-only
+*/
 
 #ifndef __GPU_QOGIRL6_REGS_H
 #define __GPU_QOGIRL6_REGS_H

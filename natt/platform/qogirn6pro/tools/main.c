@@ -1,3 +1,8 @@
+/*
+ * SPDX-FileCopyrightText: 2021 Unisoc (Shanghai) Technologies Co., Ltd
+ * SPDX-License-Identifier: GPL-2.0-only
+*/
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
