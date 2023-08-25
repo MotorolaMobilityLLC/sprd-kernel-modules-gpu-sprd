@@ -348,10 +348,10 @@ static inline void mali_freq_init(struct device *dev)
 		gpu_dvfs_ctx.freq_list[i].dvfs_index = i;
 	}
 
-	//T750 table: 384M, 512M, 680M
-	//T765 table: 384M, 512M, 680M, 850M
+	//T158 table: 384M, 512M, 680M
+	//T750 and T765 table: 384M, 512M, 680M, 850M
 	//default table: 384M, 512M, 680M, 850M
-	if (gpu_dvfs_ctx.chip_id == 1 || gpu_dvfs_ctx.chip_id == 3)
+	if (gpu_dvfs_ctx.chip_id == 3)
 	{
 		//remove 850M
 		memset(&gpu_dvfs_ctx.freq_list[gpu_dvfs_ctx.freq_list_len-1], 0, sizeof(struct gpu_freq_info));
@@ -882,11 +882,11 @@ void kbase_platform_limit_max_freq(struct device *dev)
 	dev_pm_opp_disable(dev, GPU_26M_FREQ);
 	dev_pm_opp_disable(dev, GPU_76M8_FREQ);
 	dev_pm_opp_disable(dev, GPU_153M6_FREQ);
-	//T750: GPU max freq is 680M
-	//T765: GPU max freq is 850M
+	//T158: GPU max freq is 680M
+	//T750 and T765: GPU max freq is 850M
 	//default table:384M, 512M, 680M, 850M
 
-	if (gpu_dvfs_ctx.chip_id == 1 || gpu_dvfs_ctx.chip_id == 3)
+	if (gpu_dvfs_ctx.chip_id == 3)
 	{
 		//default table:384M, 512M, 680M
 		//remove 850M
@@ -966,9 +966,9 @@ void kbase_platform_modify_target_freq(struct device *dev, unsigned long *target
 		*target_freq = (unsigned long)freq_max->freq*FREQ_KHZ;
 		modify_flag = 1;
 	}
-	//T765 TT gpu_temperature >= 65 the max freq of gpu is 680MHz
+	//T750 T765 TT gpu_temperature >= 65 the max freq of gpu is 680MHz
 	if ((*target_freq == (unsigned long)gpu_dvfs_ctx.freq_list[gpu_dvfs_ctx.freq_list_len-1].freq*FREQ_KHZ )
-		&& 0 == gpu_dvfs_ctx.chip_id
+		&& (0 == gpu_dvfs_ctx.chip_id || 2 == gpu_dvfs_ctx.chip_id)
 		&& (2 == gpu_dvfs_ctx.gpu_bin || 0 == gpu_dvfs_ctx.gpu_bin)
 		&& gpu_dvfs_ctx.gpu_temperature >= 65000) {
 		*target_freq = (unsigned long)gpu_dvfs_ctx.freq_list[gpu_dvfs_ctx.freq_list_len-2].freq*FREQ_KHZ;
