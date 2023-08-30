@@ -283,7 +283,7 @@ static inline void mali_power_off(void)
 
 static inline void mali_clock_on(void)
 {
-	int i;
+	int i, ret;
 
 	//enable all clocks
 	for(i=0;i<gpu_dfs_ctx.gpu_clk_num;i++)
@@ -298,15 +298,20 @@ static inline void mali_clock_on(void)
 	udelay(300);
 
 	//set gpu clock parent
-	clk_set_parent(gpu_dfs_ctx.gpu_clock, gpu_dfs_ctx.freq_default->clk_src);
+	ret = clk_set_parent(gpu_dfs_ctx.gpu_clock, gpu_dfs_ctx.freq_default->clk_src);
 
 	KBASE_DEBUG_ASSERT(gpu_dfs_ctx.freq_cur);
-	clk_set_rate(gpu_dfs_ctx.freq_cur->clk_src, gpu_dfs_ctx.freq_cur->freq*1000);
-	clk_set_parent(gpu_dfs_ctx.gpu_clock, gpu_dfs_ctx.freq_cur->clk_src);
+	ret = clk_set_rate(gpu_dfs_ctx.freq_cur->clk_src, gpu_dfs_ctx.freq_cur->freq*1000);
+	ret = clk_set_parent(gpu_dfs_ctx.gpu_clock, gpu_dfs_ctx.freq_cur->clk_src);
 
 	gpu_dfs_ctx.gpu_clock_on = 1;
 
 	gpu_freq_cur = gpu_dfs_ctx.freq_cur->freq;
+
+	if (ret)
+	{
+		KBASE_DEBUG_PRINT(2, "GPU_DVFS mali_clock_on set err! cur_freq %6d", gpu_dfs_ctx.freq_cur->freq);
+	}
 }
 
 static inline void mali_clock_off(void)
@@ -557,27 +562,34 @@ static int freq_search(struct gpu_freq_info freq_list[], int len, int key)
 
 static void gpu_change_freq(void)
 {
+	int ret = 0;
+
 	KBASE_DEBUG_PRINT(3, "GPU_DVFS gpu_change_freq cur_freq %6d -> next_freq %6d\n",
 				gpu_dfs_ctx.freq_cur->freq, gpu_dfs_ctx.freq_next->freq);
-	if(gpu_dfs_ctx.freq_next != gpu_dfs_ctx.freq_cur)
+	if (gpu_dfs_ctx.freq_next != gpu_dfs_ctx.freq_cur)
 	{
-		if(gpu_dfs_ctx.freq_next->clk_src != gpu_dfs_ctx.freq_cur->clk_src)
+		if (gpu_dfs_ctx.freq_next->clk_src != gpu_dfs_ctx.freq_cur->clk_src)
 		{
-			clk_set_rate(gpu_dfs_ctx.freq_next->clk_src, gpu_dfs_ctx.freq_next->freq*1000);
-			clk_set_parent(gpu_dfs_ctx.gpu_clock, gpu_dfs_ctx.freq_next->clk_src);
+			ret = clk_set_rate(gpu_dfs_ctx.freq_next->clk_src, gpu_dfs_ctx.freq_next->freq*1000);
+			ret = clk_set_parent(gpu_dfs_ctx.gpu_clock, gpu_dfs_ctx.freq_next->clk_src);
 		}
 		else
 		{
-			if(gpu_dfs_ctx.freq_next->freq != gpu_dfs_ctx.freq_cur->freq)
+			if (gpu_dfs_ctx.freq_next->freq != gpu_dfs_ctx.freq_cur->freq)
 			{
-				clk_set_parent(gpu_dfs_ctx.gpu_clock, gpu_dfs_ctx.freq_default->clk_src);
-				clk_set_rate(gpu_dfs_ctx.freq_next->clk_src, gpu_dfs_ctx.freq_next->freq*1000);
-				clk_set_parent(gpu_dfs_ctx.gpu_clock, gpu_dfs_ctx.freq_next->clk_src);
+				ret = clk_set_parent(gpu_dfs_ctx.gpu_clock, gpu_dfs_ctx.freq_default->clk_src);
+				ret = clk_set_rate(gpu_dfs_ctx.freq_next->clk_src, gpu_dfs_ctx.freq_next->freq*1000);
+				ret = clk_set_parent(gpu_dfs_ctx.gpu_clock, gpu_dfs_ctx.freq_next->clk_src);
 			}
 		}
 
 		gpu_dfs_ctx.freq_cur = gpu_dfs_ctx.freq_next;
 		gpu_freq_cur = gpu_dfs_ctx.freq_cur->freq;
+	}
+
+	if (ret)
+	{
+		KBASE_DEBUG_PRINT(2, "GPU_DVFS gpu_change_freq set err! cur_freq %6d", gpu_dfs_ctx.freq_cur->freq);
 	}
 }
 
@@ -752,7 +764,7 @@ void kbase_platform_limit_min_freq(struct device *dev)
 #ifdef CONFIG_MALI_BOOST
 void kbase_platform_modify_target_freq(struct device *dev, unsigned long *target_freq)
 {
-	int min_index = -1, max_index = -1, user_max_freq, user_min_freq;
+	int min_index, max_index, user_max_freq, user_min_freq;
 	//struct kbase_device *kbdev = dev_get_drvdata(dev);
 
 	switch(gpu_boost_level)
