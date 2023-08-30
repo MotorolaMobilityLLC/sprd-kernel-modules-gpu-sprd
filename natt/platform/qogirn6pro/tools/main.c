@@ -65,6 +65,15 @@ int main()
 			.level = 10,
 			.data_list =
 			{
+				"com.tencent.tmgp.sgame",
+				"com.redlinegames.attackhole",
+				"com.crazy.block.robo.monster.cliffs.craft",
+				"com.block.juggle",
+				"com.dts.freefireth",
+				"magic.friends.rainbow",
+				"com.levelinfinite.sgameGlobal",
+				"com.tencent.lolm",
+				"com.riotgames.league.wildrift",
 				"/vendor/bin/hw/android.hardware.camera.provider@2.4-service",
 				"com.futuremark.pcmark.android.benchmark",
 				"com.futuremark.pcmark.android.benchmark:workload",
