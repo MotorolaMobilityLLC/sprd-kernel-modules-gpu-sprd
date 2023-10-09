@@ -79,7 +79,8 @@ struct gpu_dfs_context {
 	struct workqueue_struct *gpu_dfs_workqueue;
 	struct semaphore* sem;
 
-	struct gpu_reg_info top_reg;
+	struct gpu_reg_info top_force_shutdown_reg;
+	struct gpu_reg_info top_state_reg;
 };
 
 #ifndef CONFIG_OF
@@ -189,13 +190,14 @@ static inline void mali_freq_init(struct device *dev)
 #ifdef CONFIG_OF
 	int i = 0, clk_cnt = 0;
 
-	//gpu_dfs_ctx.top_reg.regmap_ptr = syscon_regmap_lookup_by_name(dev->of_node,"top_force_shutdown");
-	gpu_dfs_ctx.top_reg.regmap_ptr = syscon_regmap_lookup_by_phandle_args(dev->of_node,"top_force_shutdown", 2, (uint32_t *)gpu_dfs_ctx.top_reg.args);  //SPRD k54
-	KBASE_DEBUG_ASSERT(gpu_dfs_ctx.top_reg.regmap_ptr);
-	//syscon_get_args_by_name(dev->of_node,"top_force_shutdown", 2, (uint32_t *)gpu_dfs_ctx.top_reg.args);
+	gpu_dfs_ctx.top_force_shutdown_reg.regmap_ptr = syscon_regmap_lookup_by_phandle_args(dev->of_node,"top_force_shutdown", 2, (uint32_t *)gpu_dfs_ctx.top_force_shutdown_reg.args);
+	KBASE_DEBUG_ASSERT(gpu_dfs_ctx.top_force_shutdown_reg.regmap_ptr);
+
+	gpu_dfs_ctx.top_state_reg.regmap_ptr = syscon_regmap_lookup_by_phandle_args(dev->of_node,"gpu_top_state", 2, (uint32_t *)gpu_dfs_ctx.top_state_reg.args);
+	KBASE_DEBUG_ASSERT(gpu_dfs_ctx.top_state_reg.regmap_ptr);
 
 	gpu_dfs_ctx.gpu_clk_sel_reg.regmap_ptr = syscon_regmap_lookup_by_phandle_args(dev->of_node,"gpu_clk_sel", 2, (uint32_t *)gpu_dfs_ctx.gpu_clk_sel_reg.args);
-	KBASE_DEBUG_ASSERT(gpu_dvfs_ctx.gpu_clk_sel_reg.regmap_ptr);
+	KBASE_DEBUG_ASSERT(gpu_dfs_ctx.gpu_clk_sel_reg.regmap_ptr);
 
 	gpu_dfs_ctx.gpu_clock_i = of_clk_get(dev->of_node, 0);
 	gpu_dfs_ctx.gpu_clock = of_clk_get(dev->of_node, 1);
@@ -266,11 +268,46 @@ static inline void mali_freq_init(struct device *dev)
 #endif
 }
 
+static bool mali_top_pwr_state_check(void)
+{
+    u32 top_pwr_state = 0xffff; //init with all bits 1
+    const u32 top_mask = 0x1f << 5; //[9:5]
+    const u32 top_pwr_on = 0;
+    int cnt_1 = 0, cnt_2 = 0;
+
+    while(1) {
+        //check if the top_state ready or not powered
+        regmap_read(gpu_dfs_ctx.top_state_reg.regmap_ptr, gpu_dfs_ctx.top_state_reg.args[0], &top_pwr_state);
+        top_pwr_state &= top_mask;
+        if (top_pwr_state == top_pwr_on) {
+            if (++cnt_1 >= 5)
+                return true;
+        } else {
+            cnt_1 = 0;
+            udelay(50);
+            if(++cnt_2 >= 200) {
+                printk(KERN_ERR "%s: gpu top power on timeout !", __func__);
+                WARN_ON(1);
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
 static inline void mali_power_on(void)
 {
-	regmap_update_bits(gpu_dfs_ctx.top_reg.regmap_ptr, gpu_dfs_ctx.top_reg.args[0], gpu_dfs_ctx.top_reg.args[1], ~gpu_dfs_ctx.top_reg.args[1]);
+	regmap_update_bits(gpu_dfs_ctx.top_force_shutdown_reg.regmap_ptr, gpu_dfs_ctx.top_force_shutdown_reg.args[0], gpu_dfs_ctx.top_force_shutdown_reg.args[1], ~gpu_dfs_ctx.top_force_shutdown_reg.args[1]);
 
-	udelay(300);
+	if (mali_top_pwr_state_check()) {
+		// mali power on success
+	} else {
+		printk(KERN_ERR "mali %s: gpu top not power on\n", __func__);
+		WARN_ON(1);
+		udelay(200);
+	}
+
 	gpu_dfs_ctx.gpu_power_on = 1;
 }
 
@@ -278,12 +315,19 @@ static inline void mali_power_off(void)
 {
 	gpu_dfs_ctx.gpu_power_on = 0;
 
-	regmap_update_bits(gpu_dfs_ctx.top_reg.regmap_ptr, gpu_dfs_ctx.top_reg.args[0], gpu_dfs_ctx.top_reg.args[1], gpu_dfs_ctx.top_reg.args[1]);
+	regmap_update_bits(gpu_dfs_ctx.top_force_shutdown_reg.regmap_ptr, gpu_dfs_ctx.top_force_shutdown_reg.args[0], gpu_dfs_ctx.top_force_shutdown_reg.args[1], gpu_dfs_ctx.top_force_shutdown_reg.args[1]);
 }
 
 static inline void mali_clock_on(void)
 {
 	int i, ret;
+
+	if (mali_top_pwr_state_check()) {
+		// mali power on success
+	} else {
+		printk(KERN_ERR "mali %s: gpu top not power on\n", __func__);
+		WARN_ON(1);
+	}
 
 	//enable all clocks
 	for(i=0;i<gpu_dfs_ctx.gpu_clk_num;i++)
