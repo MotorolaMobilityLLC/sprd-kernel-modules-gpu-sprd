@@ -72,6 +72,7 @@ int main()
 				"com.instagram.android",
 				"com.taobao.taobao",
 				"com.google.android.apps.photosgo",
+				"/system/bin/surfaceflinger",
 			}
 		},
 
