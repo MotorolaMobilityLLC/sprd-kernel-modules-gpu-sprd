@@ -72,6 +72,8 @@ int main()
 				"com.instagram.android",
 				"com.taobao.taobao",
 				"com.google.android.apps.photosgo",
+				"com.sina.weibo",
+				"com.google.android.apps.youtube.music",
 				"/system/bin/surfaceflinger",
 			}
 		},
