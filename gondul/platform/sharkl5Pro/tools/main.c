@@ -74,6 +74,7 @@ int main()
 				"com.levelinfinite.sgameGlobal",
 				"com.tencent.lolm",
 				"com.riotgames.league.wildrift",
+				"com.tencent.tmgp.pubgmhd",
 			}
 		},
 
