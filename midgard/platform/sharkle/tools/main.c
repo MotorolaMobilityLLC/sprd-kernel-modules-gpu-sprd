@@ -74,6 +74,7 @@ int main()
 				"com.google.android.apps.photosgo",
 				"com.sina.weibo",
 				"com.google.android.apps.youtube.music",
+				"com.youku.phone",
 				"/system/bin/surfaceflinger",
 			}
 		},
