@@ -41,8 +41,8 @@
 
 #if defined(SUPPORT_LINUX_DVFS) || defined(SUPPORT_PDVFS)
 #define GPU_POLL_MS             50
-#define GPU_UP_THRESHOLD        80
-#define GPU_DOWN_DIFFERENTIAL   10
+#define GPU_UP_THRESHOLD        40
+#define GPU_DOWN_DIFFERENTIAL   5
 #endif
 #include "rgxdebug.h"
 
